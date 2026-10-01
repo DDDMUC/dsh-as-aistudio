@@ -18,7 +18,7 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
-import { COMPONENTS, STUDIO_ID } from '../src/components.js'
+import { COMPONENTS, STUDIO_ID, STUDIO_VERSION } from '../src/components.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = join(here, '..')
@@ -36,6 +36,18 @@ test('the package declares the bundle and client contract', () => {
   assert.match(manifest.dsh.engines.dsh, /^>=/)
   assert.equal(manifest.exports['.'], './src/index.js')
   assert.equal(manifest.exports['./client'], './src/client.js')
+})
+
+// The version lives in three places (package.json, src/components.js for the
+// host half and the panel, src/client.js for the bundle the browser loads), and
+// a build that ships two of them out of step is how a stale browser half gets
+// mistaken for a missing one. AGENTS.md promises this test exists.
+test('the studio version is one number in three places', () => {
+  assert.equal(manifest.version, STUDIO_VERSION, 'package.json and src/components.js disagree')
+  assert.ok(
+    client.includes("const PLUGIN_VERSION = '" + manifest.version + "'"),
+    'src/client.js does not carry PLUGIN_VERSION ' + manifest.version,
+  )
 })
 
 test('every shipped path exists and is published', () => {

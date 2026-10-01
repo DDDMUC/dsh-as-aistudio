@@ -132,3 +132,17 @@ function foreignHideOn(row, own) {
 1. 每个包：`npm test`（+ `verify:*`）全绿；
 2. 组合矩阵：把 4 个 client bundle 以 2^4 种组合装载进同一个 DOM stub，断言：无异常、slot 注册 id 唯一、无重复按钮、隐藏归因正确；
 3. 真机：web profile 装载 `dsh-as-aistudio` + 任意子集，页面加载无 `error` 级别日志。
+## 9. 热重载纪律（HMR）—— 2026-10-01「点不动」事故后新增
+
+**改任何组件的 `client.js` 之后，必须重启宿主进程 + 让页面硬刷新，不要把 HMR 混合态交付给用户。**
+
+事故形态（dsh-rerun-turn，2026-10-01 13:5x）：用户点回答行 / 用户行的 ↻ 没有任何反应，宿主 `/debug` 也收不到 `apply` 请求；直取 `/plugins/<id>/client.js` 返回空。
+根因不是代码缺陷，而是**混合态**：client bundle 被 HMR 单独重载（0.1.21 / 0.1.22 的改动触发了多次），而宿主进程没有重启 —— 页面里是「新 bundle 实例 + 旧实例已 dispose 的控制器 / 旧按钮上已死的监听」。
+恢复动作：**重启宿主 + 硬刷新页面**（重启后 host 0.1.22、bundle 200 非空、两处 ↻ 点击均正常触发 `apply`）。
+
+配套约定：
+
+- 交付前检查三件事：宿主版本 == bundle 版本；`/plugins/<entry>/client.js` 返回 200 且非空；行上的动作按钮真的点得动。
+- 组件在 `dispose` 之后会主动早退（不唤醒已退休的控制器），所以混合态表现为**静默无响应**而不是报错 —— 这是刻意的设计，不是 Bug；遇到它先重启宿主再判断。
+- 跨端（host / client）不兼容改动必须 bump 三处版本号（`package.json` + 宿主半侧 + 浏览器半侧）并跑该仓库的全部门禁。
+- 本契约的 §2（slot order 分配）与 §4（隐藏归因）属于三个注入型组件的**共享面**：改其中一侧，必须同时检查另外两侧不受影响；组合矩阵（`dsh-as-aistudio/test/combination.test.js`）是这条规则的回归网。
