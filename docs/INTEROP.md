@@ -146,3 +146,37 @@ function foreignHideOn(row, own) {
 - 组件在 `dispose` 之后会主动早退（不唤醒已退休的控制器），所以混合态表现为**静默无响应**而不是报错 —— 这是刻意的设计，不是 Bug；遇到它先重启宿主再判断。
 - 跨端（host / client）不兼容改动必须 bump 三处版本号（`package.json` + 宿主半侧 + 浏览器半侧）并跑该仓库的全部门禁。
 - 本契约的 §2（slot order 分配）与 §4（隐藏归因）属于三个注入型组件的**共享面**：改其中一侧，必须同时检查另外两侧不受影响；组合矩阵（`dsh-as-aistudio/test/combination.test.js`）是这条规则的回归网。
+## 10. 跨插件运行时契约：dsh-edit-turn → dsh-rerun-turn
+
+这是**唯一一条两个组件之间真实存在的运行时依赖**，也是唯一一条不走 DOM、只走回环 HTTP 的依赖。写在契约里，
+是因为它跨越两个仓库、两个维护者，任何一侧单独改动都不会让另一侧的测试变红。
+
+流程（`dsh-edit-turn` 0.2.12+ 的提示词编辑器「重跑」按钮）：
+
+1. 按钮**只在探测到 rerun-turn 挂载时**出现：不带 `sessionId` 请求 `GET /dsh-rerun-turn/state`，
+   按 **400 / 405 = 装着、404 = 没装** 判定；
+2. 点击后先 `POST /dsh-edit-turn/apply` 就地保存改写（不调模型），
+3. 紧接着链式 `POST /dsh-rerun-turn/apply { sessionId, seq }`，其中 `seq` 取自 rerun-turn `/state` 的
+   `replies[]`（匹配被编辑那一轮的 `turn`、取 `seq` 最大者）；
+4. rerun-turn 侧的 `planRerun` 沿 `source.kind = plugin:dsh-edit-turn` 的就地替换链读**活节点**，
+   于是重跑用改后的措辞生成。
+
+双向边界：
+
+- edit-turn **只**走 rerun-turn 的公开回环路由，不碰对方的 client 半侧或 DOM；
+- 反过来，**纯 dsh-edit-turn（没装 rerun-turn）没有任何重跑入口** —— 编辑器只有「取消 / 保存」。
+
+不许改的形状（回归测试：`dsh-rerun-turn/test/contract.test.js`，16 例，已做变异验证）：
+
+| 形状 | 约束 |
+| --- | --- |
+| 挂载探测 | 不带 `sessionId` 的 `GET /state` 必须仍答 400；改成 404 按钮会静默消失 |
+| 目标列表 | `/state` 持续返回完整的 `replies[{seq, turn}]` |
+| 调用形状 | `POST /apply` 只要求 `sessionId` + (`seq` \| `messageId`)，**不得新增必填参数** |
+| 载荷 | edit-turn 不传文本；未知字段必须被忽略而不是 400 |
+| 错误码 | `not-rerunnable` / `already-retired` / `busy` / `rerunning` / `stale` / `session-not-found` / `session-not-active` / `invalid` 机读且稳定（edit-turn 原样提示给用户） |
+| 链式解析 | `planRerun` 继续跟随就地替换链取活文本 |
+
+**给改这两个包的 agent**：动路由、`planRerun` 或错误码之前，先在 `dsh-rerun-turn` 跑
+`node --test test/contract.test.js`；把探测状态的 400 改成 404 会让 2 例转红，给 `/apply` 加一个必填
+`confirmToken` 会让 5 例转红 —— 破坏契约会在本地就暴露，而不是等用户发现按钮点不动。
