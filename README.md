@@ -68,6 +68,7 @@ dsh plugin --profile web add dsh-delete-turn
 
 ### 已修复 / 版本
 
+- 0.1.1 —— 契约补 §9「热重载纪律」（2026-10-01「点不动」事故：client bundle 单独热重载 + 宿主未重启 = 混合态）；新增 AGENTS.md 与三处版本号一致性测试。
 - 0.1.0 —— 首个版本：组合四个组件、固化互操作契约、报告组件状态。
 
 ### 已知限制
@@ -150,6 +151,7 @@ The action strip lives on the message rows:
 
 ### Fixes / versions
 
+- 0.1.1 — contract gains §9 "hot reload discipline" (the 2026-10-01 dead-button incident: a client bundle hot-reloaded alone while the host kept running is a mixed state); adds AGENTS.md and a three-place version check.
 - 0.1.0 — first release: composes the four components, pins the interop contract, reports component status.
 
 ### Known limitations

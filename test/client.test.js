@@ -5,7 +5,13 @@
 //
 //   node --test "test/*.test.js"
 import assert from 'node:assert/strict'
+import { createRequire } from 'node:module'
 import { test } from 'node:test'
+
+// The bundle's PLUGIN_VERSION is asserted against the manifest rather than a
+// literal, so a version bump is a one-line change in three places and not a
+// fourth place that silently goes stale.
+const manifest = createRequire(import.meta.url)('../package.json')
 
 let registration
 globalThis.window = {
@@ -90,7 +96,7 @@ test('the plugin exports the platform contract', () => {
   const exports = materialize()
   assert.equal(typeof exports.apply, 'function')
   assert.deepEqual(exports.inject, ['slots', 'locale'])
-  assert.equal(exports.PLUGIN_VERSION, '0.1.0')
+  assert.equal(exports.PLUGIN_VERSION, manifest.version)
   assert.equal(exports.STATUS_ROUTE, '/api/dsh-as-aistudio/status')
 })
 

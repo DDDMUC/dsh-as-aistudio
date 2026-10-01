@@ -1,6 +1,6 @@
 {
   "name": "dsh-as-aistudio",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Google-AI-Studio-style turn controls for DeepSeek Harness, in one install: edit a prompt and re-run it, re-run a reply in place, delete a turn from the model context, and render sent prompts as Markdown. Each of the four components is an independent plugin that also works alone, and any subset of them coexists; this package composes them, enables the rows that mount them, and reports which ones are live in Settings -> Plugins -> AI Studio.",
   "type": "module",
   "main": "src/index.js",
