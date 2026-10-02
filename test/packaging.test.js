@@ -58,21 +58,27 @@ test('every shipped path exists and is published', () => {
   assert.ok(manifest.files.includes('cordis.patch.yml'))
 })
 
-test('the components are optional dependencies, never hard ones', () => {
+test('the components are HARD dependencies, because the studio mounts their host halves', () => {
+  // The studio imports each component and applies its host half into this fiber.
+  // An optional dependency could be absent, and then its routes would 404 while
+  // the vendored browser half still offered a button — the "advertised but cannot
+  // work" failure this package exists to avoid. (Optional was the old design,
+  // when the components mounted themselves through their own rows.)
+  assert.equal(manifest.optionalDependencies, undefined, 'no component may be optional any more')
   for (const component of COMPONENTS) {
-    assert.equal(manifest.dependencies?.[component.package], undefined, component.id + ' must not be a hard dependency')
-    assert.equal(typeof manifest.optionalDependencies[component.package], 'string', component.id + ' must be optional')
+    assert.equal(typeof manifest.dependencies[component.package], 'string', component.id + ' must be a hard dependency')
   }
 })
 
-test('the patch inserts one bare-named row per participant', () => {
+test('the patch inserts exactly ONE row, and it is the studio', () => {
+  // Self-contained: the components are dependencies, not profile bundles, so they
+  // have no rows of their own and never appear in the plugin list. Verified live:
+  // the composed tree carries zero component rows.
   const rows = [...patch.matchAll(/^ {4}- id: (\S+)\n {6}name: '([^']+)'$/gm)].map((match) => ({ id: match[1], name: match[2] }))
-  assert.equal(rows.length, COMPONENTS.length + 1, 'one studio row plus one row per component')
-  assert.deepEqual(rows.map((row) => row.id), [STUDIO_ID, ...COMPONENTS.map((component) => component.id)])
-  for (const row of rows) {
-    assert.equal(row.name, row.id, row.id + ': the row name must be the bare package name')
-    assert.equal(row.name.includes('/'), false, row.id + ': a subpath name would never mount a client half')
-  }
+  assert.equal(rows.length, 1, 'the studio inserts exactly one row')
+  assert.equal(rows[0].id, STUDIO_ID)
+  assert.equal(rows[0].name, rows[0].id, 'the row name must be the bare package name')
+  assert.equal(rows[0].name.includes('/'), false, 'a subpath name would never mount a client half')
 })
 
 test('the patch file is pure data with no YAML anchors or tabs', () => {
@@ -82,6 +88,13 @@ test('the patch file is pure data with no YAML anchors or tabs', () => {
 
 // The portability tripwire: web and desktop share this bundle, so the forbidden
 // list is exactly the calls that only exist, or only behave, in one of them.
+//
+// It reads src/studio.js — the half THIS package writes. The generated
+// src/client.js also carries the four component bundles verbatim, and they use
+// MutationObserver (their DOM passes) and innerHTML (icons) perfectly
+// legitimately; each component is tripwired in its own repository, and the
+// live gates verify the composed page. Scanning the generated bundle here would
+// flag code this package does not own.
 const FORBIDDEN = [
   ['location.origin', /location\.origin/],
   ['location.port', /location\.port/],
@@ -95,9 +108,10 @@ const FORBIDDEN = [
   ['localStorage', /localStorage/],
 ]
 
-test('the browser half touches no web-only global', () => {
+test('the studio own browser half touches no web-only global', () => {
+  const studio = readFileSync(join(root, 'src', 'studio.js'), 'utf8')
   for (const [label, pattern] of FORBIDDEN) {
-    assert.equal(pattern.test(clientCode), false, 'src/client.js must not use ' + label)
+    assert.equal(pattern.test(studio), false, 'src/studio.js must not use ' + label)
   }
 })
 

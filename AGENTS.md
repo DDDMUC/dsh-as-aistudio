@@ -1,25 +1,59 @@
 # AGENTS.md — dsh-as-aistudio（给并行 agent 的说明）
 
-本仓库是聚合插件 **dsh-as-aistudio** 的唯一正本。它**不包含**四个组件的实现：组件是各自仓库里的独立包，
-这里只负责组合（`cordis.patch.yml` 的 5 行）、组件状态报告（`GET /api/dsh-as-aistudio/status`）与
-设置页标签，以及五包共享的互操作契约 [docs/INTEROP.md](docs/INTEROP.md)。
+本仓库是聚合插件 **dsh-as-aistudio** 的唯一正本，**自包含**：插件列表里只有它一行。
 
-## 当前状态（2026-10-01）
+## 架构（2026-10-02 起重写）
 
-- 版本 **0.1.1**；`package.json` / `src/components.js` / `src/client.js` 三处版本号必须一致（`test/packaging.test.js` 的 "the studio version is one number in three places" 会拦）。
-- 门禁：`npm test`（72 例，含 16 种子集的组合矩阵）。
-- **0.1.1 是文档版本**：只改了 docs/INTEROP.md、README、AGENTS.md 与那条新测试，**尚未 npm publish**（npm 上 latest 仍是 0.1.0）；发布需用户明确要求。
-- `optionalDependencies` 指向四个组件的**已发布**版本；改组件版本后必须同步这里再发布，否则 `npm i` 解析不到。
-- 组件缺席是**正常状态**：其行在 import 阶段被 loader 隔离，状态面板如实报告，不要为它加"兜底"。
+```
+cordis.patch.yml    只插一行：dsh-as-aistudio 自己
+src/index.js        宿主半侧：await import 四个组件 + ctx.plugin 挂载 + /api/dsh-as-aistudio/status
+src/studio.js       studio 自己的浏览器半侧（源，注册 id dsh-as-aistudio-studio）
+src/vendor/*.js     四个组件的 browser factory，由 tools/vendor.mjs 逐字剥离生成，DO NOT EDIT
+src/client.js       生成的单一大 bundle: studio + 四个 vendored factory，DO NOT EDIT
+tools/vendor.mjs    重新生成 src/vendor/
+tools/build.mjs     把 src/studio.js + src/vendor/*.js 缝成 src/client.js
+tools/head.txt
+tools/tail.txt      ↑ 生成器的字面片段
+tools/tail2.txt
+```
 
-## 热重载纪律（2026-10-01「点不动」事故后新增，详见 docs/INTEROP.md §9）
+四个组件是 **dependencies**（不是 optionalDependencies，因为它们不再是行，缺席就意味着功能真空）。
 
-**改任何组件的 client.js 之后必须重启宿主 + 硬刷新页面**，不要停在 HMR 混合态交付。混合态的症状是按钮可见
-但点击静默无响应（组件 dispose 后主动早退，是刻意设计）；判断是否为混合态，先看宿主版本与 bundle 版本是否一致。
+## 每次改动的固定流程
+
+    npm run vendor      # 重新生成 src/vendor/（从组件仓库逐字复制）
+    npm run build       # 重新生成 src/client.js（单一大 bundle）
+    npm run verify:vendor && npm run verify:build   # 只读校验，过期就 exit 1
+    npm test            # 全绿才往下走
+
+**改了任何组件仓库，必须先跑上面四条再动本仓库。** vendor-sync / build-sync 测试会拦住过期副本。
+
+## 热重载纪律（2026-10-01 事故后新增，见 docs/INTEROP.md §9）
+
+**改 src/index.js 或 client 之后必须重启宿主 + 让页面硬刷新**，不要停在 HMR 混合态交付。混合态的症状是：路由 200 但行为是旧的、或组件宿主半侧已挂载而浏览器半侧还跑着上一版。
+
+## 验收（发布前必跑，隔离环境）
+
+    bash _aistudio-reports/verify/self.sh
+    node _aistudio-reports/verify/self-gate.mjs <self.url> <self-dump.txt>
+
+门禁断言（2026-10-02 实测全过）：
+
+1. 组合成的 184 行里**四个组件一行都没有**，只有 dsh-as-aistudio；
+2. /api/dsh-as-aistudio/status → hostMounted 4/4，版本与组件实际安装版本一致；
+3. GET /dsh-rerun-turn/state（不带 sessionId）→ **400 invalid**（证明 edit-turn 依赖的挂载探测契约仍在）；
+4. boot graph 66 条，studio 在、**组件条目 0**（它们全在 bundle 里）；
+5. served bundle 200，含四个 factory_* 与 studio 自己的 __DSH_AS_AISTUDIO__。
+
+## 推送
+
+本机 github.com:443 超时、api.github.com 正常（0.3s）。用 REST API 推 blobs→tree→commit→ref，
+**blob 请求必须带 encoding: base64**，commit 的 date 必须是 ISO 8601 且保留原时区偏移，
+否则 sha 对不上、分支分叉。现成工具：node _aistudio-reports/verify/api-push.mjs DDDMUC/dsh-as-aistudio <repo-dir>。
 
 ## 协作规则
 
-- 组合矩阵（[test/combination.test.js](test/combination.test.js)）是需求 2 的回归网：任何改动组件注册（slot / id / order）的行为都必须让它保持全绿；它按 package `exports` 解析，解析不到才回退工作区路径。
-- `cordis.patch.yml` 的行名必须是**裸包名**：客户端模块扫描器按 `<name>/package.json` 解析 `dsh.client`，subpath 会被缓存成"非客户端包"而静默不加载。
-- 隐藏归因（`data-dshdt-hidden` / `data-dshet-hidden` / `data-dsrr-hidden`）与 slot order 分配是三个注入型组件的共享面：改一侧要检查另两侧。
+- 组件是**独立正本**：修组件去组件仓库，别在这边改；这边只生成副本。
+- 不要删 test/combination.test.js 的任何断言 —— 它直接加载四个组件包，是本包架构变更时唯一的连续性保障。
 - 不要替用户重启 / 发布（npm）/ force-push，除非用户明确要求。
+
