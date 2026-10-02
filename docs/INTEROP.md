@@ -180,3 +180,36 @@ function foreignHideOn(row, own) {
 **给改这两个包的 agent**：动路由、`planRerun` 或错误码之前，先在 `dsh-rerun-turn` 跑
 `node --test test/contract.test.js`；把探测状态的 400 改成 404 会让 2 例转红，给 `/apply` 加一个必填
 `confirmToken` 会让 5 例转红 —— 破坏契约会在本地就暴露，而不是等用户发现按钮点不动。
+
+## 11. 自包含架构（2026-10-02）
+
+用户要求「插件列表里只有 AI Studio 一行」。平台的清单服务返回扁平数组，过滤条件是
+!entry.options.group && !entry.disabled && entry.fiber.state === 2
+（@deepseek-ai/dsh-plugin-package-inventory-deepseek/lib/index.js:100）—— 没有 hidden 开关，
+group 也只能把 group 自己藏起来，子条目照样平铺。所以「在跑等价于在列表里」是硬约束。
+
+唯一的出路是让四个组件不再是 Loader 行。本包因此改成自包含（@linxin666/dsh-web-all 同款）：
+
+| 部件 | 位置 | 说明 |
+| --- | --- | --- |
+| patch | cordis.patch.yml | 只插一行（本包自己） |
+| 组件身份 | package.json dependencies | 普通依赖，不是 profile bundle |
+| 宿主半侧 | src/index.js | await import 加 ctx.plugin 挂载组件的宿主半侧 |
+| 浏览器半侧 | src/client.js | 单一大 bundle（生成物） |
+| 内联来源 | src/vendor/*.js | tools/vendor.mjs 从组件源码逐字剥离 factory |
+| 缝合器 | tools/build.mjs | studio 加四个 factory 合成一个 bundle |
+
+两条设计红线：
+
+1. 宿主半侧不内联。宿主代码对列表不可见，复制它只会多出一份要维护的东西；import 加
+   ctx.plugin 就够，且组件的路由、回滚、重放逻辑仍是唯一正本。
+2. 浏览器半侧必须内联。bundle 是按 Loader 行下发的（/plugins/<行id>/client.js），
+   组件没有行就没有 bundle。
+
+防漂移：副本由工具生成、带 sha256 戳，npm run verify:vendor / verify:build 只读校验，
+测试在副本与组件源不一致时失败。手工编辑 src/vendor/* 或 src/client.js 是禁止的。
+
+实测（隔离实例，只装本包 tarball）：composed 184 行里组件行 0；/api/dsh-as-aistudio/status
+hostMounted 4/4；GET /dsh-rerun-turn/state 返回 400（edit-turn 的挂载探测契约未破）；
+boot graph 66 条里组件条目 0；served bundle 200 且含四个 factory。
+

@@ -1,24 +1,30 @@
-// dsh-as-aistudio — host half.
+// dsh-as-aistudio - host half.
 //
-// One loopback-only JSON route:
+// Self-contained: the plugin list shows ONE row (this package). The four
+// components are ordinary dependencies, not profile bundles, so they have no
+// rows of their own and never appear there.
 //
-//   GET /api/dsh-as-aistudio/status
+// Two jobs:
 //
-// It answers the only question the studio exists to answer: *which of my
-// components are actually live right now?* For each component the manifest
-// names, the host reports
+//   1. mount each component's HOST half. Those are the loopback routes and the
+//      rollback / replay services the browser halves call. They stay where they
+//      are - imported from the installed package and applied into this fiber -
+//      because host code is invisible to the plugin list and duplicating it
+//      would create a second thing to fix. A component that is absent is
+//      reported, never fatal.
 //
-//   installed — the package resolves from the running profile;
-//   version   — the version that would load;
-//   entries   — every loader entry naming that package, and whether it is
-//               disabled;
-//   mounted   — at least one enabled entry names it.
+//   2. answer the only question the studio exists to answer:
 //
-// This half owns no session state and appends nothing: it is a read-only view
-// over the loader, so it cannot corrupt a turn even if a component is broken.
-// The module imports nothing from the DSH SDK — `loader` and `webServer` are
-// resolved through the cordis context at call time — so it loads and degrades
-// on any profile (web, desktop, headless).
+//        GET /api/dsh-as-aistudio/status
+//
+//      For each component: is it installed, at which version, and is its host
+//      half actually mounted (which is what makes its routes answer)? The
+//      browser half reads this to decide which vendored factories to mount, so
+//      a missing component can never be offered as a button that cannot work.
+//
+// The module imports nothing from the DSH SDK - the loader and the web server
+// are resolved through the cordis context at call time - so it loads and
+// degrades on any profile (web, desktop, headless).
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { basename, dirname, resolve } from 'node:path'
@@ -29,33 +35,66 @@ export const name = STUDIO_ID
 
 const ROUTE_PREFIX = '/api/dsh-as-aistudio'
 
-// --- package resolution --------------------------------------------------------
-
-// A component is installed in the *profile*, not in the harness checkout the
-// host binary runs from, so one anchor is not enough: the plugin is asked for
-// the profile it serves (ctx.baseUrl), the process working directory, the entry
-// point, and — when this package itself was installed under a node_modules —
-// the profile that owns that node_modules. The first anchor that resolves wins.
-function resolver() {
-  try {
-    const entry = process.argv[1]
-    return createRequire(entry ?? import.meta.url)
-  } catch {
-    return createRequire(import.meta.url)
+/**
+ * Mount every component host half that can be imported.
+ *
+ * A host half is the component's own plugin function; applying it into this
+ * fiber registers its routes exactly as its own bundle row would have. The
+ * order is the manifest order (edit, rerun, delete, render) and each mount is
+ * independent: one failing import or one throwing apply is reported and the
+ * rest still mount, because any-subset-works is the whole point.
+ *
+ * @param ctx - this plugin's context.
+ * @returns per component: mounted, and why not when applicable.
+ */
+export async function mountComponentHosts(ctx) {
+  const mounted = new Map()
+  for (const component of COMPONENTS) {
+    let plugin
+    try {
+      // The components are dependencies of this package, so the bare specifier
+      // resolves from the profile that installed the studio.
+      const namespace = await import(component.package)
+      plugin = namespace.default ?? namespace
+    } catch (error) {
+      mounted.set(component.id, { mounted: false, reason: 'import-failed', detail: String((error && error.message) || error) })
+      continue
+    }
+    if (typeof plugin !== 'function' && !(typeof plugin === 'object' && plugin !== null && typeof plugin.apply === 'function')) {
+      mounted.set(component.id, { mounted: false, reason: 'no-plugin-shape' })
+      continue
+    }
+    try {
+      const fiber = ctx.plugin(plugin)
+      // A rejected start is still a start we know nothing about yet: record it
+      // when it settles rather than leaving the row silently half-mounted.
+      if (fiber && typeof fiber.then === 'function') {
+        fiber.then(
+          () => {},
+          (error) => {
+            console.error('[' + STUDIO_ID + '] component ' + component.id + ' failed to start:', error)
+          },
+        )
+      }
+      mounted.set(component.id, {
+        mounted: true,
+        dispose: typeof fiber !== 'undefined' && fiber !== null && typeof fiber.dispose === 'function' ? fiber.dispose.bind(fiber) : null,
+      })
+    } catch (error) {
+      mounted.set(component.id, { mounted: false, reason: 'apply-failed', detail: String((error && error.message) || error) })
+    }
   }
+  return mounted
 }
 
-/**
- * Directories a bare package specifier may resolve from, most specific first.
- * @param ctx - the plugin context; `baseUrl` is the profile root when present.
- * @returns an ordered, de-duplicated list of resolution anchors.
- */
+// --- package resolution --------------------------------------------------------
+
+// A component is installed in the PROFILE, not in this checkout, so one anchor
+// is not enough: the loader hands us the profile root, the process has a working
+// directory, and this package may itself live under a node_modules.
 export function resolveAnchors(ctx) {
   const anchors = []
   const push = (value) => {
-    // A cordis baseUrl is a file:// URL (dsh-app-boot sets
-    // `pathToFileURL(dirname(config)) + '/'`), so it must be converted before
-    // Node will accept it as a module resolution directory.
     let dir = value
     if (typeof dir === 'string' && dir.startsWith('file://')) {
       try {
@@ -65,15 +104,11 @@ export function resolveAnchors(ctx) {
       }
     }
     if (typeof dir !== 'string' || dir === '') return
-    // Normalise: a baseUrl carries a trailing separator, and Node appends
-    // 'node_modules' to whatever it is handed.
     dir = resolve(dir)
     if (!anchors.includes(dir)) anchors.push(dir)
   }
   if (ctx) {
     if (typeof ctx.baseUrl === 'string') push(ctx.baseUrl)
-    // The loader carries its own baseUrl (the profile root) when the plugin
-    // context does not expose one.
     const loader = typeof ctx.get === 'function' ? safeGet(ctx, 'loader') : undefined
     if (loader && typeof loader.baseUrl === 'string') push(loader.baseUrl)
     if (loader && loader.ctx && typeof loader.ctx.baseUrl === 'string') push(loader.ctx.baseUrl)
@@ -99,18 +134,30 @@ export function resolveAnchors(ctx) {
   return anchors
 }
 
+function safeGet(ctx, service) {
+  try {
+    return ctx.get(service)
+  } catch {
+    return undefined
+  }
+}
+
 /**
  * Resolve one component package from the profile.
  * @param pkg - the bare package name.
- * @param anchors - resolution anchors from {@link resolveAnchors}.
+ * @param anchors - resolution anchors from resolveAnchors.
  * @returns what the running profile would load, or an honest absence.
  */
 export function inspectPackage(pkg, anchors = resolveAnchors(undefined)) {
-  const require = resolver()
-  const paths = anchors
+  let require
+  try {
+    require = createRequire(process.argv[1] ?? import.meta.url)
+  } catch {
+    require = createRequire(import.meta.url)
+  }
   let manifestPath
   try {
-    manifestPath = require.resolve(pkg + '/package.json', { paths })
+    manifestPath = require.resolve(pkg + '/package.json', { paths: anchors })
   } catch {
     return { installed: false, version: null }
   }
@@ -129,19 +176,7 @@ export function inspectPackage(pkg, anchors = resolveAnchors(undefined)) {
 
 // --- loader view ---------------------------------------------------------------
 
-// Every entry in the tree, flattened. `ctx.loader` is provided by
-// @cordisjs/plugin-loader on every profile; when it is somehow absent the view
-// reports null rather than inventing an answer.
-export // `ctx.get` is the cordis service accessor; a context stub without it (or a
-// service that throws on access) must read as absent, never as a crash.
-function safeGet(ctx, service) {
-  try {
-    return ctx.get(service)
-  } catch {
-    return undefined
-  }
-}
-
+/** Every entry in the loader tree, flattened, or null when no loader is reachable. */
 export function loaderEntries(ctx) {
   const loader = ctx && typeof ctx.get === 'function' ? safeGet(ctx, 'loader') : undefined
   if (!loader || typeof loader.entries !== 'function') return null
@@ -162,18 +197,23 @@ export function loaderEntries(ctx) {
 }
 
 /**
- * Build the status payload. A pure function of the loader view plus the
- * filesystem, so the tests drive it with a stub loader and no server.
- * @param ctx - the plugin context (only `get` is used).
- * @returns the status document the browser half renders.
+ * The status document: what is installed, what is mounted, and what the browser
+ * half should therefore mount.
+ * @param ctx - the plugin context (only get is used).
+ * @param hosts - the host mount table from mountComponentHosts, when it has run;
+ *   without it the route reports installed state only.
+ * @returns the status document.
  */
-export function statusOf(ctx) {
+export function statusOf(ctx, hosts = null) {
   const entries = loaderEntries(ctx)
   const anchors = resolveAnchors(ctx)
   const components = COMPONENTS.map((component) => {
     const found = inspectPackage(component.package, anchors)
-    const mine = entries === null ? null : entries.filter((entry) => entry.name === component.package)
-    const enabled = mine === null ? null : mine.filter((entry) => !entry.disabled).length
+    const host = hosts === null ? null : hosts.get(component.id) ?? null
+    // A component that still appears as its own profile row is a real
+    // configuration (a standalone install next to the studio). The loader merges
+    // rows by id, so this is informational, not an error.
+    const rows = entries === null ? null : entries.filter((entry) => entry.name === component.package)
     return {
       id: component.id,
       package: component.package,
@@ -182,11 +222,12 @@ export function statusOf(ctx) {
       repo: component.repo,
       installed: found.installed,
       version: found.version,
-      entries: mine,
-      enabledEntries: enabled,
-      mounted: enabled === null ? null : enabled > 0,
+      hostMounted: host === null ? null : host.mounted === true,
+      hostReason: host === null || host.mounted === true ? null : host.reason,
+      ownRows: rows === null ? null : rows.filter((row) => !row.disabled).length,
     }
   })
+  const live = components.filter((component) => component.hostMounted === true)
   return {
     ok: true,
     plugin: STUDIO_ID,
@@ -197,18 +238,15 @@ export function statusOf(ctx) {
     summary: {
       total: components.length,
       installed: components.filter((component) => component.installed).length,
-      mounted: components.filter((component) => component.mounted === true).length,
-      // What the studio is for: any subset works, and this is the subset.
-      combination: components.filter((component) => component.mounted === true).map((component) => component.id),
+      mounted: live.length,
+      combination: live.map((component) => component.id),
     },
   }
 }
 
-// The host version, for the panel's compatibility line. Null when the studio
-// runs against a checkout rather than an installed dsh.
 export function dshVersion() {
   try {
-    const require = resolver()
+    const require = createRequire(process.argv[1] ?? import.meta.url)
     const manifest = JSON.parse(readFileSync(require.resolve('@deepseek-ai/dsh/package.json', { paths: resolveAnchors(undefined) }), 'utf8'))
     if (typeof manifest.version === 'string') return manifest.version
   } catch {
@@ -224,9 +262,9 @@ function isLoopbackAddress(address) {
   return address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1' || address.startsWith('127.')
 }
 
-function isLocalHostHeader(host) {
-  if (typeof host !== 'string' || host.length === 0) return false
-  const bare = host.split(':')[0].replace(/^\[|\]$/g, '').toLowerCase()
+function isLocalHostHeader(hostHeader) {
+  if (typeof hostHeader !== 'string' || hostHeader.length === 0) return false
+  const bare = hostHeader.split(':')[0].replace(/^\[|\]$/g, '').toLowerCase()
   return bare === 'localhost' || bare === '127.0.0.1' || bare === '::1'
 }
 
@@ -246,8 +284,8 @@ function guard(req, res) {
     sendJson(res, 403, { ok: false, code: 'forbidden', error: 'loopback only' })
     return false
   }
-  const host = req.headers.host
-  if (!isLocalHostHeader(host)) {
+  const hostHeader = req.headers.host
+  if (!isLocalHostHeader(hostHeader)) {
     sendJson(res, 403, { ok: false, code: 'forbidden', error: 'unexpected host' })
     return false
   }
@@ -259,7 +297,7 @@ function guard(req, res) {
     } catch {
       originHost = null
     }
-    if (originHost !== host) {
+    if (originHost !== hostHeader) {
       sendJson(res, 403, { ok: false, code: 'forbidden', error: 'cross-origin request' })
       return false
     }
@@ -269,7 +307,27 @@ function guard(req, res) {
 
 // --- plugin --------------------------------------------------------------------
 
-export function apply(ctx) {
+export async function apply(ctx) {
+  // The components mount first, so the status route can report the truth about
+  // them the moment it answers.
+  const hosts = await mountComponentHosts(ctx)
+  ctx.effect(
+    () => () => {
+      // Children mount after their parent, so dispose in reverse.
+      for (const component of [...COMPONENTS].reverse()) {
+        const record = hosts.get(component.id)
+        if (record && typeof record.dispose === 'function') {
+          try {
+            record.dispose()
+          } catch (error) {
+            console.warn('[' + STUDIO_ID + '] disposing ' + component.id + ' failed:', error)
+          }
+        }
+      }
+    },
+    STUDIO_ID + ': component hosts',
+  )
+
   const registerRoutes = (webServer, fiber) => {
     fiber.effect(() =>
       webServer.register({
@@ -282,7 +340,7 @@ export function apply(ctx) {
             return
           }
           try {
-            sendJson(res, 200, statusOf(ctx))
+            sendJson(res, 200, statusOf(ctx, hosts))
           } catch (error) {
             sendJson(res, 500, { ok: false, code: 'internal', error: String((error && error.message) || error) })
           }

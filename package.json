@@ -1,7 +1,7 @@
 {
   "name": "dsh-as-aistudio",
-  "version": "0.1.1",
-  "description": "Google-AI-Studio-style turn controls for DeepSeek Harness, in one install: edit a prompt and re-run it, re-run a reply in place, delete a turn from the model context, and render sent prompts as Markdown. Each of the four components is an independent plugin that also works alone, and any subset of them coexists; this package composes them, enables the rows that mount them, and reports which ones are live in Settings -> Plugins -> AI Studio.",
+  "version": "0.2.0",
+  "description": "Google-AI-Studio-style turn controls for DeepSeek Harness, in one install: edit a prompt and re-run it, re-run a reply in place, delete a turn from the model context, and render sent prompts as Markdown. Self-contained: the plugin list shows this one row; the four components are dependencies mounted by it. Each still installs alone and works alone.",
   "type": "module",
   "main": "src/index.js",
   "exports": {
@@ -11,6 +11,7 @@
   },
   "files": [
     "src",
+    "tools",
     "cordis.patch.yml",
     "docs/INTEROP.md",
     "README.md",
@@ -37,13 +38,18 @@
     "node": ">=22"
   },
   "scripts": {
-    "test": "node --test \"test/*.test.js\""
+    "vendor": "node tools/vendor.mjs",
+    "build": "node tools/vendor.mjs && node tools/build.mjs",
+    "test": "node --test test/*.test.js",
+    "check": "npm run build && npm test",
+    "verify:vendor": "node tools/vendor.mjs --check",
+    "verify:build": "node tools/build.mjs --check"
   },
-  "optionalDependencies": {
+  "dependencies": {
     "dsh-delete-turn": "^0.1.7",
-    "dsh-edit-turn": "^0.2.14",
-    "dsh-markdown-bubble": "^0.1.1",
-    "dsh-rerun-turn": "^0.1.22"
+    "dsh-edit-turn": "^0.2.15",
+    "dsh-markdown-bubble": "^0.1.4",
+    "dsh-rerun-turn": "^0.1.24"
   },
   "dsh": {
     "bundle": {
@@ -52,7 +58,11 @@
     "client": {
       "platform": "web",
       "inject": [
-        "@deepseek-ai/dsh-client-locale"
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-chat",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-primitives",
+        "@deepseek-ai/dsh-client-ui-settings-plugins"
       ]
     },
     "engines": {

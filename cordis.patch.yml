@@ -1,30 +1,23 @@
-# dsh-as-aistudio bundle patch: the AI Studio composition.
+# dsh-as-aistudio bundle patch: the AI Studio composition, ONE row.
 #
-# Rows are inserted for the studio itself and for each component it composes, so
-# one install turns the whole strip on. Every component keeps its own repo, its
-# own package and its own cordis.patch.yml: installing one alone still mounts it
-# through that row, and the platform's entry tree is keyed by id, so a row
-# inserted twice (by this patch and by the component's own bundle) merges into a
-# single entry rather than mounting the plugin twice.
+# Self-contained: the plugin list shows exactly this row. The four components are
+# ordinary npm dependencies of this package (see package.json), not profile
+# bundles, so they have no rows of their own and never appear in that list.
 #
-# A missing package fails in isolation: @cordisjs/plugin-loader's Entry#_init
-# catches the import error, logs it and returns, so the other rows still start.
-# That is what makes "any subset of the components, on top of the studio" safe,
-# and the studio's own panel reports the gap instead of hiding it.
+# The node half mounts each component HOST half (its loopback routes and its
+# rollback / replay services) by importing the installed package, so host logic
+# stays in the components and there is only one copy of it. The browser bundles
+# travel inside this package (src/client.js) because a browser bundle is served
+# per Loader row and the components have none.
 #
-# The entry names are the BARE package names on purpose: the client-module
-# scanner treats the name as a package specifier and resolves
-# `<name>/package.json` for the `dsh.client` declaration, so a subpath entry
-# would be cached as "not a client package" and the browser half would silently
-# never load.
+# A component that is not installed is reported by /api/dsh-as-aistudio/status and
+# is never mounted - the studio boots either way. Each component still has its own
+# cordis.patch.yml, so installing one standalone mounts it through its own row.
+#
+# The entry name is the BARE package name on purpose: the client-module scanner
+# treats it as a package specifier and resolves <name>/package.json for the
+# dsh.client declaration, so a subpath entry would be cached as "not a client
+# package" and the browser half would silently never load.
 - insert:
     - id: dsh-as-aistudio
       name: 'dsh-as-aistudio'
-    - id: dsh-edit-turn
-      name: 'dsh-edit-turn'
-    - id: dsh-rerun-turn
-      name: 'dsh-rerun-turn'
-    - id: dsh-delete-turn
-      name: 'dsh-delete-turn'
-    - id: dsh-markdown-bubble
-      name: 'dsh-markdown-bubble'

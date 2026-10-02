@@ -1,0 +1,5 @@
+
+    // --- which factories the studio mounts ---
+    const VENDORED_TABLE = { __T__ }
+
+    // --- the studio own browser half ---

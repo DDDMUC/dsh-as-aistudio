@@ -1,28 +1,27 @@
-// Host-half tests: drive the real apply() against a context stub, then call the
-// route the way the browser does. What matters here is that the status document
-// is honest — it distinguishes "installed but not enabled" from "enabled", it
-// stays readable when the loader is invisible, and it never throws on the wire.
+// Host-half tests: the shell that mounts the four component host halves, and the
+// status route that reports what actually mounted.
 //
-//   node --test "test/*.test.js"
+// Since the self-contained rewrite the studio has no rows of its own for the
+// components: it imports each package and applies it into this fiber. So the
+// interesting questions are all about that mount - does a failing component stop
+// the others, does a missing one get reported rather than thrown, and does the
+// route tell the truth about what is live.
+//
+//   node --test test/*.test.js
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { apply, loaderEntries, name, resolveAnchors, statusOf } from '../src/index.js'
-import { COMPONENTS } from '../src/components.js'
+import { apply, inspectPackage, loaderEntries, mountComponentHosts, name, resolveAnchors, statusOf } from '../src/index.js'
+import { COMPONENTS, STUDIO_ID } from '../src/components.js'
 
-/** A loader stub: entries as the loader tree would flatten them. */
-function loaderWith(rows) {
-  return {
-    get: (service) => (service === 'loader' ? { entries: () => rows.map((row) => ({ options: row, disabled: row.disabled === true })) } : undefined),
-  }
-}
+const SESSION_ID = 'session-11111111-2222-4333-8444-555555555555'
 
-/** A webServer stub that records registrations. */
+/** A webServer stub that records the registrations. */
 function webServerStub() {
   const routes = new Map()
   return {
     routes,
     webServer: {
-      register: (route) => {
+      register(route) {
         routes.set(route.path, route)
         return () => routes.delete(route.path)
       },
@@ -30,15 +29,27 @@ function webServerStub() {
   }
 }
 
-/** The context stub apply() needs: loader, webServer and effect. */
-function contextStub(rows) {
+/**
+ * A context stub. The host half resolves services lazily, so the loader and the
+ * webServer are handed over through get(); plugin() records the mounts.
+ */
+function contextStub(options = {}) {
   const server = webServerStub()
-  const loader = loaderWith(rows).get('loader')
+  const mounted = []
+  const thrown = []
   const ctx = {
     get: (service) => {
-      if (service === 'loader') return loader
       if (service === 'webServer') return server.webServer
+      if (service === 'loader') return options.loader
       return undefined
+    },
+    plugin: (fn) => {
+      mounted.push(fn)
+      if (options.failing !== undefined && options.failing.includes(fn)) {
+        thrown.push(fn)
+        throw new Error('component refused to mount')
+      }
+      return { dispose() {} }
     },
     effect: (factory) => {
       const disposer = factory()
@@ -46,44 +57,25 @@ function contextStub(rows) {
         if (typeof disposer === 'function') disposer()
       }
     },
-    inject: () => {},
-  }
-  return { ctx, server }
-}
-
-/** A loopback request the guard accepts. */
-function request(method) {
-  return { method, url: '/api/dsh-as-aistudio/status', socket: { remoteAddress: '127.0.0.1' }, headers: { host: '127.0.0.1:3080' } }
-}
-
-/** A response recorder. */
-function response() {
-  const box = { status: 0, headers: null, body: '' }
-  return {
-    box,
-    writeHead: (status, headers) => {
-      box.status = status
-      box.headers = headers
+    inject: (services, factory) => {
+      if (options.injectHook) options.injectHook(services, factory)
     },
-    end: (payload) => {
-      box.body = payload
-    },
+    on: () => {},
+    logger: { warn: () => {}, error: () => {}, debug: () => {}, info: () => {} },
   }
+  return { ctx, server, mounted, thrown }
 }
 
 test('the host half names the studio', () => {
   assert.equal(name, 'dsh-as-aistudio')
 })
 
-// dsh-app-boot sets a cordis baseUrl to `pathToFileURL(dirname(config)) + '/'`,
-// and Node refuses a file:// URL as a resolution directory — the live instance
-// answered "installed: false" for every component until this was converted.
-test('a file:// baseUrl becomes a filesystem anchor', () => {
+test('resolveAnchors turns a file:// baseUrl into a directory', () => {
   const anchors = resolveAnchors({ baseUrl: 'file:///Users/example/.dsh/profiles/web/', get: () => undefined })
   assert.equal(anchors[0], '/Users/example/.dsh/profiles/web')
 })
 
-test('a loader baseUrl is used when the context does not expose one', () => {
+test('resolveAnchors falls back to the loader baseUrl', () => {
   const anchors = resolveAnchors({
     get: (service) => (service === 'loader' ? { entries: () => [], baseUrl: 'file:///srv/profile/' } : undefined),
   })
@@ -96,125 +88,216 @@ test('a throwing service accessor reads as absent', () => {
 
 test('the loader view flattens the tree and reports absence', () => {
   assert.equal(loaderEntries({ get: () => undefined }), null)
-  assert.equal(loaderEntries({ get: () => ({ entries: 'nope' }) }), null)
   const rows = loaderEntries({ get: () => ({ entries: () => [{ options: { id: 'x', name: 'dsh-edit-turn' } }] }) })
   assert.deepEqual(rows, [{ id: 'x', name: 'dsh-edit-turn', disabled: false }])
 })
 
-test('an invisible loader yields mounted: null, never a crash', () => {
+test('inspectPackage reports an absence instead of throwing', () => {
+  const found = inspectPackage('dsh-a-package-that-does-not-exist', ['/nonexistent-root'])
+  assert.equal(found.installed, false)
+  assert.equal(found.version, null)
+})
+
+// --- the component mount -------------------------------------------------------
+
+test('apply mounts every component host half, in manifest order', async () => {
+  const stub = contextStub()
+  await apply(stub.ctx)
+  assert.equal(stub.mounted.length, COMPONENTS.length, 'one mount per component')
+  assert.equal(stub.thrown.length, 0, 'a healthy stub refuses none')
+})
+
+test('a component that refuses to mount does not stop the others', async () => {
+  const failing = () => { throw new Error('refused') }
+  const mounts = []
+  const ctx = {
+    get: (service) => (service === 'webServer' ? webServerStub().webServer : undefined),
+    plugin: (fn) => {
+      mounts.push(fn)
+      if (fn === failing) throw new Error('refused')
+      return { dispose() {} }
+    },
+    effect: (f) => f(),
+    inject: () => {},
+    on: () => {},
+    logger: { warn: () => {}, error: () => {} },
+  }
+  await apply(ctx)
+  assert.equal(mounts.length, COMPONENTS.length, 'every component was still attempted')
+})
+
+test('mountComponentHosts records why a component did not mount', async () => {
+  const hosts = await mountComponentHosts({ plugin: () => ({ dispose() {} }) })
+  assert.equal(hosts.size, COMPONENTS.length)
+  for (const [id, record] of hosts) {
+    if (record.mounted === false) {
+      assert.equal(typeof record.reason, 'string', id + ': a reason accompanies a failed mount')
+      assert.ok(['import-failed', 'apply-failed', 'no-plugin-shape'].includes(record.reason), id + ': a known reason')
+    } else {
+      assert.equal(record.reason, undefined, id + ': a mounted component carries no reason')
+    }
+  }
+})
+
+// --- the status document -------------------------------------------------------
+
+test('an invisible loader yields hostMounted null, never a crash', () => {
   const status = statusOf({ get: () => undefined })
   assert.equal(status.ok, true)
   assert.equal(status.loaderVisible, false)
-  for (const component of status.components) assert.equal(component.mounted, null)
+  for (const component of status.components) assert.equal(component.hostMounted, null)
   assert.equal(status.components.length, COMPONENTS.length)
 })
 
-test('an entry naming a component marks it mounted', () => {
-  const rows = [
-    { id: 'dsh-edit-turn', name: 'dsh-edit-turn' },
-    { id: 'dsh-delete-turn', name: 'dsh-delete-turn' },
-    { id: 'unrelated', name: 'something-else' },
-  ]
-  const status = statusOf({ get: (service) => loaderWith(rows).get(service) })
-  const byId = new Map(status.components.map((component) => [component.id, component]))
-  assert.equal(byId.get('dsh-edit-turn').mounted, true)
-  assert.equal(byId.get('dsh-delete-turn').mounted, true)
-  assert.equal(byId.get('dsh-rerun-turn').mounted, false)
-  assert.equal(byId.get('dsh-markdown-bubble').mounted, false)
-  assert.deepEqual(status.summary.combination, ['dsh-edit-turn', 'dsh-delete-turn'])
-  assert.equal(status.summary.mounted, 2)
-  assert.equal(status.summary.total, COMPONENTS.length)
-})
-
-test('a disabled entry is not mounted, and its count is still reported', () => {
-  const rows = [
-    { id: 'dsh-edit-turn', name: 'dsh-edit-turn', disabled: true },
-    { id: 'dsh-edit-turn-shadow', name: 'dsh-edit-turn' },
-  ]
-  const status = statusOf({ get: (service) => loaderWith(rows).get(service) })
+test('the status document reports installed state and the own-row count', () => {
+  // Under the studio the components have no rows of their own; a standalone
+  // install next to it would show exactly one. The loader view tells the two
+  // apart, and it has to be visible for the count to be honest.
+  const rows = [{ options: { id: 'dsh-edit-turn', name: 'dsh-edit-turn' }, disabled: false }]
+  const loader = { entries: () => rows }
+  const status = statusOf({ get: (service) => (service === 'loader' ? loader : undefined) })
+  assert.equal(status.loaderVisible, true)
   const edit = status.components.find((component) => component.id === 'dsh-edit-turn')
-  assert.equal(edit.entries.length, 2)
-  assert.equal(edit.enabledEntries, 1)
-  assert.equal(edit.mounted, true)
+  assert.equal(edit.ownRows, 1, 'a standalone install is visible as one own row')
+  const other = status.components.find((component) => component.id === 'dsh-rerun-turn')
+  assert.equal(other.ownRows, 0, 'under the studio it has no row of its own')
+
+  // With no loader there is no count at all, not a wrong one.
+  const blind = statusOf({ get: () => undefined })
+  assert.equal(blind.loaderVisible, false)
+  assert.equal(blind.components.find((component) => component.id === 'dsh-edit-turn').ownRows, null)
 })
 
-// The row-merge case the composition depends on: the platform merges two
-// inserted rows that share an id into one Entry, and a merged row still names
-// its package exactly once. Two live entries naming the same package would mean
-// the plugin mounts twice, so the host must show it rather than hide it.
-test('two entries naming one component are both reported', () => {
-  const rows = [
-    { id: 'dsh-delete-turn', name: 'dsh-delete-turn' },
-    { id: 'as-aistudio-delete-turn', name: 'dsh-delete-turn' },
-  ]
-  const status = statusOf({ get: (service) => loaderWith(rows).get(service) })
-  const del = status.components.find((component) => component.id === 'dsh-delete-turn')
-  assert.equal(del.entries.length, 2)
-  assert.equal(del.mounted, true)
+test('the summary counts what the host actually mounted', () => {
+  const hosts = new Map([
+    ['dsh-edit-turn', { mounted: true }],
+    ['dsh-rerun-turn', { mounted: true }],
+    ['dsh-delete-turn', { mounted: false, reason: 'apply-failed' }],
+    ['dsh-markdown-bubble', { mounted: true }],
+  ])
+  const status = statusOf({ get: () => undefined }, hosts)
+  assert.equal(status.summary.mounted, 3)
+  assert.deepEqual(status.summary.combination, ['dsh-edit-turn', 'dsh-rerun-turn', 'dsh-markdown-bubble'])
+  const failed = status.components.find((component) => component.id === 'dsh-delete-turn')
+  assert.equal(failed.hostMounted, false)
+  assert.equal(failed.hostReason, 'apply-failed')
 })
+
+test('the payload carries the component identity the panel needs', () => {
+  const status = statusOf({ get: () => undefined })
+  for (const component of status.components) {
+    for (const key of ['id', 'package', 'feature', 'kind', 'repo', 'installed', 'version', 'hostMounted', 'ownRows']) {
+      assert.ok(key in component, component.id + ' is missing ' + key)
+    }
+    assert.match(component.repo, /^https:\/\/github\.com\//)
+  }
+})
+
+// --- the route ----------------------------------------------------------------
+
+function request(method, url, body) {
+  const listeners = new Map()
+  const req = {
+    method,
+    url,
+    socket: { remoteAddress: '127.0.0.1' },
+    headers: { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080' },
+    on(event, handler) {
+      listeners.set(event, handler)
+      return req
+    },
+    destroy() {},
+  }
+  setImmediate(() => {
+    if (body !== undefined) listeners.get('data')?.(body)
+    listeners.get('end')?.()
+  })
+  return req
+}
+
+function response() {
+  const box = { status: 0, body: '' }
+  return {
+    box,
+    writeHead(status) {
+      box.status = status
+    },
+    end(payload) {
+      box.body = payload
+    },
+  }
+}
+
+async function call(route, method, url, body) {
+  const res = response()
+  await route.handler(request(method, url, body), res)
+  let parsed = null
+  try {
+    parsed = JSON.parse(res.box.body)
+  } catch {
+    parsed = null
+  }
+  return { status: res.box.status, body: parsed }
+}
+
+async function statusRoute() {
+  const stub = contextStub()
+  await apply(stub.ctx)
+  return stub.server.routes.get('/api/dsh-as-aistudio/status')
+}
 
 test('the route answers GET on loopback with the status document', async () => {
-  const { ctx, server } = contextStub([{ id: 'dsh-rerun-turn', name: 'dsh-rerun-turn' }])
-  apply(ctx)
-  const route = server.routes.get('/api/dsh-as-aistudio/status')
-  assert.ok(route !== undefined, 'the status route is registered')
-  assert.equal(route.kind, 'exact')
-  const res = response()
-  await route.handler(request('GET'), res)
-  assert.equal(res.box.status, 200)
-  const body = JSON.parse(res.box.body)
-  assert.equal(body.ok, true)
-  assert.equal(body.plugin, 'dsh-as-aistudio')
-  assert.equal(body.summary.mounted, 1)
-  assert.deepEqual(body.summary.combination, ['dsh-rerun-turn'])
+  const answer = await call(await statusRoute(), 'GET', '/api/dsh-as-aistudio/status')
+  assert.equal(answer.status, 200)
+  assert.equal(answer.body.ok, true)
+  assert.equal(answer.body.plugin, STUDIO_ID)
+  assert.equal(Array.isArray(answer.body.components), true)
 })
 
 test('the route refuses a non-GET method', async () => {
-  const { ctx, server } = contextStub([])
-  apply(ctx)
-  const res = response()
-  await server.routes.get('/api/dsh-as-aistudio/status').handler(request('POST'), res)
-  assert.equal(res.box.status, 405)
+  const answer = await call(await statusRoute(), 'POST', '/api/dsh-as-aistudio/status', '{}')
+  assert.equal(answer.status, 405)
+  assert.equal(answer.body.code, 'method')
 })
 
 test('the route refuses a non-loopback caller', async () => {
-  const { ctx, server } = contextStub([])
-  apply(ctx)
+  const r = await statusRoute()
   const res = response()
-  const remote = request('GET')
+  const remote = request('GET', '/api/dsh-as-aistudio/status')
   remote.socket = { remoteAddress: '10.0.0.7' }
-  await server.routes.get('/api/dsh-as-aistudio/status').handler(remote, res)
+  await r.handler(remote, res)
   assert.equal(res.box.status, 403)
+  assert.equal(JSON.parse(res.box.body).code, 'forbidden')
 })
 
 test('the route refuses a foreign Host header', async () => {
-  const { ctx, server } = contextStub([])
-  apply(ctx)
+  const r = await statusRoute()
   const res = response()
-  const foreign = request('GET')
+  const foreign = request('GET', '/api/dsh-as-aistudio/status')
   foreign.headers = { host: 'evil.example' }
-  await server.routes.get('/api/dsh-as-aistudio/status').handler(foreign, res)
+  await r.handler(foreign, res)
   assert.equal(res.box.status, 403)
 })
 
 test('the route refuses a cross-origin caller', async () => {
-  const { ctx, server } = contextStub([])
-  apply(ctx)
+  const r = await statusRoute()
   const res = response()
-  const cross = request('GET')
+  const cross = request('GET', '/api/dsh-as-aistudio/status')
   cross.headers = { host: '127.0.0.1:3080', origin: 'https://evil.example' }
-  await server.routes.get('/api/dsh-as-aistudio/status').handler(cross, res)
+  await r.handler(cross, res)
   assert.equal(res.box.status, 403)
 })
 
-test('apply defers to the webServer injection when the service is absent', () => {
+test('apply defers to the webServer injection when the service is absent', async () => {
   const injected = []
   const ctx = {
     get: () => undefined,
     inject: (services, factory) => injected.push({ services, factory }),
     effect: () => () => {},
+    plugin: () => ({ dispose() {} }),
   }
-  apply(ctx)
+  await apply(ctx)
   assert.equal(injected.length, 1)
   assert.deepEqual(injected[0].services, ['webServer'])
 })
+

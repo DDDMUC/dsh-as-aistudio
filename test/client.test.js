@@ -38,12 +38,34 @@ function reactStub() {
   }
 }
 
-/** Materialize the bundle with a stub react and record what apply() registers. */
+/**
+ * Materialize the generated bundle with a stub react.
+ *
+ * The generated bundle carries the studio half AND the four vendored component
+ * factories, and the components require the host UI primitives package too — so
+ * the require stub answers 'react' and
+ * '@deepseek-ai/dsh-client-ui-primitives', exactly as the browser module table
+ * would for this package's declared injections. Anything else is a bug: an
+ * unexpected request means a half is reaching for something it never declared.
+ */
 function materialize() {
   assert.ok(registration !== undefined, 'the bundle registered its factory')
   const react = reactStub()
+  const primitivesStub = {
+    projectUserText: (text) => react.createElement('span', { className: 'plainRun' }, text),
+    MarkdownText: function MarkdownText() {},
+    JsonBlock: function JsonBlock() {},
+    Tooltip: (props) => props.children,
+    FileTypeIcon: function FileTypeIcon() {},
+    IconCopyOutlineRegular: function IconCopyOutlineRegular() {},
+    IconCheckOutlineRegular: function IconCheckOutlineRegular() {},
+    fileExtension: () => 'txt',
+    fileSizeText: () => '1 KB',
+    writeClipboard: () => Promise.resolve(true),
+  }
   const require = (spec) => {
     if (spec === 'react') return react
+    if (spec === '@deepseek-ai/dsh-client-ui-primitives') return primitivesStub
     throw new Error('unexpected require(' + JSON.stringify(spec) + ')')
   }
   return registration.factory(require)
@@ -131,13 +153,18 @@ test('both dictionaries are complete and parallel', () => {
   assert.deepEqual(Object.keys(exports.zh).sort(), Object.keys(exports.en).sort())
 })
 
+// The payload the studio reports since the self-contained rewrite: the component
+// is only really live when ITS OWN HOST HALF is mounted (that is what makes its
+// routes answer), not merely when the package resolves.
 test('stateOf reads the host payload honestly', () => {
   const exports = materialize()
-  assert.equal(exports.stateOf({ mounted: true, installed: true }), 'mounted')
-  assert.equal(exports.stateOf({ mounted: false, installed: true }), 'installed')
-  assert.equal(exports.stateOf({ mounted: null, installed: true }), 'mounted')
-  assert.equal(exports.stateOf({ mounted: null, installed: false }), 'missing')
-  assert.equal(exports.stateOf({ mounted: false, installed: false }), 'missing')
+  assert.equal(exports.stateOf({ hostMounted: true, installed: true }), 'mounted')
+  assert.equal(exports.stateOf({ hostMounted: false, installed: true }), 'installed')
+  // The host reported nothing (no mounts attempted): an installed package reads
+  // as available rather than broken.
+  assert.equal(exports.stateOf({ hostMounted: null, installed: true }), 'mounted')
+  assert.equal(exports.stateOf({ hostMounted: null, installed: false }), 'missing')
+  assert.equal(exports.stateOf({ hostMounted: false, installed: false }), 'missing')
 })
 
 test('fill substitutes known keys and leaves unknown ones visible', () => {
@@ -148,9 +175,11 @@ test('fill substitutes known keys and leaves unknown ones visible', () => {
 
 test('the published allocation mirrors the manifest', () => {
   const exports = materialize()
+  // The studio has no overlay entry of its own any more (it renders only a
+  // settings tab), so the allocation lists the three components that claim one.
   assert.deepEqual(
     exports.OVERLAY_ORDERS.map((row) => row.id),
-    ['dsh-delete-turn', 'dsh-edit-turn', 'dsh-rerun-turn', 'dsh-as-aistudio'],
+    ['dsh-delete-turn', 'dsh-edit-turn', 'dsh-rerun-turn'],
   )
   assert.equal(exports.HIDE_OWNERS.length, 3)
 })

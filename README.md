@@ -1,6 +1,6 @@
 # dsh-as-aistudio
 
-**把 DeepSeek Harness 用成 Google AI Studio —— 一轮对话就是一个可以反复打磨的 prompt playground。** 改一句提示词并重跑、原位重跑某条回复、把不该留下的那一轮从模型上下文里删掉、让发出的提示词按 Markdown 渲染。这四个能力各自是一个独立插件，本包把它们组合成一次安装，并在「设置 → 插件 → AI Studio」里如实报告哪几个真的活着。
+**把 DeepSeek Harness 用成 Google AI Studio —— 一轮对话就是一个可以反复打磨的 prompt playground，而且插件列表里只占一行。** 改一句提示词并重跑、原位重跑某条回复、把不该留下的那一轮从模型上下文里删掉、让发出的提示词按 Markdown 渲染。
 
 [中文](#中文) · [English](#english)
 
@@ -10,78 +10,57 @@
 
 ### 为什么需要它
 
-AI Studio 的好用之处不在模型，在于**一轮对话中的每一步都能回头改**：提示词写错了就地改完再跑一次、这次答得不好原地重跑、这段不该进上下文就删掉。DSH 的会话日志是 append-only 的，官方只提供整段压缩（`/compact`），没有轮次级的编辑、重跑与删除。
+AI Studio 的好用之处不在模型，在于一轮对话中的每一步都能回头改。DSH 官方只提供整段压缩（/compact），没有轮次级的编辑、重跑与删除。
 
-这四个组件补上了这一层，而本包负责让它们**装得下、合得来、看得见**：
+四个组件补上了这一层，而这个包负责让它们装得下、合得来、看得见：
 
-- **装得下** —— 一次安装启用整条动作条；
-- **合得来** —— 四个组件各自独立、可任意子集共存，互操作契约由本包固化并测试；
-- **看得见** —— 谁装了、谁启用了、谁缺席，面板上一目了然。
+- **装得下** —— 自包含安装，一次装完；
+- **合得来** —— 四个组件各自独立、任意子集共存，互操作契约由本包固化并测试；
+- **看得见** —— 设置 → 插件 → AI Studio 面板如实报告哪几个真的活着。
 
 ### 特性
 
-- **一次安装，整条动作条** —— 安装本包即可启用编辑、原位重跑、删除与 Markdown 气泡四个组件；
-- **任意子集都能跑** —— 只装其中一个组件时它自己就是完整功能；装两个、三个、四个，或者叠加本包，都不会重复挂载、不会抢同一行；
-- **组件仍是独立包** —— 每个组件有自己的仓库、自己的 `cordis.patch.yml`、自己单独的安装方式；本包**不内联、不魔改**它们的代码；
-- **互操作契约可验证** —— slot order 分配、行隐藏归属、兄弟探测协议写在 `docs/INTEROP.md`，并由 `test/manifest.test.js` 断言；
-- **如实报告** —— `GET /api/dsh-as-aistudio/status` 与设置面板区分「已启用 / 已安装未启用 / 未安装」，缺失组件只会退化，不会把宿主带崩；
-- **web 与桌面端同构** —— 浏览器半侧只注册一个设置页标签、只发一次相对路径请求；没有 DOM 注入、没有 MutationObserver、没有键盘监听。
-
-### 组件
-
-| 组件 | 能力 | 仓库 |
-| --- | --- | --- |
-| `dsh-edit-turn` | 就地改提示词并重跑（回滚到那一条之前） | <https://github.com/DDDMUC/dsh-edit-turn> |
-| `dsh-rerun-turn` | 原位重跑：同一句提示词重新生成，后续轮次原样存活 | <https://github.com/DDDMUC/dsh-rerun-turn> |
-| `dsh-delete-turn` | 把一条消息 / 一个步骤 / 整条回复从模型上下文里拿掉 | <https://github.com/DDDMUC/dsh-delete-turn> |
-| `dsh-markdown-bubble` | 已发送的提示词按 Markdown 渲染 | <https://github.com/DDDMUC/dsh-markdown-bubble> |
-
-四个组件都是**可选依赖**（`optionalDependencies`）：装不上、被移除、离线都只会让对应那一行缺席，本包照常启动。
+- **一行搞定** —— 插件列表里只有 AI Studio 一行。四个组件是本包的 dependencies，由本包挂载，不再各自占一行（和 @linxin666/dsh-web-all 同一个模式）。
+- **组件仍是独立包** —— 每个都有自己的仓库与 cordis.patch.yml，单独安装照样工作；本包不复制任何组件逻辑：宿主半侧（路由、回滚、重放）就是组件自己，浏览器 factory 由 tools/vendor.mjs 从组件源码逐字剥离生成。
+- **副本不会漂移** —— npm run vendor 重新生成内联包，npm run build 重新生成大 bundle，verify:vendor / verify:build 是只读校验；测试里 vendor-sync / build-sync 会在副本过期时失败。
+- **一个挂了不影响其余** —— 四个 vendored factory 各自带 guard 挂载，一个抛错不会带走另外三个。
+- **互操作契约可验证** —— slot order 分配、行隐藏归属、兄弟探测协议写在 docs/INTEROP.md，并由组合矩阵测试断言。
+- **web 与桌面端同构** —— 同一份 dsh.client.platform: web bundle；没有 location.origin / window.open / navigator.* / dialog / popover。
 
 ### 安装
 
 ```sh
-# AI Studio 全家桶（studio + 四个组件一起启用）
 dsh plugin --profile web add dsh-as-aistudio
-
-# 只想要其中一个能力，就单独装那一个
-dsh plugin --profile web add dsh-delete-turn
 ```
 
-桌面端把 `--profile web` 换成 `--profile desktop` 即可，两端共用同一份浏览器半侧。
+桌面端把 --profile web 换成 --profile desktop。四个组件会作为 dependencies 一起装上，不需要逐个装。
 
 ### 使用
 
-装好后，动作条就在消息行上：
+装好后动作条就在消息行上：
 
-1. 悬停**你发出的那条消息** → 铅笔（编辑并重跑）；
-2. 悬停**模型的回复** → 重跑 / 删除；
-3. 「设置 → 插件」多出一个 **AI Studio** 标签页，列出每个组件的实时状态、版本、它占用的槽位，以及互操作契约的分配表。
+1. 悬停你发出的那条消息 → 铅笔（编辑并重跑）；
+2. 悬停模型的回复 → 重跑 / 删除；
+3. 设置 → 插件 多出一个 AI Studio 标签页，列出每个组件的实时状态、版本、占用的槽位，以及互操作契约分配表。
 
 ### 工作原理
 
-- 本包的 `cordis.patch.yml` 为**自己和四个组件**各插入一行，行的 `name` 就是组件的裸包名 —— 这是客户端模块扫描器解析 `dsh.client` 声明的方式；
-- 宿主侧只做一件事：读 loader 的条目树，回答「这个组件现在有没有启用的条目、装的是哪个版本」，走 loopback-only 的 `/api/dsh-as-aistudio/status`；
-- 浏览器侧只做一件事：往 `settings.plugins.tab` 注册一个标签页；
-- 条目树按 id 归并，所以「本包插入的行」与「组件自己的 bundle 插入的行」会合并成**一个**条目，而不是挂载两次；
-- 某个组件缺席时，它的那一行会在 import 阶段失败并被 loader 隔离，其余行照常启动。
-
-### 已修复 / 版本
-
-- 0.1.1 —— 契约补 §9「热重载纪律」（2026-10-01「点不动」事故：client bundle 单独热重载 + 宿主未重启 = 混合态）；新增 AGENTS.md 与三处版本号一致性测试。
-- 0.1.0 —— 首个版本：组合四个组件、固化互操作契约、报告组件状态。
+- **宿主半侧**（src/index.js）：await import 导入每个组件的宿主半侧并 ctx.plugin 挂进本 fiber —— 它们的 loopback 路由与回滚/重放服务因此就位。缺哪个报告哪个，绝不致命。
+- **浏览器半侧**（src/client.js，由 tools/build.mjs 生成）：单一大 bundle —— studio 自己的浏览器半侧 + 四个组件的 factory（各自 var module / var exports / const react，靠 var 提升共处一个 scope）。bundle 是按 Loader 行下发的，所以这是它们到达页面的唯一方式。
+- **为什么宿主半侧不内联**：宿主代码对插件列表不可见，复制它只会凭空多出一份要维护的东西。
+- **状态面板**：读 GET /api/dsh-as-aistudio/status，对每个组件报告 installed / hostMounted / version / ownRows（ownRows 大于 0 表示它还被独立安装着）。
 
 ### 已知限制
 
-- 动作条本身由四个组件各自渲染，本包不接管；某个组件缺席时它那一个按钮就不会出现，这符合预期；
-- 状态面板不提供开关：启用/禁用条目请在「设置 → 插件」的官方列表里做，那是平台自己的所有权；
-- 组件缺席时，宿主日志会有一条该条目的 import 失败记录。这是 loader 的诚实报错，不是本包的异常。
+- 四个组件的 browser factory 是生成副本。改了组件必须 npm run vendor && npm run build 再发本包；verify:vendor / verify:build 会拦住过期副本。
+- 组件缺席（有人手动删了依赖）时，它的 browser half 不会挂载，面板显示「已安装，宿主未挂载」或「未安装」。
+- 宿主版本常量只在进程启动时读一次：改了本包要重启宿主 + 硬刷新。
 
 ### 兼容性
 
-- DSH `>=0.1.6-alpha.2`（`0.2.0-rc.1` 实测通过）；
-- profile：`web`、`desktop`（`headless` 无 Web 界面，仅宿主半侧可用）；
-- 四个组件都可单独安装，也可以任意子集叠加本包。
+- DSH >=0.1.6-alpha.2（0.2.0-rc.1 实测通过）；
+- profile：web、desktop；
+- 四个组件都可单独安装，也可以任意子集和本包共存。
 
 ### License
 
@@ -93,79 +72,51 @@ MIT
 
 ### Why you need it
 
-What makes AI Studio pleasant is not the model: it is that **every step of a turn can be revisited**. Rewrite a prompt in place and run it again, regenerate a reply without disturbing what came later, remove a turn that should never have entered the context. DSH's session log is append-only and the platform only offers whole-transcript compaction (`/compact`) — there is no per-turn edit, re-run or delete.
-
-Four components supply that layer. This package makes them **installable, compatible and visible**:
-
-- **installable** — one install turns on the whole action strip;
-- **compatible** — each component is independent and any subset coexists; the interop contract is pinned here and tested;
-- **visible** — which component is installed, enabled or absent, on one panel.
+What makes AI Studio pleasant is not the model: it is that every step of a turn can be revisited. DSH offers whole-transcript compaction only. Four components add turn-level edit, re-run and delete; this package makes them installable, compatible and visible.
 
 ### Features
 
-- **One install, the whole strip** — installing this package enables edit, re-run, delete and the Markdown bubble;
-- **Any subset works** — one component alone is a complete feature; two, three, four, or components plus this package never double-mount and never fight over a row;
-- **Components stay independent packages** — each keeps its own repo, its own `cordis.patch.yml` and its own install path; this package does not inline or rewrite their code;
-- **A verifiable interop contract** — slot orders, row-hide ownership and the sibling probe protocol live in `docs/INTEROP.md` and are asserted by `test/manifest.test.js`;
-- **Honest reporting** — `GET /api/dsh-as-aistudio/status` and the settings panel distinguish enabled / installed-not-enabled / absent; a missing component degrades, never breaks the host;
-- **Web and desktop are one implementation** — the browser half registers one settings tab and makes one relative-path request; no DOM injection, no MutationObserver, no keyboard listener.
-
-### Components
-
-| Component | What it does | Repo |
-| --- | --- | --- |
-| `dsh-edit-turn` | Rewrite a prompt in place and re-run it (rolls back to just before that turn) | <https://github.com/DDDMUC/dsh-edit-turn> |
-| `dsh-rerun-turn` | Infix re-run: regenerate one reply from the same prompt, later turns survive | <https://github.com/DDDMUC/dsh-rerun-turn> |
-| `dsh-delete-turn` | Remove a message, a step or a whole reply from the derived model context | <https://github.com/DDDMUC/dsh-delete-turn> |
-| `dsh-markdown-bubble` | Render sent prompts as Markdown | <https://github.com/DDDMUC/dsh-markdown-bubble> |
-
-All four are **optional dependencies**: a component that cannot be installed, was removed, or is unavailable offline simply misses its row; the studio still boots.
+- **One row** — the plugin list shows only AI Studio. The four components are dependencies mounted by this package and no longer occupy rows of their own (the @linxin666/dsh-web-all pattern).
+- **Components stay independent packages** — each keeps its own repo and its own cordis.patch.yml and works alone. This package copies no component logic: the host halves ARE the components, and the browser factories are lifted verbatim from their sources by tools/vendor.mjs.
+- **The vendored copy cannot drift** — npm run vendor regenerates it, npm run build regenerates the bundle, and verify:vendor / verify:build are read-only gates; the test suite fails on a stale copy.
+- **One failure does not take the rest** — each vendored factory mounts behind its own guard.
+- **A verifiable interop contract** — slot orders, row-hide ownership and the sibling probe protocol live in docs/INTEROP.md and are asserted by the combination matrix.
+- **Web and desktop are one implementation** — the same dsh.client.platform: web bundle; no location.origin, window.open, navigator.*, dialog or popover.
 
 ### Install
 
 ```sh
-# The whole AI Studio set (studio plus its four components)
 dsh plugin --profile web add dsh-as-aistudio
-
-# Or just one capability
-dsh plugin --profile web add dsh-delete-turn
 ```
 
-On the desktop app use `--profile desktop`; both share the same browser half.
+Use --profile desktop on the desktop app. The four components arrive as dependencies; there is nothing else to install.
 
 ### Usage
 
-The action strip lives on the message rows:
-
-1. Hover **a message you sent** → the pencil (edit and re-run);
-2. Hover **a model reply** → re-run / delete;
-3. Settings → Plugins gains an **AI Studio** tab listing each component's live state, version, the slot it claims, and the interop allocation.
+1. Hover a message you sent → the pencil (edit and re-run);
+2. Hover a model reply → re-run / delete;
+3. Settings → Plugins gains an AI Studio tab listing each component's live state, version, the slot it claims, and the interop allocation.
 
 ### How it works
 
-- This package's `cordis.patch.yml` inserts one row for itself and one per component, each named by the component's bare package name — that is how the client-module scanner resolves a `dsh.client` declaration;
-- The host half does one thing: read the loader's entry tree and answer "does this component have an enabled entry, and which version is installed", over a loopback-only `/api/dsh-as-aistudio/status`;
-- The browser half does one thing: register a tab into `settings.plugins.tab`;
-- The entry tree is keyed by id, so a row inserted by this patch and the same row inserted by a component's own bundle merge into **one** entry instead of mounting the plugin twice;
-- A missing component fails at import and is isolated by the loader; every other row still starts.
-
-### Fixes / versions
-
-- 0.1.1 — contract gains §9 "hot reload discipline" (the 2026-10-01 dead-button incident: a client bundle hot-reloaded alone while the host kept running is a mixed state); adds AGENTS.md and a three-place version check.
-- 0.1.0 — first release: composes the four components, pins the interop contract, reports component status.
+- **Host half** (src/index.js): imports each component's host half and applies it into this fiber with ctx.plugin, which is what puts its loopback routes and its rollback / replay services in place. A missing one is reported, never fatal.
+- **Browser half** (src/client.js, generated by tools/build.mjs): one bundle — the studio's own browser half plus the four component factories, each with its own var module / var exports / const react in one scope via hoisting. A bundle is served per Loader row, so this is the only way they can reach the page.
+- **Why the host halves are not vendored**: host code is invisible to the plugin list, so copying it would only create a second thing to fix.
+- **The panel** reads GET /api/dsh-as-aistudio/status and reports installed / hostMounted / version / ownRows per component (ownRows greater than 0 means it is also installed standalone).
 
 ### Known limitations
 
-- The action strip is rendered by the components themselves; this package does not take it over. A missing component means its button is absent, which is the point;
-- The panel reports but does not toggle: enable or disable a row in the platform's own Settings → Plugins list, which owns that state;
-- A missing component leaves one import failure in the host log. That is the loader being honest, not an exception from this package.
+- The four browser factories are a generated copy. After changing a component, run npm run vendor && npm run build before releasing this package; the verify gates block a stale copy.
+- A component that is somehow absent is not mounted and the panel says so.
+- The host version constant is read once at process start: after changing this package, restart the host and hard-refresh.
 
 ### Compatibility
 
-- DSH `>=0.1.6-alpha.2` (verified on `0.2.0-rc.1`);
-- Profiles: `web`, `desktop` (`headless` has no web surface; the host half still loads);
-- Every component installs alone, and any subset composes with this package.
+- DSH >=0.1.6-alpha.2 (verified on 0.2.0-rc.1);
+- Profiles: web, desktop;
+- Every component installs alone, and any subset coexists with this package.
 
 ### License
 
 MIT
+
