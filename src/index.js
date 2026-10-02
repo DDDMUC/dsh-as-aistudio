@@ -64,22 +64,32 @@ export async function mountComponentHosts(ctx) {
       mounted.set(component.id, { mounted: false, reason: 'no-plugin-shape' })
       continue
     }
+    // A mount is only honest once the fiber has SETTLED. A component whose
+    // apply() threw synchronously is caught below, but one whose start failed
+    // asynchronously — a tool registered twice, a route refused — rejects after
+    // ctx.plugin() has already returned. Reporting it optimistically as mounted
+    // is exactly the lie that shipped: the host log said "failed to start" while
+    // /status said 4/4. So the record is created optimistic and CORRECTED when
+    // the fiber settles, and statusOf reads the record, not the promise.
+    const record = { mounted: true, reason: null, dispose: null }
     try {
       const fiber = ctx.plugin(plugin)
-      // A rejected start is still a start we know nothing about yet: record it
-      // when it settles rather than leaving the row silently half-mounted.
+      if (fiber !== undefined && fiber !== null && typeof fiber.dispose === 'function') {
+        record.dispose = fiber.dispose.bind(fiber)
+      }
       if (fiber && typeof fiber.then === 'function') {
-        fiber.then(
+        Promise.resolve(fiber).then(
           () => {},
           (error) => {
+            record.mounted = false
+            record.reason = 'start-failed'
             console.error('[' + STUDIO_ID + '] component ' + component.id + ' failed to start:', error)
           },
         )
       }
-      mounted.set(component.id, {
-        mounted: true,
-        dispose: typeof fiber !== 'undefined' && fiber !== null && typeof fiber.dispose === 'function' ? fiber.dispose.bind(fiber) : null,
-      })
+      // A synchronous apply failure also arrives as a throw here, and it must win
+      // over the optimistic value we are about to store.
+      mounted.set(component.id, record)
     } catch (error) {
       mounted.set(component.id, { mounted: false, reason: 'apply-failed', detail: String((error && error.message) || error) })
     }
