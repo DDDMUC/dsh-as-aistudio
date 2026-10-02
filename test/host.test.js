@@ -132,10 +132,70 @@ test('mountComponentHosts records why a component did not mount', async () => {
   for (const [id, record] of hosts) {
     if (record.mounted === false) {
       assert.equal(typeof record.reason, 'string', id + ': a reason accompanies a failed mount')
-      assert.ok(['import-failed', 'apply-failed', 'no-plugin-shape'].includes(record.reason), id + ': a known reason')
+      assert.ok(['import-failed', 'apply-failed', 'no-plugin-shape', 'start-failed'].includes(record.reason), id + ': a known reason')
     } else {
-      assert.equal(record.reason, undefined, id + ': a mounted component carries no reason')
+      assert.ok(record.reason === null || record.reason === undefined, id + ': a mounted component carries no reason')
     }
+  }
+})
+
+test('a component whose start rejects is reported as NOT mounted', async () => {
+  // The shipped defect: ctx.plugin() returns, so the record said mounted: true,
+  // and the real failure (a tool registered twice by a standalone install of the
+  // same component) rejected AFTER that. /status then claimed 4/4 while the host
+  // log said "failed to start". The record must therefore be corrected when the
+  // fiber settles, and statusOf must read the record.
+  const seen = new Map()
+  const ctx = {
+    get: (service) => (service === 'webServer' ? webServerStub().webServer : undefined),
+    plugin: () => ({ dispose() {}, then: (onOk, onFail) => Promise.resolve().then(onFail, new Error('tool already registered')) }),
+    effect: (f) => f(),
+    inject: () => {},
+    on: () => {},
+    logger: { warn: () => {}, error: () => {} },
+  }
+  const hosts = await mountComponentHosts(ctx)
+  // The rejection settles on a later microtask, so let the queue drain.
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  for (const [id, record] of hosts) {
+    assert.equal(record.mounted, false, id + ': a rejected start is not a mount')
+    assert.equal(record.reason, 'start-failed', id + ': the reason names the failure')
+    seen.set(id, record)
+  }
+  const status = statusOf({ get: () => undefined }, hosts)
+  assert.equal(status.summary.mounted, 0, 'nothing counts as mounted when every start failed')
+  for (const component of status.components) {
+    assert.equal(component.hostMounted, false, component.id)
+    assert.equal(component.hostReason, 'start-failed', component.id)
+  }
+})
+
+test('a component whose start rejects is reported as NOT mounted', async () => {
+  // The shipped defect: ctx.plugin() returns, so the record said mounted: true,
+  // and the real failure (a tool registered twice by a standalone install of the
+  // same component) rejected AFTER that. /status then claimed 4/4 while the host
+  // log said "failed to start". The record must therefore be corrected when the
+  // fiber settles, and statusOf must read the record.
+  const ctx = {
+    get: (service) => (service === 'webServer' ? webServerStub().webServer : undefined),
+    plugin: () => ({ dispose() {}, then: (onOk, onFail) => Promise.resolve().then(onFail, new Error('tool already registered')) }),
+    effect: (f) => f(),
+    inject: () => {},
+    on: () => {},
+    logger: { warn: () => {}, error: () => {} },
+  }
+  const hosts = await mountComponentHosts(ctx)
+  // The rejection settles on a later microtask, so let the queue drain.
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  for (const [id, record] of hosts) {
+    assert.equal(record.mounted, false, id + ': a rejected start is not a mount')
+    assert.equal(record.reason, 'start-failed', id + ': the reason names the failure')
+  }
+  const status = statusOf({ get: () => undefined }, hosts)
+  assert.equal(status.summary.mounted, 0, 'nothing counts as mounted when every start failed')
+  for (const component of status.components) {
+    assert.equal(component.hostMounted, false, component.id)
+    assert.equal(component.hostReason, 'start-failed', component.id)
   }
 })
 
