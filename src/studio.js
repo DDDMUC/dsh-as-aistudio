@@ -49,7 +49,7 @@ window.__ModuleLoader__.load({
     const NS = 'dsh-as-aistudio'
 
     /** Keep in sync with package.json and src/components.js. */
-    const PLUGIN_VERSION = '0.2.2'
+    const PLUGIN_VERSION = '0.2.4'
 
     /** Presence marker the live verifier reads. */
     const DEBUG_KEY = '__DSH_AS_AISTUDIO__'
