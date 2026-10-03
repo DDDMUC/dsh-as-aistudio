@@ -6,21 +6,25 @@
 //
 // Two jobs:
 //
-//   1. mount each component's HOST half. Those are the loopback routes and the
-//      rollback / replay services the browser halves call. They stay where they
-//      are - imported from the installed package and applied into this fiber -
-//      because host code is invisible to the plugin list and duplicating it
-//      would create a second thing to fix. A component that is absent is
-//      reported, never fatal.
+//   1. describe how a component's HOST half is mounted - which is not done
+//      here. Each component has a row in cordis.patch.yml named
+//      `dsh-as-aistudio/<suffix>` whose config.plugin names the component
+//      package; src/shell.js is what that row mounts. The host half (its
+//      loopback routes and its rollback / replay services) therefore stays in
+//      the component package, and the Loader owns the row's lifetime and its
+//      failure. pluginOf() is the shape judgement the shell shares with this
+//      module, so there is one answer to "what is a plugin".
 //
 //   2. answer the only question the studio exists to answer:
 //
 //        GET /api/dsh-as-aistudio/status
 //
-//      For each component: is it installed, at which version, and is its host
-//      half actually mounted (which is what makes its routes answer)? The
+//      For each component: is it installed, at which version, and is its row
+//      REALLY live - read from ctx.loader.entries() and the row fiber's own
+//      state, never from an optimistic record of what we hoped we mounted. The
 //      browser half reads this to decide which vendored factories to mount, so
-//      a missing component can never be offered as a button that cannot work.
+//      a component whose host half is not up can never be offered as a button
+//      that cannot work.
 //
 // The module imports nothing from the DSH SDK - the loader and the web server
 // are resolved through the cordis context at call time - so it loads and
@@ -29,72 +33,32 @@ import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { basename, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { COMPONENTS, STUDIO_ID, STUDIO_VERSION } from './components.js'
+import { COMPONENTS, rowNameOf, STUDIO_ID, STUDIO_VERSION } from './components.js'
 
 export const name = STUDIO_ID
 
 const ROUTE_PREFIX = '/api/dsh-as-aistudio'
 
 /**
- * Mount every component host half that can be imported.
+ * The plugin callback inside a component module namespace, or null when the
+ * module has no usable plugin shape.
  *
- * A host half is the component's own plugin function; applying it into this
- * fiber registers its routes exactly as its own bundle row would have. The
- * order is the manifest order (edit, rerun, delete, render) and each mount is
- * independent: one failing import or one throwing apply is reported and the
- * rest still mount, because any-subset-works is the whole point.
+ * The judgement is the one this package has always applied - a function, or an
+ * object carrying apply() - with one tolerance the components need:
+ * dsh-edit-turn and dsh-delete-turn export `default`, dsh-rerun-turn and
+ * dsh-markdown-bubble export only named members, so the module namespace itself
+ * (which carries apply) is as valid as a default export. src/shell.js imports
+ * this so there is exactly one answer to the question.
  *
- * @param ctx - this plugin's context.
- * @returns per component: mounted, and why not when applicable.
+ * @param namespace - the imported component module.
+ * @returns the plugin to hand to ctx.plugin, or null.
  */
-export async function mountComponentHosts(ctx) {
-  const mounted = new Map()
-  for (const component of COMPONENTS) {
-    let plugin
-    try {
-      // The components are dependencies of this package, so the bare specifier
-      // resolves from the profile that installed the studio.
-      const namespace = await import(component.package)
-      plugin = namespace.default ?? namespace
-    } catch (error) {
-      mounted.set(component.id, { mounted: false, reason: 'import-failed', detail: String((error && error.message) || error) })
-      continue
-    }
-    if (typeof plugin !== 'function' && !(typeof plugin === 'object' && plugin !== null && typeof plugin.apply === 'function')) {
-      mounted.set(component.id, { mounted: false, reason: 'no-plugin-shape' })
-      continue
-    }
-    // A mount is only honest once the fiber has SETTLED. A component whose
-    // apply() threw synchronously is caught below, but one whose start failed
-    // asynchronously — a tool registered twice, a route refused — rejects after
-    // ctx.plugin() has already returned. Reporting it optimistically as mounted
-    // is exactly the lie that shipped: the host log said "failed to start" while
-    // /status said 4/4. So the record is created optimistic and CORRECTED when
-    // the fiber settles, and statusOf reads the record, not the promise.
-    const record = { mounted: true, reason: null, dispose: null }
-    try {
-      const fiber = ctx.plugin(plugin)
-      if (fiber !== undefined && fiber !== null && typeof fiber.dispose === 'function') {
-        record.dispose = fiber.dispose.bind(fiber)
-      }
-      if (fiber && typeof fiber.then === 'function') {
-        Promise.resolve(fiber).then(
-          () => {},
-          (error) => {
-            record.mounted = false
-            record.reason = 'start-failed'
-            console.error('[' + STUDIO_ID + '] component ' + component.id + ' failed to start:', error)
-          },
-        )
-      }
-      // A synchronous apply failure also arrives as a throw here, and it must win
-      // over the optimistic value we are about to store.
-      mounted.set(component.id, record)
-    } catch (error) {
-      mounted.set(component.id, { mounted: false, reason: 'apply-failed', detail: String((error && error.message) || error) })
-    }
-  }
-  return mounted
+export function pluginOf(namespace) {
+  if (namespace === null || namespace === undefined) return null
+  const candidate = namespace.default ?? namespace.plugin ?? namespace
+  if (typeof candidate === 'function') return candidate
+  if (typeof candidate === 'object' && candidate !== null && typeof candidate.apply === 'function') return candidate
+  return null
 }
 
 // --- package resolution --------------------------------------------------------
@@ -186,7 +150,44 @@ export function inspectPackage(pkg, anchors = resolveAnchors(undefined)) {
 
 // --- loader view ---------------------------------------------------------------
 
-/** Every entry in the loader tree, flattened, or null when no loader is reachable. */
+// Cordis fiber lifecycle states, named (cordis/lib: state 2 active, 3 failed
+// after a rejected start, 5 unloading; 0 and 1 are the pre-start states).
+const FIBER_ACTIVE = 2
+const FIBER_FAILED = 3
+const FIBER_UNLOADING = 5
+
+/**
+ * One row fiber's lifecycle as a word, so the status document never leaks raw
+ * constants and never reports a mount it cannot see.
+ * @param fiber - a Loader entry's fiber, or anything else.
+ * @returns 'none' (the entry never started), 'starting', 'active', 'failed',
+ *   'stopping', 'disposed', or 'unknown'.
+ */
+export function fiberStateOf(fiber) {
+  if (fiber === null || fiber === undefined) return 'none'
+  if (fiber.uid === null || fiber.uid === undefined) return 'disposed'
+  if (typeof fiber.state !== 'number') return 'unknown'
+  if (fiber.state === FIBER_ACTIVE) return 'active'
+  if (fiber.state === FIBER_FAILED) return 'failed'
+  if (fiber.state === FIBER_UNLOADING) return 'stopping'
+  return 'starting'
+}
+
+/** Why a row that is not active is not active: the event vocabulary of /status. */
+const FIBER_REASONS = {
+  none: 'not-started',
+  starting: 'starting',
+  failed: 'start-failed',
+  stopping: 'stopping',
+  disposed: 'disposed',
+  unknown: 'unknown-state',
+}
+
+/**
+ * Every entry in the loader tree, flattened, or null when no loader is reachable.
+ * @param ctx - the plugin context.
+ * @returns one row per entry: id, name, disabled, and the row fiber's state.
+ */
 export function loaderEntries(ctx) {
   const loader = ctx && typeof ctx.get === 'function' ? safeGet(ctx, 'loader') : undefined
   if (!loader || typeof loader.entries !== 'function') return null
@@ -198,6 +199,7 @@ export function loaderEntries(ctx) {
         id: typeof options.id === 'string' ? options.id : null,
         name: typeof options.name === 'string' ? options.name : null,
         disabled: Boolean(entry && entry.disabled),
+        fiberState: fiberStateOf(entry && entry.fiber ? entry.fiber : null),
       })
     }
   } catch {
@@ -207,19 +209,51 @@ export function loaderEntries(ctx) {
 }
 
 /**
+ * The loader's verdict on one component, with no optimism in it: the row has to
+ * exist, be enabled, and have a fiber that reached 'active'.
+ *
+ * The row this studio inserts is named `<package>/<suffix>`; a component
+ * installed standalone next to the studio answers under its own package name,
+ * and that row counts too (it mounts the same host half - see docs/INTEROP.md
+ * section 11 for why the studio's own row is preferred when both exist).
+ *
+ * @param component - a manifest entry.
+ * @param entries - loaderEntries(ctx), or null when no loader is reachable.
+ * @param installed - whether the component package resolves (inspectPackage).
+ * @returns { hostMounted, hostReason, hostRow }: null/true/false, the reason
+ *   when not mounted, and the row name that answered.
+ */
+export function hostStateOf(component, entries, installed) {
+  const ownRow = rowNameOf(component)
+  if (entries === null) return { hostMounted: null, hostReason: null, hostRow: null }
+  const row = entries.find((entry) => entry.name === ownRow) ?? entries.find((entry) => entry.name === component.package) ?? null
+  if (row === null) {
+    return { hostMounted: false, hostReason: installed ? 'row-missing' : 'not-installed', hostRow: ownRow }
+  }
+  if (row.disabled) return { hostMounted: false, hostReason: 'disabled', hostRow: row.name }
+  if (row.fiberState === 'active') return { hostMounted: true, hostReason: null, hostRow: row.name }
+  // A dead row whose package does not resolve is a missing dependency, whatever
+  // the fiber did: the shell's own import of it is the failure, and "not
+  // installed" is the actionable half of that answer.
+  if (!installed) return { hostMounted: false, hostReason: 'not-installed', hostRow: row.name }
+  // A row that never started, with its package installed, is an entry the Loader
+  // never got to (no fiber to inspect).
+  const reason = row.fiberState === 'none' ? 'not-started' : FIBER_REASONS[row.fiberState] ?? 'unknown-state'
+  return { hostMounted: false, hostReason: reason, hostRow: row.name }
+}
+
+/**
  * The status document: what is installed, what is mounted, and what the browser
  * half should therefore mount.
  * @param ctx - the plugin context (only get is used).
- * @param hosts - the host mount table from mountComponentHosts, when it has run;
- *   without it the route reports installed state only.
  * @returns the status document.
  */
-export function statusOf(ctx, hosts = null) {
+export function statusOf(ctx) {
   const entries = loaderEntries(ctx)
   const anchors = resolveAnchors(ctx)
   const components = COMPONENTS.map((component) => {
     const found = inspectPackage(component.package, anchors)
-    const host = hosts === null ? null : hosts.get(component.id) ?? null
+    const host = hostStateOf(component, entries, found.installed)
     // A component that still appears as its own profile row is a real
     // configuration (a standalone install next to the studio). The loader merges
     // rows by id, so this is informational, not an error.
@@ -232,8 +266,9 @@ export function statusOf(ctx, hosts = null) {
       repo: component.repo,
       installed: found.installed,
       version: found.version,
-      hostMounted: host === null ? null : host.mounted === true,
-      hostReason: host === null || host.mounted === true ? null : host.reason,
+      hostMounted: host.hostMounted,
+      hostReason: host.hostReason,
+      hostRow: host.hostRow,
       ownRows: rows === null ? null : rows.filter((row) => !row.disabled).length,
     }
   })
@@ -318,26 +353,13 @@ function guard(req, res) {
 // --- plugin --------------------------------------------------------------------
 
 export async function apply(ctx) {
-  // The components mount first, so the status route can report the truth about
-  // them the moment it answers.
-  const hosts = await mountComponentHosts(ctx)
-  ctx.effect(
-    () => () => {
-      // Children mount after their parent, so dispose in reverse.
-      for (const component of [...COMPONENTS].reverse()) {
-        const record = hosts.get(component.id)
-        if (record && typeof record.dispose === 'function') {
-          try {
-            record.dispose()
-          } catch (error) {
-            console.warn('[' + STUDIO_ID + '] disposing ' + component.id + ' failed:', error)
-          }
-        }
-      }
-    },
-    STUDIO_ID + ': component hosts',
-  )
-
+  // Nothing is mounted here any more: the four component rows in
+  // cordis.patch.yml mount the component host halves through src/shell.js, and
+  // the Loader owns their lifetime. Mounting them here as well would run every
+  // component twice in one process and collide on its routes.
+  //
+  // The status route reads the Loader per request, so it stays honest across a
+  // row being disabled, restarted or added without touching this fiber.
   const registerRoutes = (webServer, fiber) => {
     fiber.effect(() =>
       webServer.register({
@@ -350,7 +372,7 @@ export async function apply(ctx) {
             return
           }
           try {
-            sendJson(res, 200, statusOf(ctx, hosts))
+            sendJson(res, 200, statusOf(ctx))
           } catch (error) {
             sendJson(res, 500, { ok: false, code: 'internal', error: String((error && error.message) || error) })
           }

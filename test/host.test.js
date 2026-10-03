@@ -1,19 +1,18 @@
-// Host-half tests: the shell that mounts the four component host halves, and the
-// status route that reports what actually mounted.
+// Host-half tests: what the studio reports about the four component rows, and
+// the status route that reports it.
 //
-// Since the self-contained rewrite the studio has no rows of its own for the
-// components: it imports each package and applies it into this fiber. So the
-// interesting questions are all about that mount - does a failing component stop
-// the others, does a missing one get reported rather than thrown, and does the
-// route tell the truth about what is live.
+// Since the row rewrite the studio mounts NOTHING itself. Each component is
+// mounted by its own row in cordis.patch.yml (src/shell.js is what that row
+// resolves to), and /status reads the Loader to say whether that row is really
+// live. So the interesting questions are all about that reading: a row that
+// never started, one the user disabled, one whose fiber failed after starting -
+// and the rule that none of them may be reported as mounted.
 //
 //   node --test test/*.test.js
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { apply, inspectPackage, loaderEntries, mountComponentHosts, name, resolveAnchors, statusOf } from '../src/index.js'
-import { COMPONENTS, STUDIO_ID } from '../src/components.js'
-
-const SESSION_ID = 'session-11111111-2222-4333-8444-555555555555'
+import { apply, fiberStateOf, hostStateOf, inspectPackage, loaderEntries, name, resolveAnchors, statusOf } from '../src/index.js'
+import { COMPONENTS, STUDIO_ID, rowNameOf } from '../src/components.js'
 
 /** A webServer stub that records the registrations. */
 function webServerStub() {
@@ -31,12 +30,12 @@ function webServerStub() {
 
 /**
  * A context stub. The host half resolves services lazily, so the loader and the
- * webServer are handed over through get(); plugin() records the mounts.
+ * webServer are handed over through get(); plugin() records the mounts, which
+ * since the row rewrite must stay empty.
  */
 function contextStub(options = {}) {
   const server = webServerStub()
   const mounted = []
-  const thrown = []
   const ctx = {
     get: (service) => {
       if (service === 'webServer') return server.webServer
@@ -45,10 +44,6 @@ function contextStub(options = {}) {
     },
     plugin: (fn) => {
       mounted.push(fn)
-      if (options.failing !== undefined && options.failing.includes(fn)) {
-        thrown.push(fn)
-        throw new Error('component refused to mount')
-      }
       return { dispose() {} }
     },
     effect: (factory) => {
@@ -63,7 +58,40 @@ function contextStub(options = {}) {
     on: () => {},
     logger: { warn: () => {}, error: () => {}, debug: () => {}, info: () => {} },
   }
-  return { ctx, server, mounted, thrown }
+  return { ctx, server, mounted }
+}
+
+/** A live row fiber: active, and not disposed. */
+function liveFiber(uid) {
+  return { uid, state: 2 }
+}
+
+/**
+ * The loader as the studio sees it: its own row, then one row per component,
+ * each named `dsh-as-aistudio/<suffix>` exactly as the bundle patch inserts it.
+ * @param shape - per component override: { fiber, disabled, name }.
+ */
+function loaderRows(shape = () => ({})) {
+  const rows = [{ options: { id: STUDIO_ID, name: STUDIO_ID }, disabled: false, fiber: liveFiber(9) }]
+  COMPONENTS.forEach((component, index) => {
+    const override = shape(component, index) || {}
+    rows.push({
+      options: { id: 'dsh-as-aistudio-' + component.suffix, name: override.name ?? rowNameOf(component) },
+      disabled: Boolean(override.disabled),
+      fiber: 'fiber' in override ? override.fiber : liveFiber(20 + index),
+    })
+  })
+  return rows
+}
+
+/** loaderEntries(ctx) against a flat row list. */
+function entriesOf(rows) {
+  return loaderEntries({ get: (service) => (service === 'loader' ? { entries: () => rows } : undefined) })
+}
+
+/** statusOf(ctx) against a flat row list. */
+function statusWith(rows) {
+  return statusOf({ get: (service) => (service === 'loader' ? { entries: () => rows } : undefined) })
 }
 
 test('the host half names the studio', () => {
@@ -86,117 +114,89 @@ test('a throwing service accessor reads as absent', () => {
   assert.equal(loaderEntries({ get: () => { throw new Error('no such service') } }), null)
 })
 
-test('the loader view flattens the tree and reports absence', () => {
+test('the loader view flattens the tree and carries each row fiber state', () => {
   assert.equal(loaderEntries({ get: () => undefined }), null)
-  const rows = loaderEntries({ get: () => ({ entries: () => [{ options: { id: 'x', name: 'dsh-edit-turn' } }] }) })
-  assert.deepEqual(rows, [{ id: 'x', name: 'dsh-edit-turn', disabled: false }])
+  const rows = loaderEntries({
+    get: () => ({
+      entries: () => [
+        { options: { id: 'x', name: 'dsh-as-aistudio/edit' }, disabled: false, fiber: liveFiber(3) },
+        { options: { id: 'y', name: 'dsh-as-aistudio/rerun' }, disabled: true },
+        { options: { id: 'z', name: 'dsh-edit-turn' }, disabled: false, fiber: { uid: 4, state: 3 } },
+      ],
+    }),
+  })
+  assert.deepEqual(rows, [
+    { id: 'x', name: 'dsh-as-aistudio/edit', disabled: false, fiberState: 'active' },
+    { id: 'y', name: 'dsh-as-aistudio/rerun', disabled: true, fiberState: 'none' },
+    { id: 'z', name: 'dsh-edit-turn', disabled: false, fiberState: 'failed' },
+  ])
 })
 
-test('inspectPackage reports an absence instead of throwing', () => {
-  const found = inspectPackage('dsh-a-package-that-does-not-exist', ['/nonexistent-root'])
-  assert.equal(found.installed, false)
-  assert.equal(found.version, null)
+test('a fiber state is a word, never a raw constant', () => {
+  assert.equal(fiberStateOf(null), 'none')
+  assert.equal(fiberStateOf(undefined), 'none')
+  assert.equal(fiberStateOf({ uid: 1, state: 0 }), 'starting')
+  assert.equal(fiberStateOf({ uid: 1, state: 1 }), 'starting')
+  assert.equal(fiberStateOf({ uid: 1, state: 2 }), 'active')
+  assert.equal(fiberStateOf({ uid: 1, state: 3 }), 'failed')
+  assert.equal(fiberStateOf({ uid: 1, state: 5 }), 'stopping')
+  assert.equal(fiberStateOf({ uid: null, state: 2 }), 'disposed')
+  assert.equal(fiberStateOf({}), 'disposed', 'a fiber without a uid has been disposed')
+  assert.equal(fiberStateOf({ uid: 2 }), 'unknown')
 })
 
-// --- the component mount -------------------------------------------------------
+// --- the host mount ------------------------------------------------------------
 
-test('apply mounts every component host half, in manifest order', async () => {
+test('the host half mounts nothing itself: the component rows do', async () => {
+  // Mounting the components here as well is exactly the double-mount the row
+  // rewrite removed: every component would run twice in one process and the
+  // second copy would collide on its loopback routes.
   const stub = contextStub()
   await apply(stub.ctx)
-  assert.equal(stub.mounted.length, COMPONENTS.length, 'one mount per component')
-  assert.equal(stub.thrown.length, 0, 'a healthy stub refuses none')
+  assert.equal(stub.mounted.length, 0, 'the studio plugin mounts no component')
+  assert.deepEqual([...stub.server.routes.keys()], ['/api/dsh-as-aistudio/status'], 'it registers its status route only')
 })
 
-test('a component that refuses to mount does not stop the others', async () => {
-  const failing = () => { throw new Error('refused') }
-  const mounts = []
-  const ctx = {
-    get: (service) => (service === 'webServer' ? webServerStub().webServer : undefined),
-    plugin: (fn) => {
-      mounts.push(fn)
-      if (fn === failing) throw new Error('refused')
-      return { dispose() {} }
-    },
-    effect: (f) => f(),
-    inject: () => {},
-    on: () => {},
-    logger: { warn: () => {}, error: () => {} },
-  }
-  await apply(ctx)
-  assert.equal(mounts.length, COMPONENTS.length, 'every component was still attempted')
-})
-
-test('mountComponentHosts records why a component did not mount', async () => {
-  const hosts = await mountComponentHosts({ plugin: () => ({ dispose() {} }) })
-  assert.equal(hosts.size, COMPONENTS.length)
-  for (const [id, record] of hosts) {
-    if (record.mounted === false) {
-      assert.equal(typeof record.reason, 'string', id + ': a reason accompanies a failed mount')
-      assert.ok(['import-failed', 'apply-failed', 'no-plugin-shape', 'start-failed'].includes(record.reason), id + ': a known reason')
-    } else {
-      assert.ok(record.reason === null || record.reason === undefined, id + ': a mounted component carries no reason')
-    }
+test('a live component row reads as mounted', () => {
+  const entries = entriesOf(loaderRows())
+  for (const component of COMPONENTS) {
+    assert.deepEqual(
+      hostStateOf(component, entries, true),
+      { hostMounted: true, hostReason: null, hostRow: rowNameOf(component) },
+      component.id,
+    )
   }
 })
 
-test('a component whose start rejects is reported as NOT mounted', async () => {
-  // The shipped defect: ctx.plugin() returns, so the record said mounted: true,
-  // and the real failure (a tool registered twice by a standalone install of the
-  // same component) rejected AFTER that. /status then claimed 4/4 while the host
-  // log said "failed to start". The record must therefore be corrected when the
-  // fiber settles, and statusOf must read the record.
-  const seen = new Map()
-  const ctx = {
-    get: (service) => (service === 'webServer' ? webServerStub().webServer : undefined),
-    plugin: () => ({ dispose() {}, then: (onOk, onFail) => Promise.resolve().then(onFail, new Error('tool already registered')) }),
-    effect: (f) => f(),
-    inject: () => {},
-    on: () => {},
-    logger: { warn: () => {}, error: () => {} },
-  }
-  const hosts = await mountComponentHosts(ctx)
-  // The rejection settles on a later microtask, so let the queue drain.
-  await new Promise((resolve) => setTimeout(resolve, 20))
-  for (const [id, record] of hosts) {
-    assert.equal(record.mounted, false, id + ': a rejected start is not a mount')
-    assert.equal(record.reason, 'start-failed', id + ': the reason names the failure')
-    seen.set(id, record)
-  }
-  const status = statusOf({ get: () => undefined }, hosts)
-  assert.equal(status.summary.mounted, 0, 'nothing counts as mounted when every start failed')
-  for (const component of status.components) {
-    assert.equal(component.hostMounted, false, component.id)
-    assert.equal(component.hostReason, 'start-failed', component.id)
+test('any row that is not active reads as NOT mounted, with its reason', () => {
+  const cases = [
+    ['never started', { fiber: undefined }, true, 'not-started'],
+    ['never started because the package is missing', { fiber: undefined }, false, 'not-installed'],
+    ['failed to start because the package is missing', { fiber: { uid: 41, state: 3 } }, false, 'not-installed'],
+    ['disabled by the user', { disabled: true }, true, 'disabled'],
+    ['start failed', { fiber: { uid: 41, state: 3 } }, true, 'start-failed'],
+    ['still starting', { fiber: { uid: 41, state: 0 } }, true, 'starting'],
+    ['stopping', { fiber: { uid: 41, state: 5 } }, true, 'stopping'],
+    ['disposed', { fiber: { uid: null, state: 2 } }, true, 'disposed'],
+  ]
+  for (const [label, override, installed, reason] of cases) {
+    const entries = entriesOf(loaderRows((component) => (component.id === COMPONENTS[1].id ? override : {})))
+    const verdict = hostStateOf(COMPONENTS[1], entries, installed)
+    assert.equal(verdict.hostMounted, false, label + ': an inert row is not a mount')
+    assert.equal(verdict.hostReason, reason, label + ': the reason names the failure')
   }
 })
 
-test('a component whose start rejects is reported as NOT mounted', async () => {
-  // The shipped defect: ctx.plugin() returns, so the record said mounted: true,
-  // and the real failure (a tool registered twice by a standalone install of the
-  // same component) rejected AFTER that. /status then claimed 4/4 while the host
-  // log said "failed to start". The record must therefore be corrected when the
-  // fiber settles, and statusOf must read the record.
-  const ctx = {
-    get: (service) => (service === 'webServer' ? webServerStub().webServer : undefined),
-    plugin: () => ({ dispose() {}, then: (onOk, onFail) => Promise.resolve().then(onFail, new Error('tool already registered')) }),
-    effect: (f) => f(),
-    inject: () => {},
-    on: () => {},
-    logger: { warn: () => {}, error: () => {} },
-  }
-  const hosts = await mountComponentHosts(ctx)
-  // The rejection settles on a later microtask, so let the queue drain.
-  await new Promise((resolve) => setTimeout(resolve, 20))
-  for (const [id, record] of hosts) {
-    assert.equal(record.mounted, false, id + ': a rejected start is not a mount')
-    assert.equal(record.reason, 'start-failed', id + ': the reason names the failure')
-  }
-  const status = statusOf({ get: () => undefined }, hosts)
-  assert.equal(status.summary.mounted, 0, 'nothing counts as mounted when every start failed')
-  for (const component of status.components) {
-    assert.equal(component.hostMounted, false, component.id)
-    assert.equal(component.hostReason, 'start-failed', component.id)
-  }
+test('a component installed standalone next to the studio answers under its own name', () => {
+  const rows = loaderRows((component) => (component.id === COMPONENTS[0].id ? { name: COMPONENTS[0].package } : {}))
+  const verdict = hostStateOf(COMPONENTS[0], entriesOf(rows), true)
+  assert.equal(verdict.hostMounted, true)
+  assert.equal(verdict.hostRow, 'dsh-edit-turn', 'the standalone row is what answered')
+})
+
+test('a component with no row at all is reported, never silently mounted', () => {
+  const rows = loaderRows().filter((row) => row.options.name !== rowNameOf(COMPONENTS[2]))
+  assert.equal(hostStateOf(COMPONENTS[2], entriesOf(rows), true).hostReason, 'row-missing')
 })
 
 // --- the status document -------------------------------------------------------
@@ -205,7 +205,10 @@ test('an invisible loader yields hostMounted null, never a crash', () => {
   const status = statusOf({ get: () => undefined })
   assert.equal(status.ok, true)
   assert.equal(status.loaderVisible, false)
-  for (const component of status.components) assert.equal(component.hostMounted, null)
+  for (const component of status.components) {
+    assert.equal(component.hostMounted, null)
+    assert.equal(component.hostRow, null)
+  }
   assert.equal(status.components.length, COMPONENTS.length)
 })
 
@@ -213,14 +216,17 @@ test('the status document reports installed state and the own-row count', () => 
   // Under the studio the components have no rows of their own; a standalone
   // install next to it would show exactly one. The loader view tells the two
   // apart, and it has to be visible for the count to be honest.
-  const rows = [{ options: { id: 'dsh-edit-turn', name: 'dsh-edit-turn' }, disabled: false }]
-  const loader = { entries: () => rows }
-  const status = statusOf({ get: (service) => (service === 'loader' ? loader : undefined) })
+  const rows = [{ options: { id: 'dsh-edit-turn', name: 'dsh-edit-turn' }, disabled: false, fiber: liveFiber(5) }]
+  const status = statusWith(rows)
   assert.equal(status.loaderVisible, true)
   const edit = status.components.find((component) => component.id === 'dsh-edit-turn')
   assert.equal(edit.ownRows, 1, 'a standalone install is visible as one own row')
+  assert.equal(edit.hostMounted, true, 'and it is live, so the component is up')
+  assert.equal(edit.hostRow, 'dsh-edit-turn')
   const other = status.components.find((component) => component.id === 'dsh-rerun-turn')
   assert.equal(other.ownRows, 0, 'under the studio it has no row of its own')
+  assert.equal(other.hostMounted, false, 'and no row means no mount')
+  assert.equal(other.hostReason, 'row-missing')
 
   // With no loader there is no count at all, not a wrong one.
   const blind = statusOf({ get: () => undefined })
@@ -228,29 +234,42 @@ test('the status document reports installed state and the own-row count', () => 
   assert.equal(blind.components.find((component) => component.id === 'dsh-edit-turn').ownRows, null)
 })
 
-test('the summary counts what the host actually mounted', () => {
-  const hosts = new Map([
-    ['dsh-edit-turn', { mounted: true }],
-    ['dsh-rerun-turn', { mounted: true }],
-    ['dsh-delete-turn', { mounted: false, reason: 'apply-failed' }],
-    ['dsh-markdown-bubble', { mounted: true }],
-  ])
-  const status = statusOf({ get: () => undefined }, hosts)
+test('the summary counts the rows that are really live', () => {
+  const rows = loaderRows((component) => (component.id === COMPONENTS[2].id ? { fiber: { uid: 77, state: 3 } } : {}))
+  const status = statusWith(rows)
   assert.equal(status.summary.mounted, 3)
   assert.deepEqual(status.summary.combination, ['dsh-edit-turn', 'dsh-rerun-turn', 'dsh-markdown-bubble'])
   const failed = status.components.find((component) => component.id === 'dsh-delete-turn')
   assert.equal(failed.hostMounted, false)
-  assert.equal(failed.hostReason, 'apply-failed')
+  assert.equal(failed.hostReason, 'start-failed')
+  assert.equal(failed.hostRow, 'dsh-as-aistudio/delete')
+})
+
+test('the status is read from the loader on every call, never cached', () => {
+  // The point of reading the Loader instead of a private mount table: a row the
+  // user disables in the plugin manager shows up without restarting the studio.
+  const rows = loaderRows()
+  const loader = { entries: () => rows }
+  const ctx = { get: (service) => (service === 'loader' ? loader : undefined) }
+  assert.equal(statusOf(ctx).summary.mounted, COMPONENTS.length)
+  rows[1].disabled = true
+  assert.equal(statusOf(ctx).summary.mounted, COMPONENTS.length - 1)
 })
 
 test('the payload carries the component identity the panel needs', () => {
   const status = statusOf({ get: () => undefined })
   for (const component of status.components) {
-    for (const key of ['id', 'package', 'feature', 'kind', 'repo', 'installed', 'version', 'hostMounted', 'ownRows']) {
+    for (const key of ['id', 'package', 'feature', 'kind', 'repo', 'installed', 'version', 'hostMounted', 'hostReason', 'hostRow', 'ownRows']) {
       assert.ok(key in component, component.id + ' is missing ' + key)
     }
     assert.match(component.repo, /^https:\/\/github\.com\//)
   }
+})
+
+test('inspectPackage reports an absence instead of throwing', () => {
+  const found = inspectPackage('dsh-a-package-that-does-not-exist', ['/nonexistent-root'])
+  assert.equal(found.installed, false)
+  assert.equal(found.version, null)
 })
 
 // --- the route ----------------------------------------------------------------
@@ -300,8 +319,8 @@ async function call(route, method, url, body) {
   return { status: res.box.status, body: parsed }
 }
 
-async function statusRoute() {
-  const stub = contextStub()
+async function statusRoute(options) {
+  const stub = contextStub(options)
   await apply(stub.ctx)
   return stub.server.routes.get('/api/dsh-as-aistudio/status')
 }
@@ -312,6 +331,14 @@ test('the route answers GET on loopback with the status document', async () => {
   assert.equal(answer.body.ok, true)
   assert.equal(answer.body.plugin, STUDIO_ID)
   assert.equal(Array.isArray(answer.body.components), true)
+})
+
+test('the route reports what the loader says, per request', async () => {
+  const answer = await call(await statusRoute({ loader: { entries: () => loaderRows() } }), 'GET', '/api/dsh-as-aistudio/status')
+  assert.equal(answer.status, 200)
+  assert.equal(answer.body.loaderVisible, true)
+  assert.equal(answer.body.summary.mounted, COMPONENTS.length, 'the four component rows are live')
+  assert.deepEqual(answer.body.summary.combination, COMPONENTS.map((component) => component.id))
 })
 
 test('the route refuses a non-GET method', async () => {
@@ -354,10 +381,8 @@ test('apply defers to the webServer injection when the service is absent', async
     get: () => undefined,
     inject: (services, factory) => injected.push({ services, factory }),
     effect: () => () => {},
-    plugin: () => ({ dispose() {} }),
   }
   await apply(ctx)
   assert.equal(injected.length, 1)
   assert.deepEqual(injected[0].services, ['webServer'])
 })
-

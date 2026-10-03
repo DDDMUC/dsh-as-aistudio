@@ -181,35 +181,50 @@ function foreignHideOn(row, own) {
 `node --test test/contract.test.js`；把探测状态的 400 改成 404 会让 2 例转红，给 `/apply` 加一个必填
 `confirmToken` 会让 5 例转红 —— 破坏契约会在本地就暴露，而不是等用户发现按钮点不动。
 
-## 11. 自包含架构（2026-10-02）
+## 11. 自包含架构（2026-10-02 重写，2026-10-04 改为四条目行）
 
-用户要求「插件列表里只有 AI Studio 一行」。平台的清单服务返回扁平数组，过滤条件是
-!entry.options.group && !entry.disabled && entry.fiber.state === 2
-（@deepseek-ai/dsh-plugin-package-inventory-deepseek/lib/index.js:100）—— 没有 hidden 开关，
-group 也只能把 group 自己藏起来，子条目照样平铺。所以「在跑等价于在列表里」是硬约束。
+用户要求「插件列表里只有 AI Studio 一行」。平台的清单服务（同一份 dsh_plugin_packages 也喂给模型）
+收的是**包身份集合**：先按 !entry.options.group && !entry.disabled && entry.fiber?.state === 2 取活跃行
+（@deepseek-ai/dsh-plugin-package-inventory-deepseek/lib/index.js:100），每条行经 barePackageName() 解析
+回它所属的包，再按 name + version 去重。于是有两条硬约束：
 
-唯一的出路是让四个组件不再是 Loader 行。本包因此改成自包含（@linxin666/dsh-web-all 同款）：
+1. **行名不能是组件自己的包名**，否则那个包成为新的身份，列表立刻多一行；
+2. **行名必须是本包的子路径**：barePackageName('dsh-as-aistudio/edit') === 'dsh-as-aistudio'，
+   解析回本包、与自己的行去重 —— 四条组件行因此不占列表行（@linxin666/dsh-web-all 同款：
+   它 19 条声明只占 1 行）。
+
+而详情页的「包含的组件」读的是另一件事：bundle 的 patch 里 insert 的每一行
+（@deepseek-ai/dsh-plugin-manager/lib/index.js:1864 declaredRows）。要让四个组件在那里出现，
+它们就必须真的是本包 patch 里的行 —— 这正是 2026-10-04 的改动：宿主半侧的运行时 ctx.plugin
+换成四条补丁行，行名是子路径、真正的包名写在 config.plugin 里，由 src/shell.js 挂载。
 
 | 部件 | 位置 | 说明 |
 | --- | --- | --- |
-| patch | cordis.patch.yml | 只插一行（本包自己） |
+| patch | cordis.patch.yml | 插 5 行：本包自己（裸包名，带 ./client）加四条 dsh-as-aistudio/<后缀> |
 | 组件身份 | package.json dependencies | 普通依赖，不是 profile bundle |
-| 宿主半侧 | src/index.js | await import 加 ctx.plugin 挂载组件的宿主半侧 |
-| 浏览器半侧 | src/client.js | 单一大 bundle（生成物） |
+| 宿主半侧 | src/shell.js | 组件行读 config.plugin，await import 后 ctx.plugin（等价于组件自己的行） |
+| 浏览器半侧 | src/client.js | 单一大 bundle（生成物），只由本包那一行下发 |
 | 内联来源 | src/vendor/*.js | tools/vendor.mjs 从组件源码逐字剥离 factory |
 | 缝合器 | tools/build.mjs | studio 加四个 factory 合成一个 bundle |
+| 状态 | src/index.js | /api/dsh-as-aistudio/status：hostMounted 从 Loader 行 fiber 状态读 |
 
-两条设计红线：
+三条设计红线：
 
-1. 宿主半侧不内联。宿主代码对列表不可见，复制它只会多出一份要维护的东西；import 加
-   ctx.plugin 就够，且组件的路由、回滚、重放逻辑仍是唯一正本。
-2. 浏览器半侧必须内联。bundle 是按 Loader 行下发的（/plugins/<行id>/client.js），
-   组件没有行就没有 bundle。
+1. 宿主半侧不内联。宿主代码对列表不可见，复制它只会多出一份要维护的东西；组件行导入真正的包，
+   组件的路由、回滚、重放逻辑仍是唯一正本。
+2. 宿主半侧也不许自己挂。四个组件已由四条行挂载，host 再 ctx.plugin 一次就是同进程挂两遍，
+   路由必冲突；host 只回答状态。
+3. 浏览器半侧必须内联。bundle 是按 Loader 行下发的（/plugins/<行id>/client.js），且只有精确包说明符
+   会被客户端模块扫描器收进 boot graph —— 四条子路径行被跳过，组件也不会各自多出一份浏览器源。
 
-防漂移：副本由工具生成、带 sha256 戳，npm run verify:vendor / verify:build 只读校验，
-测试在副本与组件源不一致时失败。手工编辑 src/vendor/* 或 src/client.js 是禁止的。
+状态与界面：hostMounted 只在行 fiber 的 state === 2 时为真（关掉的行、缺包、起失败各有自己的 reason）；
+浏览器半侧挂载前先读一次这道状态，只画 hostMounted 为真的组件，宿主答不上来时按「未知」全挂。
 
-实测（隔离实例，只装本包 tarball）：composed 184 行里组件行 0；/api/dsh-as-aistudio/status
-hostMounted 4/4；GET /dsh-rerun-turn/state 返回 400（edit-turn 的挂载探测契约未破）；
-boot graph 66 条里组件条目 0；served bundle 200 且含四个 factory。
+防漂移：副本由工具生成、带 sha256 戳，node tools/vendor.mjs --check / node tools/build.mjs --check
+只读校验，测试在副本与组件源不一致时失败。手工编辑 src/vendor/* 或 src/client.js 是禁止的。
+
+实测（2026-10-02 旧行结构，隔离实例只装本包 tarball）：composed 184 行里组件行 0；
+GET /dsh-rerun-turn/state 返回 400（edit-turn 的挂载探测契约未破）；boot graph 66 条里组件条目 0；
+served bundle 200 且含四个 factory。换成四条行之后，同一套门禁要补一条：四条行 fiber 必须 active，
+/api/dsh-as-aistudio/status 才会给出 hostMounted 4/4。
 

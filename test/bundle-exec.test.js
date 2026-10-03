@@ -20,13 +20,31 @@ const here = dirname(fileURLToPath(import.meta.url))
 const root = join(here, '..')
 const ORDER = ['dsh-edit-turn', 'dsh-rerun-turn', 'dsh-delete-turn', 'dsh-markdown-bubble']
 
-/** Run the generated bundle the way the browser does and return what happened. */
-function runBundle() {
+/** The status payload of a host where every component's row is live. */
+function allLive(overrides = {}) {
+  return {
+    ok: true,
+    components: ORDER.map((id) => ({ id, installed: true, hostMounted: true, ...(overrides[id] ?? {}) })),
+  }
+}
+
+/**
+ * Run the generated bundle the way the browser does and return what happened.
+ * @param options.status - the payload the fake host answers the gate with;
+ *   leave undefined for "there is no fetch at all", which must still mount.
+ */
+async function runBundle(options = {}) {
   const src = readFileSync(join(root, 'src', 'client.js'), 'utf8')
   let captured = null
   const previousWindow = globalThis.window
   const previousDocument = globalThis.document
   const previousMarker = globalThis.__DSH_AS_AISTUDIO__
+  const previousFetch = globalThis.fetch
+  // The mounting gate reads one status route before it mounts anything.
+  globalThis.fetch =
+    options.status === undefined
+      ? undefined
+      : async () => ({ json: async () => options.status })
   globalThis.window = { __ModuleLoader__: { load(entry) { captured = entry } } }
   const element = { dataset: {}, style: {}, appendChild() {}, setAttribute() {}, addEventListener() {} }
   globalThis.document = {
@@ -103,11 +121,14 @@ function runBundle() {
       effect(factory) { factory() },
       inject: () => {},
     }
-    exports.apply(ctx)
+    // apply is async since the gate: it resolves once the host has answered and
+    // the allowed factories have been applied.
+    await exports.apply(ctx)
     return { exports, registered, marker: globalThis.__DSH_AS_AISTUDIO__ }
   } finally {
     globalThis.window = previousWindow
     globalThis.document = previousDocument
+    globalThis.fetch = previousFetch
     if (previousMarker === undefined) delete globalThis.__DSH_AS_AISTUDIO__
     else globalThis.__DSH_AS_AISTUDIO__ = previousMarker
   }
@@ -125,14 +146,37 @@ test('the mount table is keyed by component id, not by factory name', () => {
   assert.equal(/\{\s*factory_/.test(line), false, 'the table must not use bare factory-name shorthand')
 })
 
-test('applying the bundle mounts all four components', () => {
-  const { marker } = runBundle()
+test('applying the bundle mounts all four components', async () => {
+  const { marker } = await runBundle({ status: allLive() })
   assert.ok(marker, 'the studio records its mount state')
+  for (const id of ORDER) assert.equal(marker.mounted[id], true, id + ' must mount')
+  assert.deepEqual(marker.gate, ORDER, 'the gate allowed exactly the four live components')
+})
+
+test('with no host answer at all the bundle still mounts everything', async () => {
+  // "Unknown" is not "down": a host that cannot answer must not blank the strip.
+  const { marker } = await runBundle()
   for (const id of ORDER) assert.equal(marker.mounted[id], true, id + ' must mount')
 })
 
-test('applying the bundle claims the section-2 slot allocation', () => {
-  const { registered } = runBundle()
+// The gate is the reason the panel and the page can never disagree. A component
+// whose host half is not up has no routes, so its buttons would be dead: the
+// bundle must leave it off the page entirely, not render it disabled.
+test('a component the host reports as not mounted is not drawn', async () => {
+  const down = 'dsh-rerun-turn'
+  const { marker, registered } = await runBundle({ status: allLive({ [down]: { hostMounted: false } }) })
+  assert.equal(marker.mounted[down], false, down + ' must not mount')
+  assert.deepEqual(marker.gate, ORDER.filter((id) => id !== down))
+  for (const id of ORDER) if (id !== down) assert.equal(marker.mounted[id], true, id + ' must still mount')
+  assert.equal(
+    registered.some((row) => row.id === 'rerun-turn-reply' || row.id === 'rerun-turn'),
+    false,
+    'the gated-off component must register no slot at all',
+  )
+})
+
+test('applying the bundle claims the section-2 slot allocation', async () => {
+  const { registered } = await runBundle({ status: allLive() })
   const actions = registered.filter((row) => row.name === 'conversation.chat.assistant-actions')
   const overlay = registered.filter((row) => row.name === 'conversation.input.overlay')
   const orders = new Map(actions.map((row) => [row.id, row.order]))
@@ -149,9 +193,9 @@ test('applying the bundle claims the section-2 slot allocation', () => {
   assert.ok(registered.some((row) => row.name === 'settings.plugins.tab' && row.id === 'as-aistudio'))
 })
 
-test('no vendored component is reached through a subpath require', () => {
+test('no vendored component is reached through a subpath require', async () => {
   // Guard the design: the factories are stitched into this bundle, so they must
   // not depend on this package resolving its own subpaths at runtime.
-  const { exports } = runBundle()
+  const { exports } = await runBundle({ status: allLive() })
   assert.deepEqual(exports.VENDORED, ORDER)
 })
