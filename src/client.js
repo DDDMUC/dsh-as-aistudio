@@ -4779,7 +4779,7 @@ window.__ModuleLoader__.load({
   }
 
     // --- which factories the studio mounts ---
-    const VENDORED_TABLE = { factory_dsh_edit_turn, factory_dsh_rerun_turn, factory_dsh_delete_turn, factory_dsh_markdown_bubble }
+    const VENDORED_TABLE = { "dsh-edit-turn": factory_dsh_edit_turn, "dsh-rerun-turn": factory_dsh_rerun_turn, "dsh-delete-turn": factory_dsh_delete_turn, "dsh-markdown-bubble": factory_dsh_markdown_bubble }
 
     // --- the studio own browser half ---
 
@@ -4795,7 +4795,7 @@ window.__ModuleLoader__.load({
     const NS = 'dsh-as-aistudio'
 
     /** Keep in sync with package.json and src/components.js. */
-    const PLUGIN_VERSION = '0.2.1'
+    const PLUGIN_VERSION = '0.2.2'
 
     /** Presence marker the live verifier reads. */
     const DEBUG_KEY = '__DSH_AS_AISTUDIO__'

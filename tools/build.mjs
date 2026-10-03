@@ -61,7 +61,17 @@ for (const id of ORDER) {
   parts.push('    // ===== vendored ' + id + ' =====')
   parts.push('    const factory_' + id.replace(/-/g, '_') + ' = ' + vendored(id))
 }
-parts.push(read('tail.txt').replace('__T__', ORDER.map((id) => 'factory_' + id.replace(/-/g, '_')).join(', ')))
+// The table is keyed by COMPONENT ID, because that is what the studio looks up
+// (VENDORED_TABLE[id] with id like 'dsh-edit-turn'). Emitting the bare factory
+// names would build an object whose keys are the variable names instead, every
+// lookup would be undefined, and every component would silently fail to mount -
+// which is exactly the regression this line now prevents.
+parts.push(
+  read('tail.txt').replace(
+    '__T__',
+    ORDER.map((id) => JSON.stringify(id) + ': factory_' + id.replace(/-/g, '_')).join(', '),
+  ),
+)
 parts.push(studio)
 parts.push(read('tail2.txt'))
 
