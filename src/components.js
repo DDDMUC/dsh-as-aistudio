@@ -9,6 +9,13 @@
 // not vendor, wrap or re-implement any of them: it names them, and the bundle
 // patch enables the rows that mount them.
 //
+// Each component is mounted by ONE row of the bundle patch, named
+// `<this package>/<suffix>` (see rowNameOf below) with the component package in
+// its config.plugin; src/shell.js is the file every one of those names resolves
+// to. The suffixes are part of the manifest because three things have to agree
+// on them: cordis.patch.yml, package.json exports, and the status route that
+// matches a component to its row.
+//
 // "optional" is the honest word for a component: the studio boots with any
 // subset of them present (none, one, two, three, four), because every row the
 // patch inserts fails in isolation when its package is missing — one entry
@@ -19,7 +26,7 @@
 export const STUDIO_ID = 'dsh-as-aistudio'
 
 /** Keep in sync with package.json and src/client.js. */
-export const STUDIO_VERSION = '0.2.5'
+export const STUDIO_VERSION = '0.2.6'
 
 /**
  * The AI Studio action strip this studio composes, in the order the user meets
@@ -30,11 +37,23 @@ export const STUDIO_VERSION = '0.2.5'
  * `slot` records the registration the component owns; it is documentation and
  * an assertion source (test/manifest.test.js proves the allocation is unique),
  * never a runtime dependency. Each component registers itself.
+ *
+ * `suffix` is the bundle-patch row that mounts the component: the row is named
+ * `<this package>/<suffix>`. Two properties ride on that name, and both are
+ * load-bearing (docs/INTEROP.md section 11):
+ *
+ *   - the plugin list is a deduplicated set of package identities, and a subpath
+ *     of this package resolves to this package's identity, so four extra rows
+ *     still cost exactly zero extra list rows;
+ *   - the client-module scanner accepts only an exact package specifier, so a
+ *     subpath row never becomes a second browser source for the component - its
+ *     browser half keeps travelling inside this package's bundle.
  */
 export const COMPONENTS = [
   {
     id: 'dsh-edit-turn',
     package: 'dsh-edit-turn',
+    suffix: 'edit',
     feature: 'edit',
     kind: 'action',
     repo: 'https://github.com/DDDMUC/dsh-edit-turn',
@@ -49,6 +68,7 @@ export const COMPONENTS = [
   {
     id: 'dsh-rerun-turn',
     package: 'dsh-rerun-turn',
+    suffix: 'rerun',
     feature: 'rerun',
     kind: 'action',
     repo: 'https://github.com/DDDMUC/dsh-rerun-turn',
@@ -63,6 +83,7 @@ export const COMPONENTS = [
   {
     id: 'dsh-delete-turn',
     package: 'dsh-delete-turn',
+    suffix: 'delete',
     feature: 'delete',
     kind: 'action',
     repo: 'https://github.com/DDDMUC/dsh-delete-turn',
@@ -77,6 +98,7 @@ export const COMPONENTS = [
   {
     id: 'dsh-markdown-bubble',
     package: 'dsh-markdown-bubble',
+    suffix: 'markdown',
     feature: 'render',
     kind: 'reader',
     repo: 'https://github.com/DDDMUC/dsh-markdown-bubble',
@@ -92,6 +114,18 @@ export const COMPONENTS = [
 
 /** Component ids, in manifest order. */
 export const COMPONENT_IDS = COMPONENTS.map((c) => c.id)
+
+/**
+ * The bundle-patch row that mounts one component, in this package's namespace.
+ * @param component - a manifest entry.
+ * @returns the Loader row name, e.g. 'dsh-as-aistudio/edit'.
+ */
+export function rowNameOf(component) {
+  return STUDIO_ID + '/' + component.suffix
+}
+
+/** Every component row name, in manifest order. */
+export const COMPONENT_ROW_NAMES = COMPONENTS.map(rowNameOf)
 
 /**
  * The interop contract this studio verifies (docs/INTEROP.md §2 and §4). The

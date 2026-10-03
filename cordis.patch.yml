@@ -1,23 +1,61 @@
-# dsh-as-aistudio bundle patch: the AI Studio composition, ONE row.
+# dsh-as-aistudio bundle patch: the AI Studio composition, ONE row in the plugin list.
 #
-# Self-contained: the plugin list shows exactly this row. The four components are
-# ordinary npm dependencies of this package (see package.json), not profile
+# Self-contained: the plugin list shows exactly this package. The four components
+# are ordinary npm dependencies of this package (see package.json), not profile
 # bundles, so they have no rows of their own and never appear in that list.
 #
-# The node half mounts each component HOST half (its loopback routes and its
-# rollback / replay services) by importing the installed package, so host logic
-# stays in the components and there is only one copy of it. The browser bundles
-# travel inside this package (src/client.js) because a browser bundle is served
-# per Loader row and the components have none.
+# Five rows are inserted here, and they are what "包含的组件" lists:
 #
-# A component that is not installed is reported by /api/dsh-as-aistudio/status and
-# is never mounted - the studio boots either way. Each component still has its own
-# cordis.patch.yml, so installing one standalone mounts it through its own row.
+#   1. this package's own row. Its name is the BARE package name on purpose: the
+#      client-module scanner treats an exact package specifier as a package and
+#      resolves <name>/package.json for the dsh.client declaration. That is the
+#      row the single browser bundle (src/client.js, which carries the studio's
+#      own half and all four vendored component factories) is served for.
 #
-# The entry name is the BARE package name on purpose: the client-module scanner
-# treats it as a package specifier and resolves <name>/package.json for the
-# dsh.client declaration, so a subpath entry would be cached as "not a client
-# package" and the browser half would silently never load.
+#   2-5. one row per component, named <this package>/<suffix>. Every one of those
+#      names resolves through package.json exports to src/shell.js, and the shell
+#      mounts the component named in config.plugin. Two properties ride on that
+#      name, both load-bearing:
+#
+#        * the plugin list is a deduplicated set of package identities, and a
+#          subpath of this package resolves to this package's identity - so the
+#          four extra rows cost exactly zero extra rows in that list;
+#        * the client-module scanner accepts only an exact package specifier, so a
+#          subpath row never becomes a second browser source. The components'
+#          browser halves keep travelling inside this package's bundle, and the
+#          scanner's negative verdict for these specifiers is what keeps the boot
+#          graph from growing a second entry per component.
+#
+# The component host halves (loopback routes, rollback / replay services) are not
+# copied anywhere: each row imports the real package, so host logic stays in the
+# components and there is exactly one copy of it. Each component also keeps its
+# own cordis.patch.yml, so installing one standalone mounts it through its own
+# row.
+#
+# A component that is not installed is not fatal: every row fails in isolation
+# (the Loader reports the missing module and the other entries still start), and
+# /api/dsh-as-aistudio/status reports hostMounted: false with the reason - which
+# is also what keeps its buttons off the page.
 - insert:
     - id: dsh-as-aistudio
       name: 'dsh-as-aistudio'
+- insert:
+    - id: dsh-as-aistudio-edit
+      name: 'dsh-as-aistudio/edit'
+      config:
+        plugin: 'dsh-edit-turn'
+- insert:
+    - id: dsh-as-aistudio-rerun
+      name: 'dsh-as-aistudio/rerun'
+      config:
+        plugin: 'dsh-rerun-turn'
+- insert:
+    - id: dsh-as-aistudio-delete
+      name: 'dsh-as-aistudio/delete'
+      config:
+        plugin: 'dsh-delete-turn'
+- insert:
+    - id: dsh-as-aistudio-markdown
+      name: 'dsh-as-aistudio/markdown'
+      config:
+        plugin: 'dsh-markdown-bubble'

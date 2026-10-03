@@ -32,13 +32,21 @@ window.__ModuleLoader__.load({
     const RERUN_PREFIX = '/dsh-rerun-turn'
 
     /** Keep in sync with package.json and lib/index.js. */
-    const PLUGIN_VERSION = '0.2.16'
+    const PLUGIN_VERSION = '0.2.17'
 
     // --- copy -----------------------------------------------------------------
 
     const zh = {
       'action.edit': '编辑这条消息',
       'action.edit-reply': '编辑这条回答',
+      // The platform's own words for its copy action, spelled here because the
+      // row's copy button is recognised BY them (see `nativeCopyButton`): the host
+      // labels that button through the shared `common` dictionary, and this is the
+      // same wording. Namespace keys shadow the shared ones, so these two keep the
+      // bundle's own key surface complete; the structural rule does not need them.
+      'copy': '复制',
+      'copied': '复制成功',
+      'action.copied': '复制成功',
       'editor.title': '编辑这条消息',
       'editor.title-reply': '编辑这条回答',
       'editor.placeholder': '改成你希望自己当时说的内容。保存后这条消息之后的轮次会从模型上下文中移除，改后的内容成为新的起点。',
@@ -76,6 +84,9 @@ window.__ModuleLoader__.load({
     const en = {
       'action.edit': 'Edit this message',
       'action.edit-reply': 'Edit this reply',
+      'copy': 'Copy',
+      'copied': 'Copied',
+      'action.copied': 'Copied',
       'editor.title': 'Edit this message',
       'editor.title-reply': 'Edit this reply',
       'editor.placeholder': 'Saving rolls the conversation back to just before this message and this turn runs again.',
@@ -188,6 +199,15 @@ window.__ModuleLoader__.load({
       // the platform's time / copy / delete buttons (and every other plugin's)
       // stay reachable, so only rows with nothing worth keeping go fully away.
       '[data-dshet-hidden="1"]:not([data-dshet-keep-actions]){display:none!important}',
+      // The one platform action on such a row that cannot answer for itself:
+      // copy hands over the text of the message the row was DRAWN for - the
+      // wording the user replaced, because the host draws no row for a
+      // replacement event. This half answers that press and draws the host's
+      // own "copied" moment on the same button (`takeOverRowCopy`): the icon
+      // is swapped for a check the way the host swaps it, for the same second.
+      '[data-dshet-copy-flash="1"]{position:relative}',
+      '[data-dshet-copy-flash="1"]>svg{opacity:0}',
+      '[data-dshet-copy-flash="1"]::after{content:"";position:absolute;left:50%;top:50%;width:7px;height:12px;margin:-7px 0 0 -4px;border:solid currentColor;border-width:0 1.5px 1.5px 0;transform:rotate(45deg)}',
       // One rounded container, the way the platform's own composer box is
       // built: the input is transparent and borderless inside it, the actions
       // sit at its bottom-right, and focus is shown on the container rather
@@ -891,6 +911,9 @@ window.__ModuleLoader__.load({
       const existing = ownRevisionBubble(row)
       if (revisionSeq === null || !hidden) {
         if (existing !== null) existing.remove()
+        // Nothing of ours stands in for this row any more: the row's own copy
+        // button answers for itself again.
+        releaseRowCopy(row)
         return true
       }
       // Only one bubble per row, ever: drop any other bubble that claims it
@@ -910,6 +933,7 @@ window.__ModuleLoader__.load({
       const text = entry && typeof entry.text === 'string' ? entry.text : ''
       if (text === '') {
         if (existing !== null) existing.remove()
+        releaseRowCopy(row)
         return node.kind !== 'user'
       }
       const bubble = existing === null ? cloneUserBubble(row) : existing
@@ -934,14 +958,21 @@ window.__ModuleLoader__.load({
           injectRowAction(row, editTarget, controller, t)
           removeRowAction(bubble)
           bubble.classList.remove('dshet-revision-action')
+          // The bar that survived still holds the host's own copy button, and it
+          // reads the message this row was drawn for - the wording the user just
+          // replaced. This row's text is the bubble above it, so the press is
+          // answered here (`takeOverRowCopy`).
+          takeOverRowCopy(row, text, t)
         } else {
           injectRowAction(bubble, editTarget, controller, t, { gutter: true })
           removeRowAction(row)
           bubble.classList.add('dshet-revision-action')
+          releaseRowCopy(row)
         }
       } else {
         removeRowAction(bubble)
         bubble.classList.remove('dshet-revision-action')
+        releaseRowCopy(row)
       }
       return true
     }
@@ -991,6 +1022,237 @@ window.__ModuleLoader__.load({
         }
       }
       return null
+    }
+
+    // --- the rewritten row answers its own copy -------------------------------
+    //
+    // The platform's copy action hands over the text of the message it DREW the
+    // row for. A prompt this plugin rewrote in place never gets a row of its own:
+    // the host draws transcript rows for append-origin surface events only
+    // (`isAppendSurfaceEvent` in dsh-client-ui-chat), and a rewrite is a
+    // replacement, so the row that stands in for the message is the ORIGINAL one
+    // and still carries the wording the user replaced. Pressing copy on a
+    // rewritten prompt therefore pastes what the user was trying to get rid of:
+    // rewrite 回复1 into 回复2, press copy, paste 回复1.
+    //
+    // The button cannot be repaired from here - its text is read off the host's
+    // projection node, while the rewritten wording is the textContent of a bubble
+    // this half owns - and it must not be taken out either: the host owns that
+    // node and unmounts it through its own reconciler, and a bundle that goes
+    // away has to leave a working button behind, not a dead one. What this half
+    // CAN do is answer the press first: the listener is planted in the CAPTURE
+    // phase, the host listens for clicks at its root in the bubble phase, so this
+    // runs ahead of the host's handler and stops it, and the text it writes is
+    // the text this row actually shows.
+    //
+    // Everything the listener needs is read off the BUTTON when the press
+    // happens - the text, the label, the writer - never captured in the closure.
+    // A reloaded bundle finds the button by its marker, refreshes that state, and
+    // a listener the instance before it planted goes on working (the rule
+    // `wireAction` follows for the pencil).
+    const COPY_TEXT = 'dshetCopyText'
+    const COPY_FLASH = 'dshetCopyFlash'
+    const COPY_LABEL = 'dshetCopyLabel'
+    const COPY_OWN = 'dshetCopyOwn'
+    /** The live state of one press; a name no sibling plugin uses. */
+    const COPY_PRESS = 'dshetCopyPress'
+    const COPY_TIMER = 'dshetCopyTimer'
+    /** The host draws its own check for a second; this is the same second. */
+    const COPY_FEEDBACK_MS = 1000
+
+    /**
+     * A button another plugin put in this bar.
+     *
+     * Every injected action in this family carries its own namespace marker (the
+     * three sibling plugins do, by contract), and the host's own actions carry no
+     * `data-*` of their own at all. This plugin's four markers are excluded:
+     * they are written on the HOST's button, not on one of ours.
+     */
+    function pluginOwned(button) {
+      const data = button.dataset
+      if (data === undefined || data === null) return false
+      for (const key of Object.keys(data)) {
+        if (key === COPY_TEXT || key === COPY_FLASH || key === COPY_LABEL || key === COPY_OWN) continue
+        if (key !== '') return true
+      }
+      return false
+    }
+
+    /**
+     * The platform's own copy button in a row's action bar, or null when the bar
+     * holds none of its own to answer for.
+     *
+     * The host draws the clock, then the copy button, and gives a user row neither
+     * a branch action nor an extra strip - so the bar's FIRST button is the copy
+     * button. The CSS-module class the host's icons carry is deliberately not
+     * required: it is a build hash that can be renamed, and a rule that reads it
+     * would go quietly dead on the day it is (the pencil placement still matches
+     * that suffix, which is a different, visible contract). A sibling plugin's
+     * button is skipped: it carries its own namespace marker, and a sibling's is
+     * never this half's to answer for. A button this half already answers is
+     * found by ITS marker alone (I3), however the bar has been rebuilt around it.
+     */
+    function nativeCopyButton(row, t) {
+      if (row === null || row === undefined || typeof row.querySelector !== 'function') return null
+      const bar = row.querySelector('[class*="_actions"]')
+      if (bar === null || bar === undefined) return null
+      // The host's own wording for the two states of its copy button. It resolves
+      // through the same namespace -> shared `common` fallback the host's own
+      // lookup uses, so this names the button rather than guessing at it; a host
+      // that cannot resolve them simply falls through to the rule below.
+      const copy = typeof t === 'function' ? t('copy') : null
+      const copied = typeof t === 'function' ? t('copied') : null
+      let unclaimed = null
+      for (const child of bar.children) {
+        if (child.tagName !== 'BUTTON') continue
+        if (child.dataset !== undefined && child.dataset[COPY_OWN] === '1') return child
+        if (pluginOwned(child)) continue
+        const label = typeof child.getAttribute === 'function' ? child.getAttribute('aria-label') : null
+        if (typeof label === 'string' && label !== '' && (label === copy || label === copied)) return child
+        if (unclaimed === null) unclaimed = child
+      }
+      return unclaimed
+    }
+
+    /**
+     * Hand a rewritten row's copy press to this half.
+     *
+     * The button is left exactly as the host rendered it - not removed, not
+     * hidden, not disabled; only this half's own markers go on it. Without the
+     * host's own clipboard writer the button keeps the host's behaviour too: a
+     * takeover that cannot copy is worse than none.
+     */
+    function takeOverRowCopy(row, text, t) {
+      const button = nativeCopyButton(row, t)
+      if (button === null) return
+      const write = primitives !== null && primitives !== undefined && typeof primitives.writeClipboard === 'function'
+        ? primitives.writeClipboard
+        : null
+      if (write === null) return
+      if (button.dataset !== undefined && button.dataset[COPY_OWN] !== '1') {
+        button.dataset[COPY_OWN] = '1'
+        if (typeof button.addEventListener === 'function') {
+          // Capture: this runs ahead of the host's own click handling, which
+          // listens at the root and would write the message the row was drawn for.
+          // Stopping the event there is also what keeps that handler from running
+          // at all, so the host's own follow-up (its tooltip withdraw, its check)
+          // does not happen for this press - which is why the check is drawn here.
+          button.addEventListener('click', (event) => pressRowCopy(button, event), true)
+        }
+      }
+      if (button.dataset !== undefined) {
+        // The host's own wording, kept to give back: what the button said before
+        // this half drew its check over it.
+        if (button.dataset[COPY_LABEL] === undefined) {
+          const label = typeof button.getAttribute === 'function' ? button.getAttribute('aria-label') : null
+          if (typeof label === 'string' && label !== '') button.dataset[COPY_LABEL] = label
+        }
+        if (button.dataset[COPY_TEXT] !== text) button.dataset[COPY_TEXT] = text
+      }
+      button[COPY_PRESS] = { done: t('action.copied'), write }
+    }
+
+    /**
+     * The press itself.
+     *
+     * No text marker means the row is not (or no longer) a rewritten prompt, and
+     * the press is left completely alone: the host's own handler answers it, and a
+     * released row behaves like every other row.
+     */
+    function pressRowCopy(button, event) {
+      const data = button.dataset
+      if (data === undefined || typeof data[COPY_TEXT] !== 'string') return
+      if (event !== null && event !== undefined) {
+        if (typeof event.preventDefault === 'function') event.preventDefault()
+        if (typeof event.stopPropagation === 'function') event.stopPropagation()
+      }
+      // One copy per check, the way the host paces its own button.
+      if (data[COPY_FLASH] === '1') return
+      const press = button[COPY_PRESS]
+      if (press === null || press === undefined || typeof press.write !== 'function') return
+      let pending = null
+      try {
+        pending = press.write(data[COPY_TEXT])
+      } catch {
+        return
+      }
+      if (pending === null || pending === undefined || typeof pending.then !== 'function') return
+      pending.then(
+        (ok) => {
+          if (ok === true) flashRowCopy(button, press.done)
+        },
+        () => {},
+      )
+    }
+
+    /**
+     * The host's own "copied" moment, drawn on the button it belongs to.
+     *
+     * The host shows it by swapping its icon and its label. On this row its own
+     * React state never hears about the press, so this half draws the same thing
+     * from its stylesheet (`[data-dshet-copy-flash="1"]`) and gives the borrowed
+     * label back when the moment is over. Both are this half's own writes, and
+     * both are taken back on release (I4).
+     */
+    function flashRowCopy(button, done) {
+      const data = button.dataset
+      if (data === undefined) return
+      data[COPY_FLASH] = '1'
+      if (typeof done === 'string' && done !== '' && typeof button.setAttribute === 'function') {
+        button.setAttribute('aria-label', done)
+      }
+      if (button[COPY_TIMER] !== undefined && button[COPY_TIMER] !== null) {
+        if (typeof window.clearTimeout === 'function') window.clearTimeout(button[COPY_TIMER])
+      }
+      if (typeof window.setTimeout !== 'function') return
+      button[COPY_TIMER] = window.setTimeout(() => {
+        button[COPY_TIMER] = null
+        clearRowCopyFlash(button)
+      }, COPY_FEEDBACK_MS)
+    }
+
+    /**
+     * Take the check back.
+     *
+     * `data-dshet-copy-label` is what the host's own button said before this half
+     * drew its check on it; the host never wrote it, so giving it back is this
+     * half returning its own change (I4).
+     */
+    function clearRowCopyFlash(button) {
+      if (button[COPY_TIMER] !== undefined && button[COPY_TIMER] !== null) {
+        if (typeof window.clearTimeout === 'function') window.clearTimeout(button[COPY_TIMER])
+        button[COPY_TIMER] = null
+      }
+      const data = button.dataset
+      if (data === undefined) return
+      delete data[COPY_FLASH]
+      const label = data[COPY_LABEL]
+      if (typeof label === 'string' && label !== '' && typeof button.setAttribute === 'function') {
+        button.setAttribute('aria-label', label)
+      }
+    }
+
+    /** Hand one platform copy button back: nothing of ours is left WRITTEN on it. */
+    function releaseCopyButton(button) {
+      if (button === null || button === undefined || typeof button !== 'object') return
+      clearRowCopyFlash(button)
+      const data = button.dataset
+      if (data !== undefined) {
+        delete data[COPY_TEXT]
+        delete data[COPY_LABEL]
+      }
+      button[COPY_PRESS] = undefined
+      // `data-dshet-copy-own` stays, and so does the listener: neither claims
+      // anything about the message any more, and that marker is what stops a
+      // reloaded bundle from planting a second listener on the same button. A
+      // press with no text marker returns above and reaches the host's own
+      // handler - exactly the behaviour the row had before this plugin saw it.
+    }
+
+    /** The copy handover of a row, wherever the last pass left it. */
+    function releaseRowCopy(row) {
+      const button = nativeCopyButton(row)
+      if (button !== null) releaseCopyButton(button)
     }
 
     // The message a chain of rewrites ends at.
@@ -1892,6 +2154,11 @@ window.__ModuleLoader__.load({
       //    markers are this plugin's own writes, so this is its own state - and
       //    only its own: the restore path asks the attribution guard first (I4).
       each('[data-dshet-hidden="1"]', (row) => setRowHidden(row, false))
+      // A row's copy button was answering for this half; that handover is this
+      // half's own write on a HOST node and goes back the same way (I4). The
+      // button itself stays where the host owns it - it simply copies its own
+      // message again, through the host's handler.
+      each('[data-dshet-copy-text]', (button) => releaseCopyButton(button))
       each('[data-dshet-collapsed="1"]', (child) => {
         child.style.display = ''
         delete child.dataset.dshetCollapsed
@@ -1996,7 +2263,7 @@ window.__ModuleLoader__.load({
     const ROUTE_PREFIX = '/dsh-rerun-turn'
 
     /** Keep in sync with package.json and lib/index.js. */
-    const PLUGIN_VERSION = '0.1.24'
+    const PLUGIN_VERSION = '0.1.25'
 
     // --- copy -----------------------------------------------------------------
 
@@ -4818,7 +5085,7 @@ window.__ModuleLoader__.load({
     const NS = 'dsh-as-aistudio'
 
     /** Keep in sync with package.json and src/components.js. */
-    const PLUGIN_VERSION = '0.2.5'
+    const PLUGIN_VERSION = '0.2.6'
 
     /** Presence marker the live verifier reads. */
     const DEBUG_KEY = '__DSH_AS_AISTUDIO__'
@@ -4845,7 +5112,8 @@ window.__ModuleLoader__.load({
       statusInstalled: '已安装，宿主未挂载',
       statusMissing: '未安装',
       statusUnknown: '宿主未报告',
-      hostOnly: '（独立安装时走自己的插件行；这里由 AI Studio 统一挂载）',
+      hostOnly: '（独立安装时走自己的插件行）',
+      row: '行 {row}',
       version: '版本 {version}',
       versionUnknown: '版本未知',
       repo: '仓库',
@@ -4857,7 +5125,7 @@ window.__ModuleLoader__.load({
       interopHide: '行隐藏归属属性（别人声明的隐藏，我不能清掉）',
       host: '宿主 DSH {version}',
       hostUnknown: '宿主版本未知',
-      note: '四个组件由这个包统一挂载，所以插件列表里只有 AI Studio 一行；它们仍然是独立 npm 包，单独安装时自己出现一行。',
+      note: '四个组件由这个包的四个补丁行挂载（dsh-as-aistudio/edit 等），插件列表里仍然只有 AI Studio 一行；它们仍是独立 npm 包，单独安装时自己出现一行。宿主未挂载的组件不会画到界面上。',
     }
 
     const en = {
@@ -4869,7 +5137,8 @@ window.__ModuleLoader__.load({
       statusInstalled: 'Installed, host not mounted',
       statusMissing: 'Not installed',
       statusUnknown: 'Host did not report',
-      hostOnly: '(a standalone install shows its own row; here AI Studio mounts it)',
+      hostOnly: '(a standalone install also shows its own row)',
+      row: 'row {row}',
       version: 'v{version}',
       versionUnknown: 'version unknown',
       repo: 'Repo',
@@ -4881,7 +5150,7 @@ window.__ModuleLoader__.load({
       interopHide: 'Row-hide ownership attributes (a foreign hide is never cleared)',
       host: 'host DSH {version}',
       hostUnknown: 'host version unknown',
-      note: 'The four components are mounted by this package, so the plugin list shows only AI Studio; they are still independent npm packages and appear as their own rows when installed standalone.',
+      note: 'The four components are mounted by the four patch rows of this package (dsh-as-aistudio/edit and friends), so the plugin list still shows only AI Studio; they remain independent npm packages that show their own row when installed standalone. A component whose host half is not mounted is not drawn at all.',
     }
 
     const COMPONENT_COPY = {
@@ -5014,14 +5283,87 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * Mount the four vendored browser halves, in interop order.
-     * @param ctx - this plugin's client context.
-     * @returns which ones mounted, by id.
+     * Whether one component of a status payload is worth drawing: exactly the
+     * components the panel reports as 已启用 / Enabled.
+     *
+     * The gate and the panel therefore cannot disagree - "the status says it is
+     * up" and "we mounted it" are the same predicate, in one place.
+     *
+     * @param component - one entry of the status payload's components.
+     * @returns true when its UI may be mounted.
      */
-    function mountComponents(ctx) {
+    function shouldMount(component) {
+      return stateOf(component) === 'mounted'
+    }
+
+    /**
+     * The vendored ids a status payload allows, in mount order.
+     *
+     * A component the payload does not mention stays off: the host half that
+     * generated the payload is the only authority on what is running, and a
+     * bundle newer than the host must not draw what the host never mounted.
+     *
+     * @param payload - the status document, or null when the host did not answer.
+     * @returns component ids to mount; every id when there is no payload.
+     */
+    function mountableComponents(payload) {
+      if (payload === null || payload === undefined) return VENDORED.slice()
+      const reported = new Map()
+      for (const component of payload.components) {
+        if (component !== null && typeof component === 'object' && typeof component.id === 'string') reported.set(component.id, component)
+      }
+      return VENDORED.filter((id) => {
+        const component = reported.get(id)
+        return component !== undefined && shouldMount(component)
+      })
+    }
+
+    /**
+     * Read the host's status document once.
+     *
+     * Every failure reads as "unknown" rather than "nothing is running": a host
+     * that cannot answer has said nothing about the components, and guessing
+     * "down" would blank the whole strip for a host that is merely busy.
+     *
+     * @returns the status document, or null.
+     */
+    function readStatus() {
+      if (typeof fetch !== 'function') return Promise.resolve(null)
+      let pending
+      try {
+        pending = fetch(statusUrl(0), { headers: { accept: 'application/json' } })
+      } catch (error) {
+        return Promise.resolve(null)
+      }
+      return Promise.resolve(pending)
+        .then((response) => response.json())
+        .then((body) => (body !== null && body !== undefined && body.ok === true && Array.isArray(body.components) ? body : null))
+        .catch(() => null)
+    }
+
+    /**
+     * Mount the vendored browser halves whose host half is really up.
+     *
+     * @param ctx - this plugin's client context.
+     * @returns which ones mounted, by id (the marker's payload).
+     */
+    async function mountLiveComponents(ctx) {
+      const payload = await readStatus()
+      const ids = mountableComponents(payload)
+      return mountComponents(ctx, ids)
+    }
+
+    /**
+     * Mount the vendored browser halves named by the gate, in interop order.
+     * @param ctx - this plugin's client context.
+     * @param ids - component ids the host reported as mounted.
+     * @returns which ones mounted, by id; gated-off ones are false.
+     */
+    function mountComponents(ctx, ids) {
       const mounted = {}
-      for (const id of VENDORED) mounted[id] = applyVendored(ctx, id)
-      globalThis[DEBUG_KEY] = { version: PLUGIN_VERSION, mounted, route: STATUS_ROUTE }
+      const gate = Array.isArray(ids) ? ids : VENDORED.slice()
+      for (const id of VENDORED) mounted[id] = gate.indexOf(id) === -1 ? false : applyVendored(ctx, id)
+      globalThis[DEBUG_KEY] = { version: PLUGIN_VERSION, mounted, gate: gate.slice(), route: STATUS_ROUTE }
       return mounted
     }
 
@@ -5134,7 +5476,9 @@ window.__ModuleLoader__.load({
           ? t('versionUnknown')
           : fill(t('version'), { version: component.version })
       const ownRows = typeof component.ownRows === 'number' && component.ownRows > 0 ? t('hostOnly') : ''
-      const tail = [ownRows].filter((part) => part !== '').join(' · ')
+      const rowLine =
+        typeof component.hostRow === 'string' && component.hostRow !== '' ? fill(t('row'), { row: component.hostRow }) : ''
+      const tail = [rowLine, ownRows].filter((part) => part !== '').join(' · ')
       return h('li', { className: 'dsas-row', key: component.id }, [
         h('div', { className: 'dsas-rowHead', key: 'head' }, [
           h('span', { className: 'dsas-dot', 'data-state': state, key: 'dot' }),
@@ -5181,7 +5525,6 @@ window.__ModuleLoader__.load({
     function apply(ctx) {
       injectStyles()
       ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-as-aistudio: dictionaries')
-      mountComponents(ctx)
 
       const t = ctx.locale.bind(NS)
       const currentLocale = () => {
@@ -5216,6 +5559,12 @@ window.__ModuleLoader__.load({
         },
         NS + ': lifecycle',
       )
+
+      // The components mount last, and the gate is a network read: the studio's
+      // own tab is registered above so a host that never answers delays the
+      // components, never the panel that reports on them. Awaiting it is what
+      // makes the marker (and this plugin's fiber) mean "the gate has settled".
+      return mountLiveComponents(ctx)
     }
 
     exports.apply = apply
@@ -5231,6 +5580,9 @@ window.__ModuleLoader__.load({
     exports.HIDE_OWNERS = HIDE_OWNERS
     exports.VENDORED = VENDORED
     exports.applyVendored = applyVendored
+    exports.shouldMount = shouldMount
+    exports.mountableComponents = mountableComponents
+    exports.mountComponents = mountComponents
     exports.zh = zh
     exports.en = en
     return module.exports

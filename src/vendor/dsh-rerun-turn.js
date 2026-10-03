@@ -1,6 +1,6 @@
 // dsh-rerun-turn browser half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-rerun-turn/lib/client.js  (v0.1.24, sha256 78101edc9b9d7a16)
+// Source: ../dsh-rerun-turn/lib/client.js  (v0.1.25, sha256 7ce84517d66de598)
 // Regenerate with `npm run vendor`; test/vendor-sync.test.js fails when this is stale.
 //
 // The component registers its factory with the host module loader; inside this
@@ -19,7 +19,7 @@ export default (require) => {
     const ROUTE_PREFIX = '/dsh-rerun-turn'
 
     /** Keep in sync with package.json and lib/index.js. */
-    const PLUGIN_VERSION = '0.1.24'
+    const PLUGIN_VERSION = '0.1.25'
 
     // --- copy -----------------------------------------------------------------
 

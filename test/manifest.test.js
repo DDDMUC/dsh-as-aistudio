@@ -11,7 +11,7 @@
 //   node --test "test/*.test.js"
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { COMPONENTS, COMPONENT_IDS, INTEROP, STUDIO_ID, STUDIO_VERSION } from '../src/components.js'
+import { COMPONENTS, COMPONENT_IDS, COMPONENT_ROW_NAMES, INTEROP, STUDIO_ID, STUDIO_VERSION, rowNameOf } from '../src/components.js'
 
 const NPM_NAME = /^(@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/
 const SEMVER = /^\d+\.\d+\.\d+$/
@@ -35,6 +35,24 @@ test('every component is an independent npm package with its own repo', () => {
 test('component ids are unique and ordered', () => {
   assert.equal(new Set(COMPONENT_IDS).size, COMPONENT_IDS.length)
   assert.deepEqual(COMPONENT_IDS, [...COMPONENT_IDS])
+})
+
+// The suffix is the bundle-patch row that mounts the component AND the exports
+// subpath that row resolves through, so it is asserted here as manifest data; the
+// patch and package.json are matched against it in test/packaging.test.js.
+test('every component names the row that mounts it', () => {
+  const seen = new Set()
+  COMPONENTS.forEach((component, index) => {
+    assert.match(component.suffix, /^[a-z][a-z0-9-]*$/, component.id + ': suffix shape')
+    assert.equal(seen.has(component.suffix), false, component.suffix + ' is claimed twice')
+    seen.add(component.suffix)
+    assert.equal(rowNameOf(component), STUDIO_ID + '/' + component.suffix, component.id + ': row name')
+    // A row named after the component itself would be a plugin-list row of its
+    // own; the row must live in this package's namespace.
+    assert.notEqual(rowNameOf(component), component.package)
+    assert.equal(COMPONENT_ROW_NAMES[index], rowNameOf(component))
+  })
+  assert.equal(new Set(COMPONENT_ROW_NAMES).size, COMPONENT_ROW_NAMES.length)
 })
 
 test('every component speaks both languages', () => {

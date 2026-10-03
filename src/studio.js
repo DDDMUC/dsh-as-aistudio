@@ -4,33 +4,32 @@
 // its own. tools/build.mjs stitches it together with the four vendored component
 // factories into src/client.js - the single bundle the plugin actually ships -
 // placing each factory verbatim into this scope and declaring VENDORED_TABLE.
-// Run "npm run build" after changing this file or any component.
+// After changing this file, run "node tools/build.mjs" (NOT "npm run build",
+// which first re-vendors src/vendor/ from the component checkouts).
 //
-// Self-contained: the plugin list shows ONE row (this package). The four
-// components are ordinary dependencies with no rows of their own, so the only way
-// their browser halves can reach the page is inside that bundle. They travel in
-// src/vendor/<component>.js, generated from the component sources by
-// tools/vendor.mjs, and build.mjs places each factory verbatim into this scope.
+// Self-contained: the plugin list shows ONE row (this package). This bundle is
+// served for that row, so it is the only way the four components' browser halves
+// can reach the page. They travel in src/vendor/<component>.js, generated from
+// the component sources by tools/vendor.mjs, and build.mjs places each factory
+// verbatim into this scope.
 //
 // What is deliberately NOT here: no copy of any component logic. The host halves
-// (routes, rollback, replay) run in the components themselves, mounted by
-// src/index.js; only the browser factories travel here, which is the part that
-// cannot be delegated because a bundle is served per Loader row.
+// (routes, rollback, replay) run in the components themselves, mounted by the
+// component rows in cordis.patch.yml through src/shell.js; only the browser
+// factories travel here, which is the part that cannot be delegated because a
+// bundle is served per Loader row.
 //
 // Mount order is the manifest order (edit, rerun, delete, render) and it matters:
 // the slot registrations are ordered by it, and each slot id / order pair is
 // unique by contract (docs/INTEROP.md section 2).
 //
-
-//
-// What is deliberately NOT here: no copy of any component logic. The host halves
-// (routes, rollback, replay) run in the components themselves, mounted by
-// src/index.js; only the browser factories travel here, which is the part that
-// cannot be delegated because a bundle is served per Loader row.
-//
-// Mount order is the manifest order (edit, rerun, delete, render) and it matters:
-// the slot registrations are ordered by it, and each slot id / order pair is
-// unique by contract (docs/INTEROP.md section 2).
+// Mounting is GATED on the host's own report. A component whose host half is not
+// really up (its package is missing, its row was disabled, its start failed) has
+// no routes behind it, so drawing its buttons would offer an action that cannot
+// work - the exact failure this package exists to prevent. So the gate asks
+// /api/dsh-as-aistudio/status first and mounts only what that answer calls
+// mounted; a host that cannot answer at all is treated as "unknown" and every
+// factory is mounted, which is the pre-gate behaviour.
 //
 // One surface is added on top: the Settings -> Plugins -> AI Studio tab, which
 // lists each component's live state. That is where a reader sees which of the
@@ -49,7 +48,7 @@ window.__ModuleLoader__.load({
     const NS = 'dsh-as-aistudio'
 
     /** Keep in sync with package.json and src/components.js. */
-    const PLUGIN_VERSION = '0.2.5'
+    const PLUGIN_VERSION = '0.2.6'
 
     /** Presence marker the live verifier reads. */
     const DEBUG_KEY = '__DSH_AS_AISTUDIO__'
@@ -76,7 +75,8 @@ window.__ModuleLoader__.load({
       statusInstalled: '已安装，宿主未挂载',
       statusMissing: '未安装',
       statusUnknown: '宿主未报告',
-      hostOnly: '（独立安装时走自己的插件行；这里由 AI Studio 统一挂载）',
+      hostOnly: '（独立安装时走自己的插件行）',
+      row: '行 {row}',
       version: '版本 {version}',
       versionUnknown: '版本未知',
       repo: '仓库',
@@ -88,7 +88,7 @@ window.__ModuleLoader__.load({
       interopHide: '行隐藏归属属性（别人声明的隐藏，我不能清掉）',
       host: '宿主 DSH {version}',
       hostUnknown: '宿主版本未知',
-      note: '四个组件由这个包统一挂载，所以插件列表里只有 AI Studio 一行；它们仍然是独立 npm 包，单独安装时自己出现一行。',
+      note: '四个组件由这个包的四个补丁行挂载（dsh-as-aistudio/edit 等），插件列表里仍然只有 AI Studio 一行；它们仍是独立 npm 包，单独安装时自己出现一行。宿主未挂载的组件不会画到界面上。',
     }
 
     const en = {
@@ -100,7 +100,8 @@ window.__ModuleLoader__.load({
       statusInstalled: 'Installed, host not mounted',
       statusMissing: 'Not installed',
       statusUnknown: 'Host did not report',
-      hostOnly: '(a standalone install shows its own row; here AI Studio mounts it)',
+      hostOnly: '(a standalone install also shows its own row)',
+      row: 'row {row}',
       version: 'v{version}',
       versionUnknown: 'version unknown',
       repo: 'Repo',
@@ -112,7 +113,7 @@ window.__ModuleLoader__.load({
       interopHide: 'Row-hide ownership attributes (a foreign hide is never cleared)',
       host: 'host DSH {version}',
       hostUnknown: 'host version unknown',
-      note: 'The four components are mounted by this package, so the plugin list shows only AI Studio; they are still independent npm packages and appear as their own rows when installed standalone.',
+      note: 'The four components are mounted by the four patch rows of this package (dsh-as-aistudio/edit and friends), so the plugin list still shows only AI Studio; they remain independent npm packages that show their own row when installed standalone. A component whose host half is not mounted is not drawn at all.',
     }
 
     const COMPONENT_COPY = {
@@ -245,14 +246,87 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * Mount the four vendored browser halves, in interop order.
-     * @param ctx - this plugin's client context.
-     * @returns which ones mounted, by id.
+     * Whether one component of a status payload is worth drawing: exactly the
+     * components the panel reports as 已启用 / Enabled.
+     *
+     * The gate and the panel therefore cannot disagree - "the status says it is
+     * up" and "we mounted it" are the same predicate, in one place.
+     *
+     * @param component - one entry of the status payload's components.
+     * @returns true when its UI may be mounted.
      */
-    function mountComponents(ctx) {
+    function shouldMount(component) {
+      return stateOf(component) === 'mounted'
+    }
+
+    /**
+     * The vendored ids a status payload allows, in mount order.
+     *
+     * A component the payload does not mention stays off: the host half that
+     * generated the payload is the only authority on what is running, and a
+     * bundle newer than the host must not draw what the host never mounted.
+     *
+     * @param payload - the status document, or null when the host did not answer.
+     * @returns component ids to mount; every id when there is no payload.
+     */
+    function mountableComponents(payload) {
+      if (payload === null || payload === undefined) return VENDORED.slice()
+      const reported = new Map()
+      for (const component of payload.components) {
+        if (component !== null && typeof component === 'object' && typeof component.id === 'string') reported.set(component.id, component)
+      }
+      return VENDORED.filter((id) => {
+        const component = reported.get(id)
+        return component !== undefined && shouldMount(component)
+      })
+    }
+
+    /**
+     * Read the host's status document once.
+     *
+     * Every failure reads as "unknown" rather than "nothing is running": a host
+     * that cannot answer has said nothing about the components, and guessing
+     * "down" would blank the whole strip for a host that is merely busy.
+     *
+     * @returns the status document, or null.
+     */
+    function readStatus() {
+      if (typeof fetch !== 'function') return Promise.resolve(null)
+      let pending
+      try {
+        pending = fetch(statusUrl(0), { headers: { accept: 'application/json' } })
+      } catch (error) {
+        return Promise.resolve(null)
+      }
+      return Promise.resolve(pending)
+        .then((response) => response.json())
+        .then((body) => (body !== null && body !== undefined && body.ok === true && Array.isArray(body.components) ? body : null))
+        .catch(() => null)
+    }
+
+    /**
+     * Mount the vendored browser halves whose host half is really up.
+     *
+     * @param ctx - this plugin's client context.
+     * @returns which ones mounted, by id (the marker's payload).
+     */
+    async function mountLiveComponents(ctx) {
+      const payload = await readStatus()
+      const ids = mountableComponents(payload)
+      return mountComponents(ctx, ids)
+    }
+
+    /**
+     * Mount the vendored browser halves named by the gate, in interop order.
+     * @param ctx - this plugin's client context.
+     * @param ids - component ids the host reported as mounted.
+     * @returns which ones mounted, by id; gated-off ones are false.
+     */
+    function mountComponents(ctx, ids) {
       const mounted = {}
-      for (const id of VENDORED) mounted[id] = applyVendored(ctx, id)
-      globalThis[DEBUG_KEY] = { version: PLUGIN_VERSION, mounted, route: STATUS_ROUTE }
+      const gate = Array.isArray(ids) ? ids : VENDORED.slice()
+      for (const id of VENDORED) mounted[id] = gate.indexOf(id) === -1 ? false : applyVendored(ctx, id)
+      globalThis[DEBUG_KEY] = { version: PLUGIN_VERSION, mounted, gate: gate.slice(), route: STATUS_ROUTE }
       return mounted
     }
 
@@ -365,7 +439,9 @@ window.__ModuleLoader__.load({
           ? t('versionUnknown')
           : fill(t('version'), { version: component.version })
       const ownRows = typeof component.ownRows === 'number' && component.ownRows > 0 ? t('hostOnly') : ''
-      const tail = [ownRows].filter((part) => part !== '').join(' · ')
+      const rowLine =
+        typeof component.hostRow === 'string' && component.hostRow !== '' ? fill(t('row'), { row: component.hostRow }) : ''
+      const tail = [rowLine, ownRows].filter((part) => part !== '').join(' · ')
       return h('li', { className: 'dsas-row', key: component.id }, [
         h('div', { className: 'dsas-rowHead', key: 'head' }, [
           h('span', { className: 'dsas-dot', 'data-state': state, key: 'dot' }),
@@ -412,7 +488,6 @@ window.__ModuleLoader__.load({
     function apply(ctx) {
       injectStyles()
       ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-as-aistudio: dictionaries')
-      mountComponents(ctx)
 
       const t = ctx.locale.bind(NS)
       const currentLocale = () => {
@@ -447,6 +522,12 @@ window.__ModuleLoader__.load({
         },
         NS + ': lifecycle',
       )
+
+      // The components mount last, and the gate is a network read: the studio's
+      // own tab is registered above so a host that never answers delays the
+      // components, never the panel that reports on them. Awaiting it is what
+      // makes the marker (and this plugin's fiber) mean "the gate has settled".
+      return mountLiveComponents(ctx)
     }
 
     exports.apply = apply
@@ -462,6 +543,9 @@ window.__ModuleLoader__.load({
     exports.HIDE_OWNERS = HIDE_OWNERS
     exports.VENDORED = VENDORED
     exports.applyVendored = applyVendored
+    exports.shouldMount = shouldMount
+    exports.mountableComponents = mountableComponents
+    exports.mountComponents = mountComponents
     exports.zh = zh
     exports.en = en
     return module.exports

@@ -22,6 +22,19 @@ globalThis.window = {
   },
 }
 
+// The bundle's mounting gate reads the status route before it mounts anything.
+// This file asserts the studio's own surfaces and the gate's pure predicates, so
+// the stub reports every component as NOT mounted: nothing is drawn, no factory
+// runs against a stub context, and an unexpected registration can only come from
+// the studio itself. The fully mounted path is exercised against the real
+// vendored factories in test/bundle-exec.test.js.
+const ALL_DOWN = ['dsh-edit-turn', 'dsh-rerun-turn', 'dsh-delete-turn', 'dsh-markdown-bubble'].map((id) => ({
+  id,
+  installed: true,
+  hostMounted: false,
+}))
+globalThis.fetch = async () => ({ json: async () => ({ ok: true, components: ALL_DOWN }) })
+
 await import('../src/client.js')
 
 /** A React stub carrying only what the factory touches. */
@@ -165,6 +178,76 @@ test('stateOf reads the host payload honestly', () => {
   assert.equal(exports.stateOf({ hostMounted: null, installed: true }), 'mounted')
   assert.equal(exports.stateOf({ hostMounted: null, installed: false }), 'missing')
   assert.equal(exports.stateOf({ hostMounted: false, installed: false }), 'missing')
+})
+
+// The gate: the browser half must not draw a component whose host half is not
+// up, because its buttons would call routes that do not exist. The predicate is
+// deliberately the SAME one the panel renders, so "the panel says 已启用" and
+// "we mounted it" can never drift apart.
+test('the gate and the panel share one predicate', () => {
+  const exports = materialize()
+  const cases = [
+    { hostMounted: true, installed: true },
+    { hostMounted: false, installed: true },
+    { hostMounted: null, installed: true },
+    { hostMounted: null, installed: false },
+    { hostMounted: false, installed: false },
+    { hostMounted: true, installed: false },
+  ]
+  for (const component of cases) {
+    assert.equal(
+      exports.shouldMount(component),
+      exports.stateOf(component) === 'mounted',
+      JSON.stringify(component) + ': the gate must follow the panel',
+    )
+  }
+  // Spelled out, because these are the decisions: an absent host half is not
+  // drawn, an unreported one is (nothing was denied), a reported-live one is.
+  assert.equal(exports.shouldMount({ hostMounted: false, installed: true }), false)
+  assert.equal(exports.shouldMount({ hostMounted: null, installed: true }), true)
+  assert.equal(exports.shouldMount({ hostMounted: null, installed: false }), false)
+})
+
+test('apply draws nothing when the host reports every component down', async () => {
+  // The end-to-end shape of the gate in this half: the tab is still registered
+  // (it is what tells the reader why nothing is there), and not one component
+  // surface is.
+  const exports = materialize()
+  const stub = contextStub()
+  await exports.apply(stub.ctx)
+  const marker = globalThis.__DSH_AS_AISTUDIO__
+  assert.ok(marker, 'the studio records its mount state')
+  for (const id of exports.VENDORED) assert.equal(marker.mounted[id], false, id + ' must stay off the page')
+  assert.deepEqual(
+    stub.registrations.map((row) => row.options.name),
+    ['settings.plugins.tab'],
+    'a gated-off component must register no surface',
+  )
+})
+
+test('mountableComponents keeps only what the host reports as mounted', () => {
+  const exports = materialize()
+  const payload = {
+    ok: true,
+    components: [
+      { id: 'dsh-edit-turn', installed: true, hostMounted: true },
+      { id: 'dsh-rerun-turn', installed: true, hostMounted: false },
+      { id: 'dsh-delete-turn', installed: true, hostMounted: false },
+      { id: 'dsh-markdown-bubble', installed: true, hostMounted: true },
+    ],
+  }
+  assert.deepEqual(exports.mountableComponents(payload), ['dsh-edit-turn', 'dsh-markdown-bubble'])
+  // No answer at all is not a refusal: the pre-gate behaviour is kept, so a host
+  // that cannot answer does not blank the whole action strip.
+  assert.deepEqual(exports.mountableComponents(null), exports.VENDORED)
+})
+
+test('a component the host never mentions is not mounted', () => {
+  // A bundle newer than the host half must not draw a component the host has
+  // never heard of: there is no route behind it.
+  const exports = materialize()
+  const payload = { ok: true, components: [{ id: 'dsh-edit-turn', installed: true, hostMounted: true }] }
+  assert.deepEqual(exports.mountableComponents(payload), ['dsh-edit-turn'])
 })
 
 test('fill substitutes known keys and leaves unknown ones visible', () => {
