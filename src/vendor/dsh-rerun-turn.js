@@ -1,6 +1,6 @@
 // dsh-rerun-turn browser half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-rerun-turn/lib/client.js  (v0.1.25, sha256 7ce84517d66de598)
+// Source: ../dsh-rerun-turn/lib/client.js  (v0.1.27, sha256 1db55a5a2a12ac66)
 // Regenerate with `npm run vendor`; test/vendor-sync.test.js fails when this is stale.
 //
 // The component registers its factory with the host module loader; inside this
@@ -19,7 +19,7 @@ export default (require) => {
     const ROUTE_PREFIX = '/dsh-rerun-turn'
 
     /** Keep in sync with package.json and lib/index.js. */
-    const PLUGIN_VERSION = '0.1.25'
+    const PLUGIN_VERSION = '0.1.27'
 
     // --- copy -----------------------------------------------------------------
 
@@ -551,11 +551,19 @@ export default (require) => {
         resolved.set(key, decision)
         return decision
       }
-      // The turn a row belongs to, from its key shape
-      // (`turn-process17`, `turn-tail17`, `assistant-step17:1`).
-      const keyTurnOf = (key) => {
+      // The turn a row belongs to. The platform publishes it on the flow item
+      // itself (`data-chat-turn`, the same anchor the prompt-row buttons read),
+      // and a key sometimes spells it out as well
+      // (`turn-process17`, `turn-tail17`, `assistant-step17:1`). Reading the
+      // key alone is what left a bookkeeping turn's empty "completed" strip on
+      // screen once DSH started keying those rows by node kind
+      // (`turn-tail`, `["turn-tail","response"]`) with the turn only in the
+      // data attribute.
+      const keyTurnOf = (key, row) => {
         const match = /(?:turn-process|turn-tail)(\d+)|assistant-step(\d+):/.exec(key)
-        return match === null ? null : Number(match[1] ?? match[2])
+        if (match !== null) return Number(match[1] ?? match[2])
+        const fromRow = row && row.dataset ? Number(row.dataset.chatTurn) : Number.NaN
+        return Number.isInteger(fromRow) ? fromRow : null
       }
       const nodeOf = (key) => {
         const direct = snapshot.nodes.get(key)
@@ -585,7 +593,7 @@ export default (require) => {
           key,
           kind: node ? node.kind : null,
           seqs: node ? seqsFor(node) : [],
-          keyTurn: keyTurnOf(key),
+          keyTurn: keyTurnOf(key, row),
           inTarget: false,
           inTail: false,
           fresh: false,
