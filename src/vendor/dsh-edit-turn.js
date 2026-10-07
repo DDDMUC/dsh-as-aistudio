@@ -1,6 +1,6 @@
 // dsh-edit-turn browser half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-edit-turn/lib/client.js  (v0.2.19, sha256 618c7394fb3880c4)
+// Source: ../dsh-edit-turn/lib/client.js  (v0.2.20, sha256 dd3f857d93cbdb0c)
 // Regenerate with `npm run vendor`; test/vendor-sync.test.js fails when this is stale.
 //
 // The component registers its factory with the host module loader; inside this
@@ -32,7 +32,7 @@ export default (require) => {
     const RERUN_PREFIX = '/dsh-rerun-turn'
 
     /** Keep in sync with package.json and lib/index.js. */
-    const PLUGIN_VERSION = '0.2.19'
+    const PLUGIN_VERSION = '0.2.20'
 
     // --- copy -----------------------------------------------------------------
 
@@ -75,7 +75,6 @@ export default (require) => {
       'error.prompt': '已回退，但改后的内容没能写进上下文。请重试。',
       'error.reply': '已回退，但替换没有落地。请重试。',
       'error.empty': '改写后的内容不能为空。',
-      'error.unchanged': '内容没有变化，未做任何修改。',
       'error.rerun-nothing': '已保存，但这一轮没有可重跑的作答。',
       'error.rerun-unavailable': '已保存，但重跑没有开始，请稍后重试。',
       'error.not-rerunnable': '这一轮没有可重跑的作答。',
@@ -123,7 +122,6 @@ export default (require) => {
       'error.prompt': 'Rolled back, but the re-run did not start. Send the revised text manually.',
       'error.reply': 'Rolled back, but the replacement did not land. Try again.',
       'error.empty': 'The revised message cannot be empty.',
-      'error.unchanged': 'Nothing changed, so no edit was made.',
       'error.rerun-nothing': 'Saved, but this turn has no reply that can be re-run.',
       'error.rerun-unavailable': 'Saved, but the re-run did not start; try again.',
       'error.not-rerunnable': 'This turn has no reply that can be re-run.',
@@ -738,10 +736,18 @@ export default (require) => {
             failure: null,
           })
           // `unchanged` means the host wrote NOTHING: the draft is (verbatim)
-          // the text the message already carries. There is no failure to report -
-          // the edit was simply not an edit - so it is noticed as such, and
-          // nothing else about this pass changes: no row was shadowed, so none is
-          // hidden, and the message stays on screen with the pencil it had.
+          // the text the message already carries. The flag is read here for one
+          // reason, and it is not the user's: a no-op is not a failure. The
+          // `applied === false` wording below would claim the rollback landed
+          // and the replacement did not, which is a lie about an edit that was
+          // never attempted.
+          //
+          // Nothing is announced for it, deliberately (0.2.20 removed the
+          // notice this used to draw): the edit was simply not an edit, so the
+          // editor closes like any save and the screen is exactly as it was -
+          // no row was shadowed, so none is hidden, and the message keeps the
+          // pencil it had. (The banner also landed on top of the composer's
+          // placeholder text, which is not a place to report anything from.)
           //
           // The re-run intent survives it. "Re-run" saves first only because the
           // sibling regenerates the turn from the prompt the surface shows; a
@@ -749,9 +755,7 @@ export default (require) => {
           // wording moved, so the chain below is NOT gated on a write having
           // happened. (The decision itself is the host's - the text is parsed
           // there, once - and this half only reads the flag it sends back.)
-          if (data.unchanged === true) {
-            if (!rerunIntent) this.notify('unchanged')
-          } else {
+          if (data.unchanged !== true) {
             // The rollback has landed, so the editor is gone with its row: a
             // failed second half has to be reported somewhere that survives that.
             if (data.kind === 'reply' && data.applied === false) this.notify('reply')
