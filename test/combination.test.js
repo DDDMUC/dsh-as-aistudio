@@ -868,9 +868,22 @@ function mountBareUserRow(document) {
   return { row }
 }
 
+/**
+ * The render-time view delete-turn's OverlayEntry reads: a stand-in for the
+ * frozen object `DeletionController` builds (dsh-delete-turn/src/client.js).
+ * The scene drives `hidden`; the other fields are that component's own shape,
+ * so this double has to grow with it - 0.1.8 added `hiddenVia`, 0.1.9 added
+ * `spliceSeqs`. Both are read on the render path: `isRowHidden` guards its
+ * `hiddenVia` (`hiddenVia !== undefined`), but `applyDom` reads
+ * `view.spliceSeqs.has(target.seq)` unguarded, so a double missing a field
+ * throws inside the DOM pass instead of failing an assertion.
+ */
 function deleteView(hidden) {
   return {
     hidden: hidden ? new Map([[ROW_SEQ, 'message']]) : new Map(),
+    hiddenVia: new Map(),
+    // The seqs the host advertises as whole-turn deletable (0.1.9).
+    spliceSeqs: new Set(),
     surface: new Set([ROW_SEQ]),
     replyTurns: new Set(),
     edits: new Map(),
