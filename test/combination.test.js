@@ -873,40 +873,75 @@ function mountBareUserRow(document) {
 }
 
 /**
- * The render-time view delete-turn's OverlayEntry reads: a stand-in for the
- * frozen object `DeletionController` builds (dsh-delete-turn/src/client.js).
- * The scene drives `hidden`; the other fields are that component's own shape,
- * so this double has to grow with it - 0.1.8 added `hiddenVia`, and 0.1.11
- * renamed the turn-delete advertisement `spliceSeqs` -> `turnSeqs` (the "turn
- * delete is one range replace" refactor). Both are read on the render path:
- * `isRowHidden` guards its `hiddenVia` (`hiddenVia !== undefined`), but
- * `applyDom` reads `view.turnSeqs.has(target.seq)` unguarded, so a double
- * missing a field throws inside the DOM pass instead of failing an assertion.
+ * The keys of the view `DeletionController` freezes in its constructor, read
+ * off dsh-delete-turn/src/client.js (0.1.11):
  *
- * This double IS the frozen view `DeletionController` publishes
- * (dsh-delete-turn/src/client.js, the `Object.freeze` in its constructor):
- * every field that component adds, renames or drops has to be mirrored here,
- * or the render path dies with a TypeError instead of a clean assertion.
+ *   this.view = Object.freeze({
+ *     hidden, hiddenVia, surface, turnSeqs, replyTurns, edits, markerTurns,
+ *     surfaceReady, surfaceThrough, loaded, loadError, dialog, pending,
+ *     failure, revision,
+ *   })
+ *
+ * Written out by hand on purpose: a list derived from the same snapshot it
+ * checks would agree with anything. This table is the nail, `deleteView` is the
+ * derivation - keep the table in step with the component.
  */
-function deleteView(hidden) {
-  return {
+const DELETE_VIEW_KEYS = [
+  'dialog',
+  'edits',
+  'failure',
+  'hidden',
+  'hiddenVia',
+  'loadError',
+  'loaded',
+  'markerTurns',
+  'pending',
+  'replyTurns',
+  'revision',
+  'surface',
+  'surfaceReady',
+  'surfaceThrough',
+  'turnSeqs',
+]
+
+/**
+ * The render-time view delete-turn's OverlayEntry reads, DERIVED from the very
+ * controller this scene drives instead of hand-mirrored: `controller` is the
+ * plugin's own `DeletionController` - the instance its
+ * `conversation.input.overlay` registration injects (dsh-delete-turn/src/
+ * client.js) - and `getSnapshot()` is the frozen view that component
+ * publishes. The scene owns exactly one field of it, `hidden`.
+ *
+ * A field the component adds, renames or drops now rides along by itself. The
+ * old hand-written double could not: 0.1.8 added `hiddenVia` (survived only
+ * because `isRowHidden` guards it) and 0.1.11 renamed the turn-delete
+ * advertisement `spliceSeqs` -> `turnSeqs`, which `applyDom` reads unguarded
+ * (`view.turnSeqs.has(target.seq)`) - so that change surfaced as 6 internal
+ * TypeErrors instead of one failed assertion.
+ *
+ * The derivation is not a blank cheque: the snapshot's own keys are compared
+ * against DELETE_VIEW_KEYS on every call, and a gained or dropped field fails
+ * one sentence right here - before a render pass can turn it into a TypeError.
+ */
+function deleteView(controller, hidden) {
+  assert.equal(
+    typeof controller?.getSnapshot,
+    'function',
+    'the delete-turn controller no longer exposes getSnapshot(): cannot derive its view',
+  )
+  const derived = {
+    ...controller.getSnapshot(),
+    // The one field the scene drives: whether the transcript calls the row hidden.
     hidden: hidden ? new Map([[ROW_SEQ, 'message']]) : new Map(),
-    hiddenVia: new Map(),
-    // The seqs the host advertises as whole-turn deletable (0.1.11; this was
-    // `spliceSeqs` in 0.1.9, renamed by the one-range-replace refactor).
-    turnSeqs: new Set(),
-    surface: new Set([ROW_SEQ]),
-    replyTurns: new Set(),
-    edits: new Map(),
-    markerTurns: new Set(),
-    surfaceReady: false,
-    surfaceThrough: 99,
-    loaded: true,
-    loadError: false,
-    dialog: null,
-    pending: false,
-    failure: null,
   }
+  const actual = Object.keys(derived).sort()
+  const declared = DELETE_VIEW_KEYS.slice().sort()
+  if (actual.length !== declared.length || actual.some((key, index) => key !== declared[index])) {
+    const gained = actual.filter((key) => !declared.includes(key))
+    const lost = declared.filter((key) => !actual.includes(key))
+    assert.fail('the component view gained/lost fields: +' + gained.join(' ') + ' -' + lost.join(' '))
+  }
+  return derived
 }
 
 function editView(hidden) {
@@ -979,8 +1014,10 @@ async function attributionScene({ a, b, withBar }) {
   const pass = (name, hidden) => {
     const part = parts.get(name)
     if (name === 'dsh-delete-turn') {
-      // delete-turn reads the render-time view through the hook.
-      const view = deleteView(hidden)
+      // delete-turn reads the render-time view through the hook; that view is
+      // this component's own controller snapshot (plus the scene's `hidden`),
+      // so its shape is never mirrored by hand here.
+      const view = deleteView(part.controller, hidden)
       part.entry.component({ useChat: () => snapshot, useDeletion: () => view, controller: part.controller, t })
       return
     }
