@@ -787,6 +787,10 @@ test('with all four loaded the registrations match the section-2 allocation tabl
     'conversation.input.overlay | delete-turn | 8',
     'conversation.input.overlay | edit-turn | 9',
     'conversation.input.overlay | rerun-turn | 10',
+    // dsh-delete-turn 0.1.10 added the "ask before deleting" toggle on the
+    // plugin page, so the bundle also registers this key-based entry. It has no
+    // order (the row-config slot is keyed, not ordered), so §2 stays unique.
+    'plugins.row.config | dsh-delete-turn#dsh-delete-turn | priority null',
   ])
   assert.deepEqual(runtime.records.locales.map((item) => item.ns).sort(), [
     'dsh-delete-turn',
@@ -872,18 +876,25 @@ function mountBareUserRow(document) {
  * The render-time view delete-turn's OverlayEntry reads: a stand-in for the
  * frozen object `DeletionController` builds (dsh-delete-turn/src/client.js).
  * The scene drives `hidden`; the other fields are that component's own shape,
- * so this double has to grow with it - 0.1.8 added `hiddenVia`, 0.1.9 added
- * `spliceSeqs`. Both are read on the render path: `isRowHidden` guards its
- * `hiddenVia` (`hiddenVia !== undefined`), but `applyDom` reads
- * `view.spliceSeqs.has(target.seq)` unguarded, so a double missing a field
- * throws inside the DOM pass instead of failing an assertion.
+ * so this double has to grow with it - 0.1.8 added `hiddenVia`, and 0.1.11
+ * renamed the turn-delete advertisement `spliceSeqs` -> `turnSeqs` (the "turn
+ * delete is one range replace" refactor). Both are read on the render path:
+ * `isRowHidden` guards its `hiddenVia` (`hiddenVia !== undefined`), but
+ * `applyDom` reads `view.turnSeqs.has(target.seq)` unguarded, so a double
+ * missing a field throws inside the DOM pass instead of failing an assertion.
+ *
+ * This double IS the frozen view `DeletionController` publishes
+ * (dsh-delete-turn/src/client.js, the `Object.freeze` in its constructor):
+ * every field that component adds, renames or drops has to be mirrored here,
+ * or the render path dies with a TypeError instead of a clean assertion.
  */
 function deleteView(hidden) {
   return {
     hidden: hidden ? new Map([[ROW_SEQ, 'message']]) : new Map(),
     hiddenVia: new Map(),
-    // The seqs the host advertises as whole-turn deletable (0.1.9).
-    spliceSeqs: new Set(),
+    // The seqs the host advertises as whole-turn deletable (0.1.11; this was
+    // `spliceSeqs` in 0.1.9, renamed by the one-range-replace refactor).
+    turnSeqs: new Set(),
     surface: new Set([ROW_SEQ]),
     replyTurns: new Set(),
     edits: new Map(),

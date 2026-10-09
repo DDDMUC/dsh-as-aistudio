@@ -3657,19 +3657,78 @@ window.__ModuleLoader__.load({
     // Minimum gap between automatic snapshot refreshes while a transcript grows.
     const REFRESH_INTERVAL_MS = 3000
 
+    // --- preferences ----------------------------------------------------------
+    //
+    // One client-side preference: whether a deletion opens the confirmation
+    // dialog first. It lives in localStorage - the same store the official
+    // client plugins keep their view options in - so it survives reloads with no
+    // host round-trip, and a subscription keeps the settings page and the delete
+    // paths on one value.
+
+    const PREFS_KEY = 'dsh-delete-turn:prefs'
+    const DEFAULT_ASK = true
+
+    function readStoredAsk() {
+      try {
+        if (typeof window === 'undefined' || !window.localStorage) return DEFAULT_ASK
+        const raw = window.localStorage.getItem(PREFS_KEY)
+        if (raw === null) return DEFAULT_ASK
+        const parsed = JSON.parse(raw)
+        return parsed && typeof parsed.ask === 'boolean' ? parsed.ask : DEFAULT_ASK
+      } catch {
+        // A missing or malformed entry falls back to the shipped default rather
+        // than breaking the host: the dialog path is the safe behaviour.
+        return DEFAULT_ASK
+      }
+    }
+
+    let askBeforeDelete = readStoredAsk()
+    const prefListeners = new Set()
+
+    function getPrefs() {
+      return { ask: askBeforeDelete }
+    }
+
+    function setAskBeforeDelete(value) {
+      const ask = value === true
+      if (askBeforeDelete === ask) return
+      askBeforeDelete = ask
+      try {
+        if (typeof window !== 'undefined' && window.localStorage) {
+          window.localStorage.setItem(PREFS_KEY, JSON.stringify({ ask }))
+        }
+      } catch {
+        // Storage that refuses writes (private mode) must not break the toggle.
+      }
+      for (const listener of prefListeners) {
+        try {
+          listener()
+        } catch (error) {
+          console.error('[dsh-delete-turn] preference subscriber threw:', error)
+        }
+      }
+    }
+
+    function subscribePrefs(listener) {
+      prefListeners.add(listener)
+      return () => {
+        prefListeners.delete(listener)
+      }
+    }
+
     // --- copy -----------------------------------------------------------------
 
     const zh = {
       'action.tooltip.message': '删除这条消息',
-      'action.tooltip.splice': '删除这一轮并接上后面',
+      'action.tooltip.turn': '删除这一轮',
       'action.tooltip.step': '删除这一步',
       'action.tooltip.reply': '删除这条回复',
       'dialog.title.message': '删除这条消息？',
-      'dialog.title.splice': '删除这一轮并接上后面？',
+      'dialog.title.turn': '删除这一轮？',
       'dialog.title.step': '删除这一步？',
       'dialog.title.reply': '删除这条回复？',
       'dialog.desc.message': '这条消息将从模型上下文中移除，并从当前转录中隐藏。原始会话日志保持不变。',
-      'dialog.desc.splice': '这一轮（含你的提问）会从模型上下文中移除；它之后的每一轮随后以新的连续轮号原样重放回来，所以对话视图里这一轮消失、后面的内容直接接上（轮号本身仍在日志里单调递增）。',
+      'dialog.desc.turn': '这一轮（含你的提问、注入上下文、全部回复与工具结果）将从模型上下文中移除；它之后的轮次原样保留，在对话视图里直接接上来。',
       'dialog.desc.step': '这一步的回复与它请求的工具结果将一并从模型上下文中移除，同一回合的其它步骤保留。',
       'dialog.desc.reply': '这条回复连同它的思考、工具调用与注入上下文将从模型上下文中移除，你的提问会保留。',
       'dialog.note': '删除只影响模型后续看到的内容，不会改写历史日志。',
@@ -3677,6 +3736,11 @@ window.__ModuleLoader__.load({
       'dialog.confirm': '删除',
       'dialog.pending': '删除中…',
       'dialog.retry': '重试',
+      'config.ask': '删除时询问',
+      'config.hint.ask': '每次删除前都会弹出确认框。',
+      'config.hint.auto': '删除会直接执行，不再询问。',
+      'config.summary.ask': '删除前询问',
+      'config.summary.auto': '直接删除',
       'error.invalid': '请求无效，请刷新后重试。',
       'error.session-not-active': '这个会话当前未激活，请先打开该会话再删除。',
       'error.session-not-found': '找不到该会话的日志。',
@@ -3692,15 +3756,15 @@ window.__ModuleLoader__.load({
 
     const en = {
       'action.tooltip.message': 'Delete this message',
-      'action.tooltip.splice': 'Delete this turn and close the gap',
+      'action.tooltip.turn': 'Delete this turn',
       'action.tooltip.step': 'Delete this step',
       'action.tooltip.reply': 'Delete this reply',
       'dialog.title.message': 'Delete this message?',
-      'dialog.title.splice': 'Delete this turn and close the gap?',
+      'dialog.title.turn': 'Delete this turn?',
       'dialog.title.step': 'Delete this step?',
       'dialog.title.reply': 'Delete this reply?',
       'dialog.desc.message': 'This message leaves the model context and is hidden from the current transcript. The original session log stays untouched.',
-      'dialog.desc.splice': 'This turn (your prompt included) leaves the model context, and every later turn is replayed back unchanged under fresh consecutive turn numbers, so the transcript closes the gap where this turn stood (the log keeps its monotonic numbering).',
+      'dialog.desc.turn': 'This turn (your prompt, injected context, every reply step and tool result) leaves the model context. Later turns stay exactly where they are and simply move up in the transcript.',
       'dialog.desc.step': 'This step and the tool results it requested leave the model context together; other steps in the same turn stay.',
       'dialog.desc.reply': 'This reply leaves the model context together with its reasoning, tool calls and injected context; your prompt stays.',
       'dialog.note': 'Deletion only changes what the model sees next; the append-only log is never rewritten.',
@@ -3708,6 +3772,11 @@ window.__ModuleLoader__.load({
       'dialog.confirm': 'Delete',
       'dialog.pending': 'Deleting...',
       'dialog.retry': 'Retry',
+      'config.ask': 'Ask before deleting',
+      'config.hint.ask': 'Show a confirmation dialog before every deletion.',
+      'config.hint.auto': 'Delete right away without asking.',
+      'config.summary.ask': 'Ask before deleting',
+      'config.summary.auto': 'Delete without asking',
       'error.invalid': 'Invalid request; refresh and try again.',
       'error.session-not-active': 'This session is not open in DSH; open it first.',
       'error.session-not-found': 'No session log was found for this id.',
@@ -3738,20 +3807,22 @@ window.__ModuleLoader__.load({
       '[data-variant="think"]:hover .dshdt-think-action,.dshdt-think-action:focus-within{opacity:1}',
       '.dshdt-collapsing{overflow:hidden;transition:height .2s ease,opacity .14s ease,margin .2s ease,padding .2s ease}',
       '[data-dshdt-hidden="1"]{display:none!important}',
-      // The second row action: delete the whole turn and splice the later turns
-      // back. It is its own class so the trash action's selector, its counts and
-      // the interop contract stay exactly as they were; the row attribute turns
-      // it on only where the host can plan the operation.
-      '.dshdt-splice{width:28px;height:28px;padding:6px;display:none;align-items:center;justify-content:center;border:none;border-radius:28px;background:transparent;color:var(--dsw-alias-label-tertiary,#8a8f98);cursor:pointer;transition:background-color .12s,color .12s}',
-      '[data-dshdt-splice="1"] .dshdt-splice{display:inline-flex}',
-      '.dshdt-splice:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,rgba(127,127,127,.12));color:var(--dsw-alias-button-primary-fill,#4d6bfe)}',
-      '.dshdt-splice:focus-visible{outline:2px solid var(--dsw-alias-button-primary-fill,#4d6bfe);outline-offset:2px}',
-      '.dshdt-splice:disabled{cursor:default;opacity:.4}',
-      '.dshdt-splice svg{width:15px;height:15px}',
+      // The second row action: delete the whole turn (prompt included). It is
+      // its own class so the trash action's selector, its counts and the
+      // interop contract stay exactly as they were; the row attribute turns it
+      // on only where the host can plan the operation.
+      '.dshdt-turn{width:28px;height:28px;padding:6px;display:none;align-items:center;justify-content:center;border:none;border-radius:28px;background:transparent;color:var(--dsw-alias-label-tertiary,#8a8f98);cursor:pointer;transition:background-color .12s,color .12s}',
+      '[data-dshdt-turn="1"] .dshdt-turn{display:inline-flex}',
+      '.dshdt-turn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,rgba(127,127,127,.12));color:var(--dsw-alias-button-primary-fill,#4d6bfe)}',
+      '.dshdt-turn:focus-visible{outline:2px solid var(--dsw-alias-button-primary-fill,#4d6bfe);outline-offset:2px}',
+      '.dshdt-turn:disabled{cursor:default;opacity:.4}',
+      '.dshdt-turn svg{width:15px;height:15px}',
       '[data-dshdt-no-target="1"] .dshdt-action{display:none!important}',
       '.dshdt-dialog-text{margin:0;color:var(--dsw-alias-label-primary,inherit);font-size:14px;line-height:22px}',
       '.dshdt-dialog-note{margin:10px 0 0;color:var(--dsw-alias-label-tertiary,#8a8f98);font-size:13px;line-height:20px}',
       '.dshdt-dialog-error{margin:10px 0 0;color:var(--dsw-alias-state-error-primary,#d54941);font-size:13px;line-height:20px}',
+      '.dshdt-config{display:flex;flex-direction:column;gap:8px}',
+      '.dshdt-config-hint{margin:0;color:var(--dsw-alias-label-tertiary,#8a8f98);font-size:13px;line-height:20px}',
       '.dshdt-danger{background:var(--dsw-alias-state-error-primary,#d54941)!important;color:var(--dsw-alias-label-primary-foreground,#fff)!important}',
       '@media (prefers-reduced-motion:reduce){.dshdt-collapsing{transition:none}.dshdt-floating{transition:none}}',
     ].join('')
@@ -3785,16 +3856,16 @@ window.__ModuleLoader__.load({
 
     // Collapse glyph: a centre rail with one arrow above and one below, both
     // pointing at it - "the neighbours move up into this one's place".
-    const SPLICE_ICON_PATHS = [
+    const TURN_ICON_PATHS = [
       'M3.2 8h9.6',
       'M8 2.4v4',
       'M6.3 4.7L8 6.4l1.7-1.7',
       'M8 13.6v-4',
       'M6.3 11.3L8 9.6l1.7 1.7',
     ]
-    const SPLICE_ICON_MARKUP =
+    const TURN_ICON_MARKUP =
       '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">' +
-      SPLICE_ICON_PATHS.map(
+      TURN_ICON_PATHS.map(
         (d) =>
           '<path d="' + d + '" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>',
       ).join('') +
@@ -3828,7 +3899,7 @@ window.__ModuleLoader__.load({
           surface: new Set(),
           // The seqs the host would accept a turn-delete for (advertised, not
           // guessed): the entry appears only on those rows.
-          spliceSeqs: new Set(),
+          turnSeqs: new Set(),
           replyTurns: new Set(),
           edits: new Map(),
           markerTurns: new Set(),
@@ -3895,8 +3966,8 @@ window.__ModuleLoader__.load({
             const hiddenVia = hiddenViaOf(data.hidden)
             const surface = new Set()
             for (const seq of Array.isArray(data.surface) ? data.surface : []) surface.add(seq)
-            const spliceSeqs = new Set()
-            for (const seq of Array.isArray(data.spliceSeqs) ? data.spliceSeqs : []) spliceSeqs.add(seq)
+            const turnSeqs = new Set()
+            for (const seq of Array.isArray(data.turnSeqs) ? data.turnSeqs : []) turnSeqs.add(seq)
             const replyTurns = new Set()
             for (const turn of Array.isArray(data.replyTurns) ? data.replyTurns : []) replyTurns.add(turn)
             const edits = new Map()
@@ -3908,7 +3979,7 @@ window.__ModuleLoader__.load({
               if (typeof turn === 'number') markerTurns.add(turn)
             }
             const surfaceThrough = typeof data.lastSeq === 'number' ? data.lastSeq : -1
-            this.publish({ hidden, hiddenVia, surface, spliceSeqs, replyTurns, edits, markerTurns, surfaceReady: true, surfaceThrough, loaded: true, loadError: false })
+            this.publish({ hidden, hiddenVia, surface, turnSeqs, replyTurns, edits, markerTurns, surfaceReady: true, surfaceThrough, loaded: true, loadError: false })
           })
           .catch(() => {
             this.publish({ loadError: true })
@@ -3931,8 +4002,25 @@ window.__ModuleLoader__.load({
       }
 
       async confirm() {
-        const requested = this.view.dialog
-        if (requested === null || this.view.pending) return
+        await this.perform(this.view.dialog)
+      }
+
+      // The entry every action uses. With "ask" on, it opens the confirmation
+      // dialog as before. With it off, it deletes straight away - and since a
+      // silent failure would have nowhere to surface, a failed attempt opens the
+      // dialog carrying its error so the user can retry or cancel.
+      async trigger(target) {
+        if (target === null || target === undefined || this.view.pending) return
+        if (getPrefs().ask) {
+          this.open(target)
+          return
+        }
+        const result = await this.perform(target)
+        if (result.failure !== null) this.publish({ dialog: target, pending: false, failure: result.failure })
+      }
+
+      async perform(requested) {
+        if (requested === null || this.view.pending) return { failure: null }
         this.publish({ pending: true, failure: null })
         try {
           // The live node can move while the dialog sits open: another producer
@@ -3953,7 +4041,7 @@ window.__ModuleLoader__.load({
           }
           if (!result.ok) {
             this.publish({ pending: false, failure: result.code })
-            return
+            return { failure: result.code }
           }
           const data = result.data
           const hidden = new Map(this.view.hidden)
@@ -3964,8 +4052,10 @@ window.__ModuleLoader__.load({
           for (const [via, seq] of hiddenViaOf(data.hidden)) hiddenVia.set(via, seq)
           this.animateOnce = true
           this.publish({ pending: false, dialog: null, hidden, hiddenVia, loaded: true, loadError: false })
+          return { failure: null }
         } catch {
           this.publish({ pending: false, failure: 'generic' })
+          return { failure: 'generic' }
         }
       }
 
@@ -4035,14 +4125,13 @@ window.__ModuleLoader__.load({
     }
 
     // The second entry: delete the WHOLE turn the row belongs to - the prompt
-    // included - and splice every later turn back under fresh turn numbers. Only
-    // a human prompt anchors it; an injected context row or a reply row is not
-    // the turn's own question.
-    function spliceTargetFor(node) {
+    // included - as one range replace. Only a human prompt anchors it; an
+    // injected context row or a reply row is not the turn's own question.
+    function turnTargetFor(node) {
       if (node.kind !== 'user') return null
       const data = node.data || {}
       const seq = typeof data.seq === 'number' ? data.seq : node.anchorSeq
-      return typeof seq === 'number' ? { mode: 'splice', seq, label: 'splice' } : null
+      return typeof seq === 'number' ? { mode: 'turn', seq, label: 'turn' } : null
     }
 
     function seqsFor(node) {
@@ -4167,7 +4256,7 @@ window.__ModuleLoader__.load({
     // does not, and a re-apply (HMR, plugin toggle, bundle-group reload) starts
     // with fresh module state over the very same page.
     const HOST_MARK = 'data-dshdt-action-host'
-    const SPLICE_CLASS = 'dshdt-splice'
+    const TURN_CLASS = 'dshdt-turn'
     const THINK_MARK = 'data-dshdt-think-action'
     const HOST_CLASS = 'dshdt-action-host'
     const THINK_CLASS = 'dshdt-think-action'
@@ -4211,22 +4300,22 @@ window.__ModuleLoader__.load({
         host.appendChild(button)
       }
       // The row host carries this plugin's second action as well: delete the
-      // whole turn and splice the later turns back. It rides in the SAME host -
+      // whole turn. It rides in the SAME host -
       // the trash action's namespace, its selector and its one-host-per-row
       // contract are untouched - under its own class, and the reasoning host
       // never gets one (a reasoning card owns no turn).
-      let splice = null
+      let turn = null
       if (kind !== 'think') {
-        splice = host.querySelector('.' + SPLICE_CLASS)
-        if (splice === null) {
-          splice = document.createElement('button')
-          splice.type = 'button'
-          splice.className = SPLICE_CLASS + ' dshdt-row-action'
-          splice.innerHTML = SPLICE_ICON_MARKUP
-          host.appendChild(splice)
+        turn = host.querySelector('.' + TURN_CLASS)
+        if (turn === null) {
+          turn = document.createElement('button')
+          turn.type = 'button'
+          turn.className = TURN_CLASS + ' dshdt-row-action'
+          turn.innerHTML = TURN_ICON_MARKUP
+          host.appendChild(turn)
         }
       }
-      return { host, button, splice }
+      return { host, button, turn }
     }
 
     // Drop every node this plugin injected. Matched through this plugin's own
@@ -4315,7 +4404,7 @@ window.__ModuleLoader__.load({
       rowActions.delete(row)
     }
 
-    function injectRowAction(row, node, target, spliceTarget, controller, t) {
+    function injectRowAction(row, node, target, turnTarget, controller, t) {
       const label = t(`action.tooltip.${target.label}`)
       let entry = rowActions.get(row)
       if (!entry) {
@@ -4324,7 +4413,7 @@ window.__ModuleLoader__.load({
         entry = adoptHost(findOwnedHost(row, false), 'row')
         rowActions.set(row, entry)
       }
-      const { host, button, splice } = entry
+      const { host, button, turn } = entry
       if (button.getAttribute('aria-label') !== label) {
         button.setAttribute('aria-label', label)
         button.setAttribute('title', label)
@@ -4332,24 +4421,24 @@ window.__ModuleLoader__.load({
       button.onclick = (event) => {
         event.preventDefault()
         event.stopPropagation()
-        controller.open(target)
+        controller.trigger(target)
       }
-      // The second action is wired only where a splice target exists (and stays
+      // The second action is wired only where a turn target exists (and stays
       // hidden by the row attribute otherwise), so a row can never offer an
       // operation the host would refuse for the wrong reason.
-      if (splice !== null && splice !== undefined) {
-        const spliceLabel = t('action.tooltip.splice')
-        if (splice.getAttribute('aria-label') !== spliceLabel) {
-          splice.setAttribute('aria-label', spliceLabel)
-          splice.setAttribute('title', spliceLabel)
+      if (turn !== null && turn !== undefined) {
+        const turnLabel = t('action.tooltip.turn')
+        if (turn.getAttribute('aria-label') !== turnLabel) {
+          turn.setAttribute('aria-label', turnLabel)
+          turn.setAttribute('title', turnLabel)
         }
-        splice.onclick =
-          spliceTarget === null || spliceTarget === undefined
+        turn.onclick =
+          turnTarget === null || turnTarget === undefined
             ? null
             : (event) => {
                 event.preventDefault()
                 event.stopPropagation()
-                controller.open(spliceTarget)
+                controller.trigger(turnTarget)
               }
       }
       const anchor = node.kind === 'user' || node.kind === 'steering' ? row.querySelector('[class*="_actions"]') : null
@@ -4391,7 +4480,7 @@ window.__ModuleLoader__.load({
       button.onclick = (event) => {
         event.preventDefault()
         event.stopPropagation()
-        controller.open(target)
+        controller.trigger(target)
       }
       if (host.parentElement !== think) think.appendChild(host)
     }
@@ -4463,12 +4552,12 @@ window.__ModuleLoader__.load({
         const deletable = !hidden && covered && rowDeletable(node, seqs, view)
         // The turn-delete entry rides on the same gates as the delete entry: a
         // row whose content already left the context offers neither.
-        const spliceTarget =
-          deletable && spliceTargetFor(node) !== null && view.spliceSeqs.has(target.seq) ? liveTarget(spliceTargetFor(node), view.edits) : null
-        if (deletable && target !== null) injectRowAction(row, node, target, spliceTarget, controller, t)
+        const turnTarget =
+          deletable && turnTargetFor(node) !== null && view.turnSeqs.has(target.seq) ? liveTarget(turnTargetFor(node), view.edits) : null
+        if (deletable && target !== null) injectRowAction(row, node, target, turnTarget, controller, t)
         else removeRowAction(row)
-        if (deletable && target !== null && spliceTarget !== null) row.dataset.dshdtSplice = '1'
-        else delete row.dataset.dshdtSplice
+        if (deletable && target !== null && turnTarget !== null) row.dataset.dshdtTurn = '1'
+        else delete row.dataset.dshdtTurn
         if (!hidden && covered && !rowDeletable(node, seqs, view)) row.dataset.dshdtNoTarget = '1'
         else delete row.dataset.dshdtNoTarget
       }
@@ -4538,7 +4627,7 @@ window.__ModuleLoader__.load({
         'aria-label': label,
         title: label,
         disabled: view.pending,
-        onClick: () => controller.open({ mode: 'reply', messageId }),
+        onClick: () => controller.trigger({ mode: 'reply', messageId }),
         children: jsx(TrashIcon, {}),
       })
     }
@@ -4580,6 +4669,27 @@ window.__ModuleLoader__.load({
               : jsx('p', { className: 'dshdt-dialog-error', role: 'status', children: t(`error.${failure}`) }),
           ],
         }),
+      })
+    }
+
+    // The plugin page entry (the component row's "configure" arrow, slot
+    // `plugins.row.config`, key `<bundle>#<row id>`). It renders the row's
+    // one-liner for the manager's summary slot and the toggle card for the page.
+    function AskBeforeDeleteOption({ view, t }) {
+      const tr = typeof t === 'function' ? t : (key) => key
+      const [ask, setAsk] = react.useState(getPrefs().ask)
+      react.useEffect(() => subscribePrefs(() => setAsk(getPrefs().ask)), [])
+      if (view === 'summary') return tr(ask ? 'config.summary.ask' : 'config.summary.auto')
+      return jsxs('div', {
+        className: 'dshdt-config',
+        children: [
+          jsx(primitives.Checkbox, {
+            checked: ask,
+            label: tr('config.ask'),
+            onChange: (checked) => setAskBeforeDelete(checked),
+          }),
+          jsx('p', { className: 'dshdt-config-hint', children: tr(ask ? 'config.hint.ask' : 'config.hint.auto') }),
+        ],
       })
     }
 
@@ -4675,6 +4785,21 @@ window.__ModuleLoader__.load({
             inject: (sessionId) => ({ hooks: { deletion: controllerFor(sessionId) }, controller: controllerFor(sessionId) }),
           },
           OverlayEntry,
+        ),
+      )
+
+      // The plugin's own page in the manager: the row this bundle inserts
+      // (`cordis.patch.yml`, id `dsh-delete-turn`) gains a configure arrow that
+      // opens this card. The key is `<bundle package>#<row id>`, the contract of
+      // ui-plugin-manager's rowConfigKey.
+      ctx.slots.inject('plugins.row.config', () =>
+        ctx.slots.register(
+          {
+            name: 'plugins.row.config',
+            key: 'dsh-delete-turn#dsh-delete-turn',
+            locale: NS,
+          },
+          AskBeforeDeleteOption,
         ),
       )
     }
@@ -5567,7 +5692,7 @@ window.__ModuleLoader__.load({
     const NS = 'dsh-as-aistudio'
 
     /** Keep in sync with package.json and src/components.js. */
-    const PLUGIN_VERSION = '0.2.11'
+    const PLUGIN_VERSION = '0.2.12'
 
     /** Presence marker the live verifier reads. */
     const DEBUG_KEY = '__DSH_AS_AISTUDIO__'
