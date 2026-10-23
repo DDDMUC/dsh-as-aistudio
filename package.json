@@ -54,8 +54,8 @@
   "dependencies": {
     "dsh-delete-turn": "^0.1.14",
     "dsh-edit-turn": "^0.5.2",
-    "dsh-markdown-bubble": "^0.1.4",
-    "dsh-rerun-turn": "^0.1.26"
+    "dsh-markdown-bubble": "^0.1.5",
+    "dsh-rerun-turn": "^0.2.3"
   },
   "dsh": {
     "bundle": {
