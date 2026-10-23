@@ -791,6 +791,11 @@ test('with all four loaded the registrations match the section-2 allocation tabl
     // plugin page, so the bundle also registers this key-based entry. It has no
     // order (the row-config slot is keyed, not ordered), so §2 stays unique.
     'plugins.row.config | dsh-delete-turn#dsh-delete-turn | priority null',
+    // dsh-edit-turn 0.5.x and dsh-rerun-turn 0.2.x grew their own settings rows
+    // on the plugin page the same way, so each bundle now registers one more
+    // key-based entry. Same slot, same "no order" rule.
+    'plugins.row.config | dsh-edit-turn#dsh-edit-turn | priority null',
+    'plugins.row.config | dsh-rerun-turn#dsh-rerun-turn | priority null',
   ])
   assert.deepEqual(runtime.records.locales.map((item) => item.ns).sort(), [
     'dsh-delete-turn',
@@ -887,9 +892,11 @@ function mountBareUserRow(document) {
  * derivation - keep the table in step with the component.
  */
 const DELETE_VIEW_KEYS = [
+  'busy',
   'dialog',
   'edits',
   'failure',
+  'foreignCount',
   'hidden',
   'hiddenVia',
   'loadError',

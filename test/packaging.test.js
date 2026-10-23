@@ -198,7 +198,12 @@ test('the studio own browser half touches no web-only global', () => {
 test('the browser half fetches one relative route', () => {
   const routes = [...client.matchAll(/'(\/api\/[a-z0-9-]+\/[a-z0-9-]+)'/g)].map((match) => match[1])
   assert.deepEqual(routes, ['/api/dsh-as-aistudio/status'])
-  assert.equal(/https?:\/\//.test(client.replace(/https:\/\/github\.com/g, '')), false, 'no absolute URL is fetched')
+  // XML namespaces are identifiers, not addresses: the vendored halves build
+  // their icons with `xmlns="http://www.w3.org/2000/svg"`, which is not a fetch.
+  const withoutNamespaces = client
+    .replace(/https:\/\/github\.com/g, '')
+    .replace(/xmlns="https?:\/\/[^"]*"/g, '')
+  assert.equal(/https?:\/\//.test(withoutNamespaces), false, 'no absolute URL is fetched')
 })
 
 test('the host half imports nothing from the DSH SDK', () => {

@@ -20,6 +20,9 @@ window.__ModuleLoader__.load({
     Object.defineProperty(exports, Symbol.toStringTag, { value: 'Module' })
 
     const react = require('react')
+    // DOM injection has to land before the browser paints, or the host's own
+    // buttons are visible for a frame and ours pop in after them.
+    const useBrowserLayoutEffect = typeof react.useLayoutEffect === 'function' ? react.useLayoutEffect : react.useEffect
     const jsxRuntime = require('react/jsx-runtime')
     const primitives = require('@deepseek-ai/dsh-client-ui-primitives')
     const { jsx, jsxs, Fragment } = jsxRuntime
@@ -40,7 +43,7 @@ window.__ModuleLoader__.load({
     const RERUN_PREFIX = '/dsh-rerun-turn'
 
     /** Keep in sync with package.json and lib/index.js. */
-    const PLUGIN_VERSION = '0.2.20'
+    const PLUGIN_VERSION = '0.5.2'
 
     // --- copy -----------------------------------------------------------------
 
@@ -57,11 +60,47 @@ window.__ModuleLoader__.load({
       'action.copied': '复制成功',
       'editor.title': '编辑这条消息',
       'editor.title-reply': '编辑这条回答',
-      'editor.placeholder': '改成你希望自己当时说的内容。保存后这条消息之后的轮次会从模型上下文中移除，改后的内容成为新的起点。',
+      'editor.placeholder': '改成你希望自己当时说的内容。保存后就地替换这条消息，后面的对话保持不变。',
       'editor.placeholder-reply': '改成你希望模型说过的内容，保存后它就成为这条回答。',
       'editor.save': '保存',
       'editor.rerun': '重跑',
       'editor.save-reply': '保存',
+      'editor.block': '编辑哪一块',
+      'editor.block.all': '全部',
+      'config.style': '编辑器样式',
+      'config.placement': '编辑器位置',
+      'config.height': '编辑器高度',
+      'height.max': '一轮最大',
+      'height.content': '随内容',
+      'height.fill': '全部铺满',
+      'config.summary.height.max': '一轮最大',
+      'config.summary.height.content': '随内容',
+      'config.summary.height.fill': '全部铺满',
+      'config.hint.height.max': '打开时取这一轮所有思维链/正文里的最大高度；编辑中随你打字长高、删字变矮，但不会比打开时更矮。',
+      'config.hint.height.content': '打开时框高跟着当前块走；编辑中随你打字长高、删字变矮，但不会比打开时更矮。',
+      'config.hint.height.fill': '普通块打开时按一轮最大，编辑中随打字长高、删字变矮（不会比打开时更矮）；选「全部」时铺满对话区到输入框之间的整段高度，只有一个滚动条。',
+      'placement.overlay': '浮层',
+      'placement.inline': '页面内联',
+      'placement.legacy': '整行旧版',
+      'config.summary.legacy': '整行旧版',
+      'config.hint.legacy': '整条 assistant 行套框、正文保持旧的内部滚动；同样向下盖住 action bar，功能键在左下。',
+      'config.summary.overlay': '浮层',
+      'config.summary.inline': '页面内联',
+      'config.hint.overlay': '悬浮在视口内，长内容在编辑框内滚动。',
+      'config.hint.inline': '按页面坐标铺在消息上，跟随页面滚动，高度按内容展开，不再截到视口。',
+      'config.summary.frame': '整行描边',
+      'config.summary.bubble': '贴合气泡',
+      'config.summary.center': '居中面板',
+      'config.hint.frame': '一圈描边套住整条消息行，正文输入框落在消息文字上，按钮在右上角。',
+      'config.hint.bubble': '编辑框精确等于消息气泡的大小。',
+      'config.hint.center': '大号居中面板，输入框随内容增长。',
+      'style.frame': '整行',
+      'style.bubble': '气泡',
+      'style.center': '居中',
+      'editor.block.text': '正文',
+      'editor.block.reasoning': '思维链',
+      'editor.placeholder-block': '只改这一块；工具调用、其余内容和后续对话保持不变。',
+      'confirm.body-block': '确认后只替换这一块，工具调用、其他内容和后续对话保持不变。原始会话日志不会改写。',
       'editor.review': '确认执行',
       'editor.cancel': '取消',
       'editor.pending': '正在保存…',
@@ -69,12 +108,13 @@ window.__ModuleLoader__.load({
       'editor.warn-reply': '这条回答包含工具调用或思考过程，替换后它们会被一并移除。',
       'editor.attach.add': '添加附件',
       'editor.attach.remove': '移除这个附件',
-      'confirm.body': '确认后会立即执行：这条消息之后的内容会从模型上下文中移除。原始会话日志不会改写。',
+      'confirm.body': '确认后会立即执行：只有这条消息被替换，后面的对话保持不变。原始会话日志不会改写。',
       'error.invalid': '请求无效，请刷新后重试。',
       'error.session-not-active': '这个会话当前未激活，请先打开该会话再编辑。',
       'error.session-not-found': '找不到该会话的日志。',
       'error.busy': '该会话正在回复中，请等回复结束后再编辑。',
       'error.not-editable': '这条消息不支持编辑。',
+      'error.unsupported': '当前宿主不支持就地改写回复，需要走重放路径。',
       'error.already-rolled-back': '这条消息已经不在当前上下文里了。',
       'error.stale': '会话刚刚发生了变化，请重试。',
       'error.forbidden': '请求来源不被允许。',
@@ -89,11 +129,13 @@ window.__ModuleLoader__.load({
       'error.already-retired': '这一轮的内容已经不在当前上下文里了。',
       'error.rerunning': '已经有一次重跑在进行中，请等它结束。',
       'error.internal': '服务器内部错误，请稍后重试。',
+      'error.projection-missing': '编辑投影未注册，请重启 DSH 后重试。',
       'error.attachment-refused': '附件没能存下来，本次修改没有执行。',
       'error.attachments-dropped': '已保存，但这条消息的图片或文件没能保留：当前部署没有可用的附件存储。',
       'error.attachment-unreadable': '这个附件读不出来，请换一个文件。',
       'error.attachment-too-large': '这个文件太大，无法作为附件。',
       'error.too-large': '这次修改太大，服务器没有接收。',
+      'error.replay-partial': '已保存并改写了这条回答，但后面的轮次没能全部重放回来，请重新打开会话确认。',
     }
 
     const en = {
@@ -104,11 +146,47 @@ window.__ModuleLoader__.load({
       'action.copied': 'Copied',
       'editor.title': 'Edit this message',
       'editor.title-reply': 'Edit this reply',
-      'editor.placeholder': 'Saving rolls the conversation back to just before this message and this turn runs again.',
+      'editor.placeholder': 'Write what you want to have said. Saving replaces this message in place; the conversation after it stays as it is.',
       'editor.placeholder-reply': 'Write what you want the model to have said; saving makes it this reply.',
       'editor.save': 'Save',
       'editor.rerun': 'Re-run',
       'editor.save-reply': 'Save',
+      'editor.block': 'Block',
+      'editor.block.all': 'All blocks',
+      'config.style': 'Editor style',
+      'config.placement': 'Editor placement',
+      'config.height': 'Editor height',
+      'height.max': 'Turn max',
+      'height.content': 'Content',
+      'height.fill': 'Fill when all',
+      'config.summary.height.max': 'Turn max',
+      'config.summary.height.content': 'Content',
+      'config.summary.height.fill': 'Fill when all',
+      'config.hint.height.max': 'Opens at the tallest reasoning/text block of the turn; while editing it grows with your text and shrinks back, never below the height it opened at.',
+      'config.hint.height.content': 'Opens sized for the current block; while editing it grows with your text and shrinks back, never below the height it opened at.',
+      'config.hint.height.fill': 'Single blocks open at the turn max and follow your text while editing (never below the opening height); the all-blocks page fills the whole band between the conversation top and the composer, with one scrollbar.',
+      'placement.overlay': 'Overlay',
+      'placement.inline': 'In-page',
+      'placement.legacy': 'Legacy row',
+      'config.summary.legacy': 'Legacy row',
+      'config.hint.legacy': 'Frames the whole assistant row and keeps the old inner scroll; still covers the action bar, with the controls at the bottom left.',
+      'config.summary.overlay': 'Overlay',
+      'config.summary.inline': 'In-page',
+      'config.hint.overlay': 'Floats inside the viewport; long content scrolls inside the editor.',
+      'config.hint.inline': 'Lays over the message in page coordinates and scrolls with the page; it grows with the content instead of being clipped to the viewport.',
+      'config.summary.frame': 'Row frame',
+      'config.summary.bubble': 'Exact bubble',
+      'config.summary.center': 'Centered panel',
+      'config.hint.frame': 'Outline the whole message row; the textarea sits on the message text and the actions move to the top-right.',
+      'config.hint.bubble': 'The editor is exactly the message bubble.',
+      'config.hint.center': 'A large centred panel whose textarea grows with the content.',
+      'style.frame': 'Frame',
+      'style.bubble': 'Bubble',
+      'style.center': 'Center',
+      'editor.block.text': 'Answer',
+      'editor.block.reasoning': 'Reasoning',
+      'editor.placeholder-block': 'Only this block changes; tool calls, the rest of the reply and later turns stay.',
+      'confirm.body-block': 'Confirming replaces only this block; tool calls, the rest of the reply and later turns stay. The original session log is never rewritten.',
       'editor.review': 'Confirm',
       'editor.cancel': 'Cancel',
       'editor.pending': 'Working...',
@@ -116,12 +194,13 @@ window.__ModuleLoader__.load({
       'editor.warn-reply': 'This reply carries tool calls or reasoning; replacing it removes them.',
       'editor.attach.add': 'Add an attachment',
       'editor.attach.remove': 'Remove this attachment',
-      'confirm.body': 'Confirming applies right away: everything after this message leaves the model context. The original session log is never rewritten.',
+      'confirm.body': 'Confirming applies right away: only this message is replaced; the conversation after it stays as it is. The original session log is never rewritten.',
       'error.invalid': 'Invalid request; refresh and try again.',
       'error.session-not-active': 'This session is not open in DSH; open it first.',
       'error.session-not-found': 'No session log was found for this id.',
       'error.busy': 'This session is still replying; wait for it to finish.',
       'error.not-editable': 'This message cannot be edited.',
+      'error.unsupported': 'This harness does not expose the in-place reply path; the replay path is needed.',
       'error.already-rolled-back': 'This message is no longer in the current context.',
       'error.stale': 'The session just changed; try again.',
       'error.forbidden': 'The request origin is not allowed.',
@@ -136,11 +215,13 @@ window.__ModuleLoader__.load({
       'error.already-retired': 'This turn is no longer part of the current context.',
       'error.rerunning': 'A re-run is already in flight; wait for it to finish.',
       'error.internal': 'The host hit an internal error; try again shortly.',
+      'error.projection-missing': 'The edit projection is not registered; restart DSH and retry.',
       'error.attachment-refused': 'The attachment could not be stored, so nothing was changed.',
       'error.attachments-dropped': 'Saved, but the images or files on this message could not be kept: this deployment mounts no attachment store.',
       'error.attachment-unreadable': 'That attachment could not be read; try another file.',
       'error.attachment-too-large': 'That file is too large to attach.',
       'error.too-large': 'That revision was too large for the host to accept.',
+      'error.replay-partial': 'Saved and corrected, but the turns after it could not all be replayed; reopen the session to check.',
     }
 
     // Every error code the host can return travels through here. A code is
@@ -153,7 +234,157 @@ window.__ModuleLoader__.load({
       return t(typeof code === 'string' && ERROR_KEYS.has(`error.${code}`) ? `error.${code}` : 'error.generic')
     }
 
+    // --- a rewritten prompt, rendered the way the bubble it stands in for is ---
+
+    /**
+     * Whether the markdown bubble plugin is on this page.
+     *
+     * Its own presence marker is the only honest signal: the host draws a user
+     * bubble as plain text (`white-space: pre-wrap`), so rendering markdown in
+     * the revision bubble is only correct when something else is already
+     * rendering the OTHER user bubbles that way. Without it, a rewritten prompt
+     * would look different from every untouched prompt around it.
+     */
+    function markdownBubbleInstalled() {
+      try {
+        return typeof globalThis !== 'undefined' && globalThis.__DSH_MARKDOWN_BUBBLE__ !== undefined
+      } catch {
+        return false
+      }
+    }
+
+    /** One mounted markdown occurrence per bubble, so a rebuild can unmount it. */
+    const revisionRoots = new WeakMap()
+
+    /**
+     * Draw one rewritten prompt's text into `host`.
+     *
+     * The host's own markdown renderer (`MarkdownText`) is a React component and
+     * this half builds DOM by hand, so it is mounted through `react-dom/client` -
+     * the same module the host's own bundles require. Anything missing (no
+     * react-dom, no primitives, a hostile host shape) falls back to the plain
+     * text node this bubble has always used.
+     *
+     * @param host - the bubble element that shows the text.
+     * @param text - the rewritten text.
+     * @returns whether the markdown path was used.
+     */
+    function renderRevisionText(host, text) {
+      if (!markdownBubbleInstalled()) return false
+      try {
+        const react = require('react')
+        const reactDom = require('react-dom/client')
+        const MarkdownText = primitives.MarkdownText
+        if (
+          typeof react?.createElement !== 'function' ||
+          typeof reactDom?.createRoot !== 'function' ||
+          MarkdownText === undefined ||
+          MarkdownText === null
+        ) {
+          return false
+        }
+        const previous = revisionRoots.get(host)
+        if (previous !== undefined && typeof previous.unmount === 'function') previous.unmount()
+        const node = document.createElement('span')
+        node.className = 'dshet-revision-text'
+        host.appendChild(node)
+        const root = reactDom.createRoot(node)
+        root.render(react.createElement(MarkdownText, { text }))
+        revisionRoots.set(host, root)
+        return true
+      } catch (error) {
+        console.warn('[dsh-edit-turn] the rewritten prompt could not be rendered as markdown:', error)
+        return false
+      }
+    }
+
     // --- style ----------------------------------------------------------------
+    /**
+     * Take the active skin's own surfaces when they are actually opaque.
+     *
+     * A skin may paint its surfaces translucent so artwork shows through, and it
+     * compensates with its own text halo - which a plugin element does not have.
+     * So the theme's surfaces are adopted only after resolving them to a real
+     * colour and finding them opaque; a translucent skin leaves this editor on
+     * its own opaque palette. Colours, radii and shadows need no such guard:
+     * those are hue and geometry, and they survive any skin.
+     *
+     * The result is written as inline variables on `body`, which beats both the
+     * `:root` defaults and the dark-theme rule below them.
+     *
+     * @returns nothing; the stylesheet defaults stand when no probe is possible.
+     */
+    function resolveSkinPalette() {
+      if (typeof document === 'undefined' || !document.body || typeof document.createElement !== 'function') return
+      if (typeof getComputedStyle !== 'function') return
+      const probe = document.createElement('span')
+      probe.setAttribute('aria-hidden', 'true')
+      probe.style.cssText = 'position:absolute;left:-9999px;top:0;width:0;height:0;pointer-events:none'
+      document.body.appendChild(probe)
+      const read = (name) => {
+        try {
+          probe.style.color = `var(${name})`
+          const match = /rgba?\(([^)]+)\)/.exec(getComputedStyle(probe).color)
+          if (match === null) return null
+          const parts = match[1].split(',').map((value) => Number.parseFloat(value))
+          if (parts.length < 3 || parts.some((value) => !Number.isFinite(value))) return null
+          return { r: parts[0], g: parts[1], b: parts[2], a: parts.length > 3 ? parts[3] : 1 }
+        } catch {
+          return null
+        }
+      }
+      const css = (color) => `rgba(${Math.round(color.r)},${Math.round(color.g)},${Math.round(color.b)},${color.a})`
+      const style = document.body.style
+      const setVar = (name, value) => {
+        if (style === undefined || style === null) return
+        if (typeof style.setProperty === 'function') style.setProperty(name, value)
+        else style[name] = value
+      }
+      const clearVar = (name) => {
+        if (style === undefined || style === null) return
+        if (typeof style.removeProperty === 'function') style.removeProperty(name)
+        else delete style[name]
+      }
+      try {
+        const panel = read('--dsw-alias-bg-layer-1')
+        const layer2 = read('--dsw-alias-bg-layer-2')
+        const accent = read('--dsw-alias-button-primary-fill')
+        // The skin's surface HUE is taken; its transparency is not. A skin paints
+        // its own elements translucent over artwork and gives them a text halo -
+        // a plugin element has none, so the same colour is adopted at full
+        // opacity. That keeps a dark artwork skin dark (instead of falling back
+        // to this plugin's light palette, which is what a skin that never sets
+        // `data-ds-dark-theme` used to get) without ever painting text on art.
+        const solid = (color) => (color === null ? null : { r: color.r, g: color.g, b: color.b, a: 1 })
+        const panelSolid = solid(panel)
+        if (panelSolid === null) {
+          clearVar('--dshet-panel')
+          clearVar('--dshet-chip')
+          clearVar('--dshet-field')
+        } else {
+          const fieldSolid = solid(layer2) ?? panelSolid
+          setVar('--dshet-panel', css(panelSolid))
+          setVar('--dshet-chip', css(panelSolid))
+          setVar('--dshet-field', css(fieldSolid))
+        }
+        if (accent === null) {
+          clearVar('--dshet-on-accent')
+        } else {
+          // The label that sits ON the accent fill: the platform exposes no
+          // inverse token here, so it is picked from the fill's own luminance.
+          const channel = (value) => {
+            const v = value / 255
+            return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4
+          }
+          const luminance = 0.2126 * channel(accent.r) + 0.7152 * channel(accent.g) + 0.0722 * channel(accent.b)
+          setVar('--dshet-on-accent', luminance > 0.35 ? '#0f1115' : '#fff')
+        }
+      } finally {
+        if (typeof probe.remove === 'function') probe.remove()
+      }
+    }
+
+
 
     // A skin is free to make the theme's surface colours translucent - that is
     // the point of one: the artwork shows through, and the skin compensates by
@@ -168,8 +399,21 @@ window.__ModuleLoader__.load({
     // UI packages use. Theme variables are still used for *colours* (hue,
     // semantic tones) - those survive a skin; it is alpha that does not.
     const CSS = [
-      ':root{--dshet-panel:rgba(255,255,255,.96);--dshet-field:rgba(244,247,252,.98);--dshet-chip:rgba(255,255,255,.82);--dshet-line:rgba(16,24,40,.16);--dshet-ink:#0f1524;--dshet-ink-dim:#4b5872;--dshet-hover:rgba(16,24,40,.07);--dshet-shadow:0 12px 32px rgba(9,18,40,.22);--dshet-accent:#4d6bfe;--dshet-on-accent:#fff}',
-      'body[data-ds-dark-theme]{--dshet-panel:rgba(22,28,44,.96);--dshet-field:rgba(14,19,33,.98);--dshet-chip:rgba(22,28,44,.82);--dshet-line:rgba(255,255,255,.18);--dshet-ink:#eef2f8;--dshet-ink-dim:#a6b1c6;--dshet-hover:rgba(255,255,255,.11);--dshet-shadow:0 12px 32px rgba(0,0,0,.5)}',
+      // Colours, radii and shadows come from the active theme's own tokens, so a
+      // skin restyles this editor the way it restyles the rest of the app; every
+      // one of them falls back to the value this plugin shipped with. The palette
+      // hangs off `body`, not `:root`: a custom property substitutes against the
+      // values in scope where it is DEFINED, and the theme declares its tokens on
+      // body - on `:root` every reference would silently fall back. Only the
+      // SURFACES stay namespaced: a skin is free to make its own surfaces
+      // translucent (that is the point of one), and a plugin's element has no
+      // artwork-aware halo to stay readable behind. The surfaces are taken from
+      // the theme too, but only when a runtime probe finds them opaque (see
+      // resolveSkinPalette).
+      'body{--dshet-panel:rgba(255,255,255,.96);--dshet-field:rgba(244,247,252,.98);--dshet-chip:rgba(255,255,255,.82);--dshet-line:var(--dsw-alias-border-l2,rgba(16,24,40,.16));--dshet-ink:var(--dsw-alias-label-primary,#0f1524);--dshet-ink-dim:var(--dsw-alias-label-secondary,#4b5872);--dshet-ink-soft:var(--dsw-alias-label-tertiary,#81858c);--dshet-hover:rgba(16,24,40,.07);--dshet-shadow:var(--dsw-shadow-lv3,0 12px 32px rgba(9,18,40,.22));--dshet-accent:var(--dsw-alias-button-primary-fill,#4d6bfe);--dshet-on-accent:#fff;--dshet-bubble:var(--dsw-specific-bubble,var(--dshet-field));--dshet-radius-panel:var(--dsw-radius-panel,16px);--dshet-radius-xl:var(--dsw-radius-xl,16px);--dshet-radius-lg:var(--dsw-radius-lg,16px);--dshet-radius-md:var(--dsw-radius-md,12px);--dshet-radius-sm:var(--dsw-radius-sm,8px)}',
+      'body[data-ds-dark-theme]{--dshet-panel:rgba(22,28,44,.96);--dshet-field:rgba(14,19,33,.98);--dshet-chip:rgba(22,28,44,.82);--dshet-hover:rgba(255,255,255,.11);--dshet-shadow:var(--dsw-shadow-lv3,0 12px 32px rgba(0,0,0,.5))}',
+      // A hover wash that follows the skin's ink instead of a fixed grey.
+      '@supports (color:color-mix(in srgb,red,blue)){body{--dshet-hover:color-mix(in srgb,var(--dsw-alias-label-primary) 8%,transparent)}body[data-ds-dark-theme]{--dshet-hover:color-mix(in srgb,var(--dsw-alias-label-primary) 14%,transparent)}}',
       // The pencil sits among the platform's own action icons, so it takes the
       // platform's icon colour: our own `--dshet-ink-dim` is a blue-grey and
       // read as a different, "active" icon next to the neutral grey ones. The
@@ -195,7 +439,7 @@ window.__ModuleLoader__.load({
       // inherit picks up the row's 16px, fixed ignores the reader's content
       // font setting, and either way the rewritten text changed size against
       // the bubble it replaces.
-      '.dshet-revision{box-sizing:border-box;align-self:flex-end;width:fit-content;max-width:min(72ch,86%);margin:6px 0 6px auto;padding:9px 14px;border-radius:16px;background:var(--dshet-field);color:var(--dshet-ink);font:inherit;font-size:var(--dsh-content-font-size,14px);line-height:calc(22px + var(--dsh-content-font-delta,0px));white-space:pre-wrap;overflow-wrap:anywhere;min-width:0}',
+      '.dshet-revision{box-sizing:border-box;align-self:flex-end;width:fit-content;max-width:min(72ch,86%);margin:6px 0 6px auto;padding:9px 14px;border-radius:var(--dshet-radius-xl);background:var(--dshet-bubble);color:var(--dshet-ink);font:inherit;font-size:var(--dsh-content-font-size,14px);line-height:calc(22px + var(--dsh-content-font-delta,0px));white-space:pre-wrap;overflow-wrap:anywhere;min-width:0}',
       '.dshet-revision:empty{display:none}',
       '.dshet-revision{position:relative}',
       // Fallback only: a row with no action bar to keep is displayed away
@@ -204,6 +448,9 @@ window.__ModuleLoader__.load({
       // positioned button inside the bubble used to land on the last line, which
       // is how the rewritten prompt got covered up.
       '.dshet-revision.dshet-revision-action{padding-inline-end:40px}',
+      '.dshet-revision-text{display:block}',
+      '.dshet-revision-files{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}',
+      '.dshet-revision-file{display:inline-flex;align-items:center;gap:6px;max-width:100%;padding:2px 6px 2px 2px;border:1px solid var(--dshet-line);border-radius:var(--dshet-radius-sm);background:var(--dshet-chip);font-size:12px;line-height:18px}',
       '.dshet-revision .dshet-action-host{position:absolute;inset-inline-end:6px;top:6px;opacity:0;transition:opacity .12s ease}',
       '.dshet-revision:hover .dshet-action-host,.dshet-revision:focus-within .dshet-action-host{opacity:1}',
       // A sibling plugin can append its own button (dsh-delete-turn's bin) into
@@ -242,11 +489,21 @@ window.__ModuleLoader__.load({
       // composition and its clicks a piece at a time. The layer covers the
       // viewport but only the box itself takes pointer events, and the box is
       // positioned under its row by `placeEditor`.
+      '.dshet-layer[data-dshet-inline="1"]{position:absolute;left:0;top:0;right:auto;bottom:auto;width:100%;height:0}',
       '.dshet-layer{position:fixed;left:0;top:0;right:0;bottom:0;pointer-events:none;z-index:40}',
       '.dshet-layer .dshet-editor{position:absolute;pointer-events:auto}',
-      '.dshet-editor{margin:0;border:1px solid var(--dshet-line);border-radius:16px;background:var(--dshet-panel);backdrop-filter:blur(18px) saturate(1.2);box-shadow:var(--dshet-shadow);color:var(--dshet-ink);transition:border-color .12s}',
+      '.dshet-editor{display:flex;flex-direction:column;max-height:calc(100vh - 24px);overflow-y:auto;overscroll-behavior:contain;margin:0;border:1px solid var(--dshet-line);border-radius:var(--dshet-radius-panel);background:var(--dshet-panel);backdrop-filter:blur(var(--dsh-input-card-blur,18px)) saturate(1.2);box-shadow:var(--dshet-shadow);color:var(--dshet-ink);transition:border-color .12s}',
+      '.dshet-editor[data-dshet-drop="1"]{outline:2px dashed #4a7dff;outline-offset:-4px}',
       '.dshet-editor:focus-within{border-color:var(--dsw-alias-button-primary-fill,var(--dshet-accent))}',
-      '.dshet-editor textarea{display:block;width:100%;min-height:47px;max-height:46vh;overflow-y:auto;resize:none;box-sizing:border-box;padding:11px 14px 0;border:0;background:transparent;color:inherit;font:inherit;font-size:var(--dsh-content-font-size,14px);line-height:calc(22px + var(--dsh-content-font-delta,0px));outline:none}',
+      '.dshet-editor[data-dshet-inplace="1"]{overflow:hidden;border:1.5px solid var(--dsw-alias-button-primary-fill,#4a7dff);border-radius:var(--dshet-radius-md);background:var(--dshet-panel);backdrop-filter:none;box-shadow:none}',
+      '.dshet-editor[data-dshet-inplace="1"] textarea{position:absolute;min-height:0;max-height:none;padding:6px 10px;border:0;border-radius:8px;background:transparent;overflow-y:auto}',
+      '.dshet-editor[data-dshet-inplace="1"] .dshet-footer{position:absolute;top:auto;left:0;right:0;bottom:0;height:46px;align-items:center;padding:6px 10px;box-sizing:border-box;background:var(--dshet-panel);border-radius:0 0 var(--dshet-radius-md) var(--dshet-radius-md);gap:6px}',
+      '.dshet-editor[data-dshet-inplace="1"] .dshet-btn{padding:2px 8px;font-size:12px;line-height:18px;border-radius:8px}',
+      '.dshet-editor[data-dshet-inplace="1"] .dshet-pick{position:static;top:auto;left:auto;padding:0;background:transparent;border-radius:0}',
+      '.dshet-editor[data-dshet-inplace="1"] .dshet-note,.dshet-editor[data-dshet-inplace="1"] .dshet-warn{position:absolute;left:8px;bottom:6px;max-width:60%;margin:0;background:var(--dshet-panel);border-radius:8px;padding:2px 6px}',
+      '.dshet-editor[data-dshet-inplace="1"] .dshet-error{position:absolute;left:8px;right:8px;bottom:52px;max-width:none;margin:0;padding:6px 10px;border:1px solid var(--dshet-line);border-radius:8px;background:var(--dshet-panel);box-shadow:var(--dshet-shadow);font-weight:500}',
+
+      '.dshet-editor textarea{display:block;width:100%;min-height:47px;max-height:min(46vh,420px);overflow-y:auto;resize:none;box-sizing:border-box;padding:11px 14px 0;border:0;background:transparent;color:inherit;font:inherit;font-size:var(--dsh-content-font-size,14px);line-height:calc(22px + var(--dsh-content-font-delta,0px));outline:none}',
       '.dshet-editor textarea::placeholder{color:var(--dshet-ink-dim)}',
       '.dshet-editor textarea:disabled{opacity:.65}',
       // The blocks this message carries: one chip each, drawn from the same
@@ -262,8 +519,9 @@ window.__ModuleLoader__.load({
       '.dshet-chip-remove:hover:not(:disabled){background:var(--dshet-hover);color:var(--dsw-alias-state-error-primary,#c93a31)}',
       '.dshet-chip-remove:focus-visible{outline:2px solid var(--dsw-alias-button-primary-fill,var(--dshet-accent));outline-offset:1px}',
       '.dshet-chip-remove:disabled{cursor:default;opacity:.5}',
-      '.dshet-attach-row{display:flex;align-items:center;gap:8px;margin:8px 14px 0}',
-      '.dshet-attach{padding:3px 10px;border:1px dashed var(--dshet-line);border-radius:999px;background:transparent;color:var(--dshet-ink-dim);font:inherit;font-size:12px;line-height:18px;cursor:pointer;transition:background-color .12s,color .12s}',
+      '.dshet-attach-row{position:absolute;left:12px;bottom:10px;z-index:2;display:flex;align-items:center;margin:0}',
+      '.dshet-attach{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:1px 6px;box-sizing:border-box;border:0;border-radius:999px;background:#f5f6f7;color:#0f1115;font:inherit;line-height:1;cursor:pointer;outline:none;box-shadow:none;-webkit-appearance:none;transition:background-color .12s,color .12s}',
+      '.dshet-attach svg{width:14px;height:14px;display:block;stroke:currentColor;fill:none;stroke-width:1.3;}',
       '.dshet-attach:hover:not(:disabled){background:var(--dshet-hover);color:var(--dshet-ink)}',
       '.dshet-attach:focus-visible{outline:2px solid var(--dsw-alias-button-primary-fill,var(--dshet-accent));outline-offset:2px}',
       '.dshet-attach:disabled{cursor:default;opacity:.5}',
@@ -272,13 +530,46 @@ window.__ModuleLoader__.load({
       '.dshet-note{color:var(--dshet-ink-dim)}',
       '.dshet-warn{color:var(--dsw-alias-state-warning-primary,#a2650a)}',
       '.dshet-error{color:var(--dsw-alias-state-error-primary,#c93a31)}',
-      '.dshet-footer{display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:4px 10px 10px}',
+      '.dshet-footer{position:absolute;left:0;right:0;bottom:0;top:auto;z-index:3;display:flex;align-items:center;justify-content:space-between;gap:6px;height:46px;padding:6px 10px;box-sizing:border-box;background:var(--dshet-panel);border-radius:0 0 var(--dshet-radius-panel) var(--dshet-radius-panel)}',
+      '.dshet-footer-actions{display:flex;align-items:center;gap:6px}',
+      '.dshet-all-nav{position:sticky;top:0;z-index:2;display:flex;flex-wrap:nowrap;align-items:center;gap:6px;min-height:28px;padding:4px 0 6px;background:var(--dshet-panel);overflow-x:auto;scrollbar-width:none}',
+      '.dshet-all-nav button{flex:none;border:0;border-radius:999px;background:var(--dshet-hover);color:var(--dshet-ink-dim);font:inherit;font-size:12px;line-height:18px;padding:3px 10px;cursor:pointer;white-space:nowrap}',
+      '.dshet-all-nav button:hover{color:var(--dshet-ink)}',
+      '.dshet-all{position:absolute;left:8px;right:8px;top:6px;bottom:52px;overflow-y:auto;display:flex;flex-direction:column;padding:2px 4px 4px}',
+      '.dshet-all-block{display:flex;flex-direction:column;padding:6px 0 8px}',
+      '.dshet-all-block:first-child{padding-top:2px}',
+      '.dshet-all-head{display:flex;width:100%;box-sizing:border-box;align-items:center;gap:8px;font-size:11px;color:var(--dshet-ink-dim);padding:0 2px 4px}',
+      '.dshet-all-head>span:first-child{background:var(--dshet-hover);border-radius:6px;padding:1px 6px;white-space:nowrap}',
+      '.dshet-all-line{flex:1;height:1px;background:var(--dshet-line);opacity:.55}',
+      '.dshet-editor[data-dshet-inplace="1"] .dshet-all .dshet-all-area{position:static;left:auto;top:auto;width:100%;height:auto;min-height:32px;max-height:none;padding:0 2px;border-radius:0;overflow:hidden}',
+      '.dshet-all-area{display:block;width:100%;min-height:32px;max-height:none;box-sizing:border-box;border:0;background:transparent;color:inherit;font:inherit;font-size:var(--dsh-content-font-size,14px);line-height:calc(22px + var(--dsh-content-font-delta,0px));resize:none;outline:none;overflow:hidden;scrollbar-width:none;padding:0 2px}',
+      '.dshet-editor .dshet-footer .dshet-btn{height:34px;box-sizing:border-box;padding:0 14px}',
       '.dshet-btn{padding:6px 16px;border:1px solid var(--dshet-line);border-radius:999px;background:var(--dshet-field);color:var(--dshet-ink);font:inherit;font-size:13px;line-height:20px;cursor:pointer;transition:background-color .12s,border-color .12s}',
       '.dshet-btn:hover:not(:disabled){background:var(--dshet-hover)}',
       '.dshet-btn:focus-visible{outline:2px solid var(--dsw-alias-button-primary-fill,var(--dshet-accent));outline-offset:2px}',
       '.dshet-btn:disabled{cursor:default;opacity:.5}',
+      '.dshet-btn-save{width:28px;height:28px;padding:0;border:0;border-radius:50%;background:transparent;color:#81858c}',
+      '.dshet-btn-save:hover:not(:disabled){background:var(--dshet-hover)}',
+      '.dshet-btn-save svg{width:15px;height:15px;display:block;stroke:currentColor;fill:none;stroke-width:1.2;stroke-linecap:round;stroke-linejoin:round}',
+      '.dshet-sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}',
       '.dshet-btn-primary{border-color:var(--dsw-alias-button-primary-fill,var(--dshet-accent));background:var(--dsw-alias-button-primary-fill,var(--dshet-accent));color:var(--dsw-alias-label-primary-foreground,var(--dshet-on-accent))}',
       '.dshet-btn-primary:hover:not(:disabled){background:var(--dsw-alias-button-primary-fill,var(--dshet-accent));filter:brightness(1.08)}',
+'.dshet-btn.dshet-btn-save{width:28px;height:28px;padding:0;border:0;border-radius:50%;background:transparent;color:var(--dshet-ink-soft);filter:none}',
+      '.dshet-btn.dshet-btn-save:hover:not(:disabled){background:var(--dshet-hover);filter:none}',
+      '.dshet-btn.dshet-btn-save.dshet-btn-confirm{background:var(--dshet-hover);box-shadow:inset 0 0 0 1.5px var(--dshet-accent)}',
+      '.dshet-editor .dshet-footer .dshet-btn.dshet-btn-icon{width:28px;height:28px;padding:0;border:0;border-radius:50%;background:transparent;color:#81858c;filter:none}',
+      '.dshet-editor .dshet-footer .dshet-btn.dshet-btn-icon:hover:not(:disabled){background:var(--dshet-hover);color:var(--dshet-ink-soft);filter:none}',
+      '.dshet-btn-icon svg{width:15px;height:15px;display:block;fill:none;stroke:currentColor;stroke-width:1.2;stroke-linecap:round;stroke-linejoin:round}',
+      '.dshet-editor[data-dshet-inplace="1"] .dshet-btn.dshet-btn-save{width:28px;height:28px;padding:0;border:0;border-radius:50%;background:transparent;color:#81858c;filter:none}',
+      '.dshet-editor[data-dshet-inplace="1"] .dshet-btn.dshet-btn-save:hover:not(:disabled){background:var(--dshet-hover);filter:none}',
+      '.dshet-pick{display:flex;align-items:center;gap:4px;padding:0;font-size:12px;color:var(--dshet-ink-dim)}',
+      '.dshet-config{display:flex;flex-direction:column;gap:10px}',
+      '.dshet-config-row{display:flex;align-items:center;justify-content:space-between;gap:12px}',
+      '.dshet-config-hint{margin:0;color:var(--dsw-alias-label-tertiary,#8a8f98);font-size:13px;line-height:20px}',
+      '.dshet-select{padding:3px 8px;border:1px solid var(--dshet-line);border-radius:var(--dshet-radius-sm);background:var(--dshet-field);color:var(--dshet-ink);font:inherit;font-size:12px;line-height:18px}',
+      '.dshet-pick .dshet-select{height:28px;padding:0 6px;border:0;border-radius:8px;background:transparent;line-height:1;cursor:pointer;outline:none}',
+      '.dshet-pick .dshet-select:hover{background:var(--dshet-hover)}',
+      '[data-dshet-patch]{white-space:pre-wrap}',
       '.dshet-notice{margin:4px 0;padding:6px 10px;border:1px solid var(--dshet-line);border-radius:8px;background:var(--dshet-panel);backdrop-filter:blur(18px) saturate(1.2);box-shadow:var(--dshet-shadow);color:var(--dsw-alias-state-error-primary,#c93a31);font-size:12px;line-height:19px}',
       '@media (prefers-reduced-motion:reduce){.dshet-collapsing{transition:none}.dshet-floating{transition:none}}',
     ].join('')
@@ -340,8 +631,13 @@ window.__ModuleLoader__.load({
         this.editorElement = null
         this.editorBox = null
         this.editorRow = null
+        this.editorAnchor = null
+        this.editorMode = 'reply'
+        this.editorStyle = 'frame'
         this.editorFocus = false
         this.editorDraft = ''
+        this.editorBlockKey = ''
+        this.editorDrafts = new Map()
         // The block list being edited: what the carrier will be rebuilt from.
         // Every entry is either `{ keep: <index> }` - a block of this message the
         // user left alone - or `{ add: { data, mediaType?, name } }` for
@@ -366,6 +662,15 @@ window.__ModuleLoader__.load({
           editable: new Map(),
           replies: new Map(),
           repliesByMessage: new Map(),
+          // Landed in-place reply patches, latest per block, and the same data
+          // indexed by seq for the in-place text display.
+          patches: [],
+          patchBySeq: new Map(),
+          replyMode: 'replay',
+          // The block being edited in the reply editor (null for a prompt).
+          blocks: [],
+          blockIndex: null,
+          blockKind: null,
           editing: null,
           draft: '',
           parts: [],
@@ -444,6 +749,22 @@ window.__ModuleLoader__.load({
             for (const turn of Array.isArray(data.turns) ? data.turns : []) {
               if (turn && typeof turn.seq === 'number') editable.set(turn.seq, turn)
             }
+            // The in-place reply patches, latest per block. The model sees them
+            // through the host projection; this half uses them to draw the
+            // projected text over the recorded row.
+            const patches = []
+            const patchBySeq = new Map()
+            for (const patch of Array.isArray(data.patches) ? data.patches : []) {
+              if (!patch || typeof patch.seq !== 'number' || typeof patch.blockIndex !== 'number') continue
+              if (patch.kind !== 'text' && patch.kind !== 'reasoning') continue
+              const normalized = { seq: patch.seq, blockIndex: patch.blockIndex, kind: patch.kind, text: String(patch.text ?? '') }
+              const previous = patches.findIndex((entry) => entry.seq === normalized.seq && entry.blockIndex === normalized.blockIndex)
+              if (previous >= 0) patches[previous] = normalized
+              else patches.push(normalized)
+              let byBlock = patchBySeq.get(normalized.seq)
+              if (byBlock === undefined) { byBlock = new Map(); patchBySeq.set(normalized.seq, byBlock) }
+              byBlock.set(normalized.blockIndex, normalized)
+            }
             // The model's replies are editable too, as a separate list: they are
             // rewritten rather than re-run, so the editor words the consequence
             // differently.
@@ -456,13 +777,26 @@ window.__ModuleLoader__.load({
               // replies are indexed by it too.
               if (typeof reply.messageId === 'string' && reply.messageId !== '') repliesByMessage.set(reply.messageId, reply)
             }
+            let preferredStyle = data.config && (data.config.editorStyle === 'bubble' || data.config.editorStyle === 'center')
+              ? data.config.editorStyle
+              : 'frame'
+            const savedStyle = readStoredEditorStyle()
+            if (savedStyle !== null) preferredStyle = savedStyle
+            this.editorStyle = preferredStyle
             this.publish({
               hidden,
               revisions,
               editable,
               replies,
               repliesByMessage,
+              patches,
+              patchBySeq,
+              replyMode: data.mode === 'patch' ? 'patch' : 'replay',
+              editorStyle: data.config && (data.config.editorStyle === 'bubble' || data.config.editorStyle === 'center')
+                ? data.config.editorStyle
+                : 'frame',
               surfaceReady: true,
+              busy: data.busy === true,
               loaded: true,
               loadError: false,
               confirmStep: !(data.config && data.config.confirm === false),
@@ -477,6 +811,14 @@ window.__ModuleLoader__.load({
           })
           .finally(() => {
             this.inflight = null
+            // While the session is replying, the editor stays open but cannot
+            // save; re-check so the banner clears itself when the turn ends.
+            if (this.view.busy === true && this.editor !== null) {
+              const token = (this.busyToken = (this.busyToken ?? 0) + 1)
+              window.setTimeout(() => {
+                if (this.busyToken === token && this.editor !== null) this.load()
+              }, 3000)
+            }
           })
         this.inflight = pending
         return pending
@@ -489,10 +831,53 @@ window.__ModuleLoader__.load({
         const same = this.editor !== null && this.editor.seq === target.seq && this.editor.mode === target.mode
         const previous = this.editorElement
         this.load()
-        this.editor = target
+        // A reply on the patch path carries its editable blocks; open the one
+        // the editor was asked for, or the answer text when none was named.
+        const replyBlocks = target.mode === 'reply' && Array.isArray(target.blocks) ? target.blocks : []
+        const requested = typeof target.blockIndex === 'number'
+          ? replyBlocks.find((block) => block.index === target.blockIndex)
+          : undefined
+        // Pressing the same pencil again keeps the block the user already
+        // switched to; only a fresh open picks the answer block by default.
+        const current = same && typeof this.editorBlockIndex === 'number'
+          ? replyBlocks.find((block) => block.index === this.editorBlockIndex)
+          : undefined
+        // A fresh open always lands on the answer text: a turn's block list is
+        // mostly reasoning now, and opening on a chain-of-thought is not what
+        // the pencil means. The picker is how the user goes to a thought.
+        const answerBlock = [...replyBlocks].reverse().find((block) => block.kind === 'text')
+        const chosen = (same ? current : undefined) ?? answerBlock ?? requested ?? replyBlocks[0]
+        const normalized = replyBlocks.length > 0
+          ? {
+              ...target,
+              patch: true,
+              blocks: replyBlocks,
+              blockIndex: chosen === undefined ? undefined : chosen.index,
+              blockKind: chosen === undefined ? undefined : chosen.kind,
+            }
+          : target
+        this.editor = normalized
+        this.editorMode = normalized.mode === 'prompt' ? 'prompt' : 'reply'
+        this.editorAnchor = target.anchor !== undefined && target.anchor !== null && target.anchor.isConnected === true
+          ? target.anchor
+          : null
+        this.editorBlocks = replyBlocks
+        this.editorBlockIndex = chosen === undefined ? null : chosen.index
+        this.editorBlockKind = chosen === undefined ? null : chosen.kind
+        this.editorTargetSeq = chosen !== undefined && typeof chosen.seq === 'number' ? chosen.seq : null
+        this.editorAll = false
+        // The height the box opens at: the floor the user cannot shrink below
+        // for as long as this edit lasts (save or cancel ends it). Null until
+        // the first layout measures it.
+        this.editorBaseHeight = null
+        // ONE draft store per open, keyed by block: the 正文/思维链 pages and the
+        // sub-pages inside 全部 all read and write it, so switching pages never
+        // drops what the user typed (only closing the editor does).
+        this.editorDrafts = new Map()
         if (!same) {
-          this.editorDraft = target.text
-          this.editorParts = blocksToParts(target, this.sessionId)
+          this.editorBlockKey = chosen === undefined ? '' : blockDraftKey(chosen)
+          this.editorDraft = chosen === undefined ? target.text : chosen.text
+          this.editorParts = blocksToParts(normalized, this.sessionId)
         }
         this.confirming = false
         this.editorElement = null
@@ -509,7 +894,18 @@ window.__ModuleLoader__.load({
             /* focus is best-effort */
           }
         }
-        this.publish({ editing: target, draft: this.editorDraft, parts: this.editorParts.slice(), confirming: false, failure: null })
+        this.publish({
+          editing: normalized,
+          draft: this.editorDraft,
+          parts: this.editorParts.slice(),
+          blocks: replyBlocks,
+          blockIndex: this.editorBlockIndex,
+          blockKind: this.editorBlockKind,
+          targetSeq: this.editorTargetSeq,
+          allBlocks: false,
+          confirming: false,
+          failure: null,
+        })
         this.probeSiblingRerun()
       }
 
@@ -537,23 +933,108 @@ window.__ModuleLoader__.load({
         if (this.view.siblingRerun !== next) this.publish({ siblingRerun: next })
       }
 
+      // Pick another block of the same reply. The editor is rebuilt by the
+      // block index in its marker; the draft becomes that block's current
+      // (already projected) text.
+      selectBlock(value) {
+        if (this.view.pending) return
+        const target = this.editor
+        if (target === null || !Array.isArray(target.blocks)) return
+        const raw = String(value)
+        if (raw === 'all') {
+          // The all-blocks page reads the SAME drafts: a block edited on its own
+          // page shows that edit in its sub-page, and the other way round.
+          this.editorAll = true
+          this.editorElement = null
+          this.publish({ allBlocks: true, blockIndex: null, blockKind: null, targetSeq: null, failure: null })
+          return
+        }
+        const split = raw.includes(':') ? raw.split(':') : ['', raw]
+        const seq = split[0] === '' ? null : Number(split[0])
+        const index = Number(split[1])
+        const block = target.blocks.find((entry) =>
+          entry.index === index && (seq === null || entry.seq === undefined || entry.seq === seq))
+        // Leaving the all-blocks view has to say so: the picker change alone left
+        // `allBlocks` true, so the box was redrawn as the all view again with a
+        // picker that said "正文" - two fields over a single-block selection.
+        this.editorAll = false
+        if (block === undefined || block.kind === undefined) {
+          // Nothing matched: still leave the all view, keeping the block that was
+          // selected before it, so the picker describes the box again.
+          this.publish({ allBlocks: false, failure: null })
+          return
+        }
+        this.editorBlockIndex = block.index
+        this.editorBlockKind = block.kind
+        this.editorTargetSeq = typeof block.seq === 'number' ? block.seq : this.editorTargetSeq
+        this.editorBlockKey = blockDraftKey(block)
+        // This block's own draft, which may already carry what the user typed on
+        // another page - never the recorded text, which used to wipe it.
+        this.editorDraft = this.draftOfBlock(block)
+        this.editorElement = null
+        this.publish({ draft: this.editorDraft, blockIndex: block.index, blockKind: block.kind, targetSeq: this.editorTargetSeq, allBlocks: false, failure: null })
+      }
+
       close() {
         if (this.view.pending) return
         this.pendingRerun = false
         this.editorElement = null
         this.editorBox = null
         this.editorRow = null
+        this.editorAnchor = null
+        this.editorMode = 'reply'
         this.editorFocus = false
         this.editor = null
         this.editorDraft = ''
         this.editorParts = []
         this.confirming = false
         this.editorElement = null
-        this.publish({ editing: null, draft: '', parts: [], confirming: false, failure: null })
+        this.editorBlocks = []
+        this.editorBlockIndex = null
+        this.editorBlockKind = null
+        this.editorTargetSeq = null
+        this.editorAll = false
+        this.editorDrafts = new Map()
+        this.editorBlockKey = ''
+        this.editorBaseHeight = null
+        this.publish({ editing: null, draft: '', parts: [], blocks: [], blockIndex: null, blockKind: null, confirming: false, failure: null })
+      }
+
+      /** The draft of one block: what the user typed, else the recorded text. */
+      draftOfBlock(block) {
+        const drafts = this.editorDrafts
+        if (drafts instanceof Map) {
+          const key = blockDraftKey(block)
+          const typed = drafts.get(key)
+          if (typeof typed === 'string') return typed
+        }
+        return block !== null && block !== undefined && typeof block.text === 'string' ? block.text : ''
+      }
+
+      /** Remember one block's draft, wherever the user typed it. */
+      setDraftFor(block, value) {
+        if (!(this.editorDrafts instanceof Map)) this.editorDrafts = new Map()
+        this.editorDrafts.set(blockDraftKey(block), String(value ?? ''))
       }
 
       setDraft(value) {
         this.editorDraft = value
+        // The 正文/思维链 page and the matching sub-page inside 全部 are the same
+        // block: one store, so the edit survives a page switch.
+        const blocks = Array.isArray(this.editorBlocks) ? this.editorBlocks : []
+        const current =
+          blocks.find((block) => blockDraftKey(block) === this.editorBlockKey) ??
+          (typeof this.editorBlockIndex === 'number'
+            ? blocks.find((block) => block.index === this.editorBlockIndex && (this.editorBlockKind === null || block.kind === this.editorBlockKind))
+            : undefined)
+        if (current !== undefined) this.setDraftFor(current, value)
+      }
+
+      setEditorStyle(style) {
+        if (!EDITOR_STYLES.includes(style)) return
+        setEditorStylePreference(style)
+        this.editorStyle = style
+        this.publish({ editorStyle: style })
       }
 
       /**
@@ -621,6 +1102,59 @@ window.__ModuleLoader__.load({
         }
       }
 
+      /** The all-blocks save: one request carrying every edited block. */
+      async confirmAll(target) {
+        const blocks = Array.isArray(target.blocks) ? target.blocks : []
+        const targets = []
+        for (const block of blocks) {
+          const text = this.draftOfBlock(block)
+          if (typeof text !== 'string' || text.trim() === '') {
+            this.publish({ failure: 'empty' })
+            return
+          }
+          if (text !== block.text) {
+            targets.push({ seq: typeof block.seq === 'number' ? block.seq : target.seq, blockIndex: block.index, kind: block.kind, text })
+          }
+        }
+        if (targets.length === 0) {
+          this.publish({ failure: null })
+          this.editor = null
+          this.publish({ editing: null })
+          return
+        }
+        this.publish({ pending: true, failure: null, failureDetail: null })
+        try {
+          const res = await fetch(`${ROUTE_PREFIX}/apply`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            ...(typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
+              ? { signal: AbortSignal.timeout(20000) }
+              : {}),
+            body: JSON.stringify({ sessionId: this.sessionId, targets }),
+          })
+          const data = await res.json().catch(() => ({}))
+          if (!res.ok || !data.ok) {
+            const code = data && data.code ? String(data.code) : 'generic'
+            const detail = data && typeof data.error === 'string' && data.error !== '' ? data.error : null
+            this.publish({ pending: false, failure: code, failureDetail: detail })
+            return
+          }
+          this.editor = null
+          this.editorDraft = ''
+          this.editorAll = false
+          this.editorDrafts = new Map()
+          this.editorElement = null
+          this.editorBox = null
+          this.editorRow = null
+          this.editorFocus = false
+          this.confirming = false
+          this.publish({ pending: false, editing: null, confirming: false, failure: null })
+          this.load()
+        } catch {
+          this.publish({ pending: false, failure: 'generic' })
+        }
+      }
+
       review() {
         this.pendingRerun = false
         this.runReview()
@@ -656,6 +1190,9 @@ window.__ModuleLoader__.load({
         if (target === null || this.view.pending) return
         const rerunIntent = this.pendingRerun
         this.pendingRerun = false
+        if (this.editorAll === true) {
+          return this.confirmAll(target)
+        }
         const text = this.editorDraft
         if (text.trim() === '') {
           this.publish({ failure: 'empty' })
@@ -668,22 +1205,38 @@ window.__ModuleLoader__.load({
         const parts = target.mode === 'prompt' && this.view.attachmentsOk === true
           ? this.editorParts.map((part) => (part.keep !== undefined ? { keep: part.keep } : { add: part.add }))
           : undefined
-        this.publish({ pending: true, failure: null })
+        this.publish({ pending: true, failure: null, failureDetail: null })
         try {
           const res = await fetch(`${ROUTE_PREFIX}/apply`, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
+            // A hung host must not leave the editor pending forever with a
+            // button that looks dead.
+            ...(typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
+              ? { signal: AbortSignal.timeout(20000) }
+              : {}),
             body: JSON.stringify({
               sessionId: this.sessionId,
               seq: target.seq,
               messageId: typeof target.messageId === 'string' ? target.messageId : undefined,
               text,
               ...(parts === undefined ? {} : { parts }),
+              // The in-place reply path names one block; the host validates that
+              // it is still that kind at that index before writing the record.
+              ...(target.patch === true && typeof this.editorBlockIndex === 'number'
+                ? {
+                    blockIndex: this.editorBlockIndex,
+                    kind: this.editorBlockKind,
+                    ...(this.editorTargetSeq === null ? {} : { targetSeq: this.editorTargetSeq }),
+                  }
+                : {}),
             }),
           })
           const data = await res.json().catch(() => ({}))
           if (!res.ok || !data.ok) {
-            this.publish({ pending: false, failure: data && data.code ? String(data.code) : 'generic' })
+            const code = data && data.code ? String(data.code) : 'generic'
+            const detail = data && typeof data.error === 'string' && data.error !== '' ? data.error : null
+            this.publish({ pending: false, failure: code, failureDetail: detail })
             return
           }
           const shadowed = Array.isArray(data.shadowed) ? data.shadowed : []
@@ -720,6 +1273,60 @@ window.__ModuleLoader__.load({
           // replies here and re-enters through the next /state refresh (the
           // appended correction is itself an editable reply).
           const replies = new Map(this.view.replies)
+          // The in-place path wrote one small record and touched no surface
+          // row: the reply stays where it is, and its block list is updated
+          // optimistically so the next render already shows the new text.
+          let patches = this.view.patches
+          let patchBySeq = this.view.patchBySeq
+          if (data.mode === 'patch' && data.target && typeof data.target.blockIndex === 'number') {
+            // The BLOCK's own seq, not the reply's. A turn's reasoning can live
+            // in another step's message, and the host reports that seq in the
+            // answer. Keying the optimistic patch by the reply's seq looked up
+            // the wrong block, took the wrong `original`, and the patch then
+            // matched nothing in the DOM - the edit appeared only after a reload,
+            // when /state supplied it under its own seq (reported from the field
+            // for the 思维链 page; the 正文 page looked fine because its block IS
+            // the reply's own).
+            const patchSeq = typeof data.target.seq === 'number' ? data.target.seq : target.seq
+            const targetPatch = {
+              seq: patchSeq,
+              blockIndex: data.target.blockIndex,
+              kind: data.target.kind === 'reasoning' ? 'reasoning' : 'text',
+              text: String(data.target.text ?? ''),
+            }
+            patches = patches
+              .filter((entry) => !(entry.seq === targetPatch.seq && entry.blockIndex === targetPatch.blockIndex))
+              .concat([targetPatch])
+            patchBySeq = new Map(patchBySeq)
+            const byBlock = new Map(patchBySeq.get(targetPatch.seq) ?? [])
+            byBlock.set(targetPatch.blockIndex, targetPatch)
+            patchBySeq.set(targetPatch.seq, byBlock)
+            // The entry that carries this block: the reply's own, or the one
+            // whose block list holds another step's reasoning.
+            let entry = replies.get(patchSeq)
+            if (entry === undefined || !Array.isArray(entry.blocks)) {
+              for (const candidate of replies.values()) {
+                if (Array.isArray(candidate?.blocks) && candidate.blocks.some((block) => block.seq === patchSeq)) {
+                  entry = candidate
+                  break
+                }
+              }
+            }
+            if (entry !== undefined && Array.isArray(entry.blocks)) {
+              const blocks = entry.blocks.map((block) =>
+                block.index === targetPatch.blockIndex &&
+                (block.seq === undefined || block.seq === patchSeq)
+                  ? { ...block, text: targetPatch.text, patched: true }
+                  : block)
+              const text = blocks.filter((block) => block.kind === 'text').map((block) => block.text).join('\n')
+              replies.set(target.seq, {
+                ...entry,
+                blocks,
+                text,
+                patched: blocks.some((block) => block.patched === true),
+              })
+            }
+          }
           for (const entry of replies.values()) {
             if (hidden.has(entry.seq)) replies.delete(entry.seq)
           }
@@ -740,6 +1347,11 @@ window.__ModuleLoader__.load({
             revisions,
             editable,
             replies,
+            patches,
+            patchBySeq,
+            blocks: [],
+            blockIndex: null,
+            blockKind: null,
             parts: [],
             failure: null,
           })
@@ -773,6 +1385,11 @@ window.__ModuleLoader__.load({
             // the only place the user can still be told (see applyEdit's
             // `dropped`).
             if (data.kind !== 'reply' && data.applied === true && data.dropped === true) this.notify('attachments-dropped')
+            // The correction landed, but replaying the turns behind it did not:
+            // the editor is already gone, so this is the only place left to say
+            // that the tail is missing from the context instead of silently
+            // hiding rows the user still expects.
+            if (data.applied === true && data.replay && data.replay.error) this.notify('replay-partial')
           }
           // Save first, re-run second - always: the sibling re-runs the turn
           // from the prompt the surface NOW shows, so the revised wording has
@@ -1044,9 +1661,9 @@ window.__ModuleLoader__.load({
      * at all and reads exactly like a dead pencil.
      */
     function wireAction(button) {
-      pressable(button, () => {
+      pressable(button, (event) => {
         const activate = button[ACTIVATE]
-        if (typeof activate === 'function') activate()
+        if (typeof activate === 'function') activate(event)
       })
     }
 
@@ -1108,7 +1725,8 @@ window.__ModuleLoader__.load({
       }
       const entry = view.editable.get(headRevision(view.revisions.get(revisionSeq), view.revisions))
       const text = entry && typeof entry.text === 'string' ? entry.text : ''
-      if (text === '') {
+      const extraBlocks = entry && Array.isArray(entry.blocks) ? entry.blocks.filter((block) => block.type !== 'text') : []
+      if (text === '' && extraBlocks.length === 0) {
         if (existing !== null) existing.remove()
         releaseRowCopy(row)
         return node.kind !== 'user'
@@ -1121,7 +1739,30 @@ window.__ModuleLoader__.load({
         }
       }
       placeRevisionBubble(row, bubble)
-      if (bubble.textContent !== text) bubble.textContent = text
+      // A rewritten prompt may still carry images/files. The carrier keeps
+      // those blocks, the model reads them, and the editor lists them - the
+      // standing-in bubble must show them too, or an edited image message looks
+      // like the images were deleted.
+      const signature = text + '|' + extraBlocks.map((block) =>
+        `${String(block.index)}:${String(block.type)}:${String(block.name ?? '')}:${String(block.bytes ?? '')}`).join(',')
+      // The signature carries whether the markdown path was used: installing or
+      // removing the markdown bubble plugin must redraw this bubble too.
+      const markdownSignature = signature + '|md:' + (markdownBubbleInstalled() ? '1' : '0')
+      if (bubble.dataset.dshetRevisionContent !== markdownSignature) {
+        const previous = revisionRoots.get(bubble)
+        if (previous !== undefined && typeof previous.unmount === 'function') previous.unmount()
+        revisionRoots.delete(bubble)
+        bubble.textContent = ''
+        if (!renderRevisionText(bubble, text)) {
+          const textNode = document.createElement('span')
+          textNode.className = 'dshet-revision-text'
+          textNode.textContent = text
+          bubble.appendChild(textNode)
+        }
+        const files = revisionAttachments(entry, controller)
+        if (files !== null) bubble.appendChild(files)
+        bubble.dataset.dshetRevisionContent = markdownSignature
+      }
       // The edit entry goes where every other action of this row lives: the
       // platform's own bar, which the collapse keeps standing, at its right end
       // behind the clock and the copy button - the row the user reads as "this
@@ -1152,6 +1793,40 @@ window.__ModuleLoader__.load({
         releaseRowCopy(row)
       }
       return true
+    }
+
+    /**
+     * The non-text blocks of a rewritten prompt, drawn under its text.
+     *
+     * These are the same blocks the editor lists as chips; the bytes come from
+     * this plugin's attachment route, so a thumbnail works without a host API.
+     */
+    function revisionAttachments(entry, controller) {
+      if (!entry || !Array.isArray(entry.blocks)) return null
+      const blocks = entry.blocks.filter((block) => block.type !== 'text')
+      if (blocks.length === 0) return null
+      const strip = document.createElement('div')
+      strip.className = 'dshet-revision-files'
+      for (const block of blocks) {
+        const item = document.createElement('div')
+        item.className = 'dshet-revision-file'
+        if (block.preview === true && typeof block.index === 'number') {
+          const image = document.createElement('img')
+          image.className = 'dshet-thumb'
+          image.alt = ''
+          image.src = previewUrl(controller.sessionId, entry.seq, block.index)
+          image.addEventListener('error', () => {
+            if (typeof image.remove === 'function') image.remove()
+          })
+          item.appendChild(image)
+        }
+        const label = document.createElement('span')
+        label.className = 'dshet-chip-label'
+        label.textContent = typeof block.name === 'string' && block.name !== '' ? block.name : block.type
+        item.appendChild(label)
+        strip.appendChild(item)
+      }
+      return strip
     }
 
     // A copy of a live user bubble element, classes and all.
@@ -1662,7 +2337,14 @@ window.__ModuleLoader__.load({
       } else if (button.dataset !== undefined && button.dataset.dshetFallback !== undefined) {
         delete button.dataset.dshetFallback
       }
-      button[ACTIVATE] = () => controller.open(entry.target)
+      button[ACTIVATE] = (event) => controller.open({
+        ...entry.target,
+        // The editor belongs beside the pencil the user just pressed, not at the
+        // top of a row that may be taller than the screen.
+        anchor: event !== undefined && event !== null && event.currentTarget !== undefined
+          ? event.currentTarget
+          : button,
+      })
       liveHosts.add(host)
       if (button.getAttribute('aria-label') !== label) {
         button.setAttribute('aria-label', label)
@@ -1792,13 +2474,606 @@ window.__ModuleLoader__.load({
     // Put the box under the row it belongs to: same width, just below its lower
     // edge. Called on render and whenever the page scrolls or resizes, since
     // the layer is fixed to the viewport.
-    function placeEditor(row, box) {
+    // Some host skins mark their editor chrome `!important`; only an inline
+    // `!important` outranks that. The stub DOM has no `setProperty`, so it falls
+    // back to a plain assignment there.
+    function forceStyle(element, property, value) {
+      if (element === null || element === undefined || element.style === undefined) return
+      if (typeof element.style.setProperty === 'function') {
+        element.style.setProperty(property, value, 'important')
+        return
+      }
+      element.style[property] = value
+    }
+
+    /**
+     * The surface an in-place editor paints itself with, so the recorded text
+     * underneath cannot show through the draft.
+     *
+     * The skin's own panel colour comes first. A skin that paints the app on
+     * artwork usually leaves `body` transparent (the artwork is a layer behind
+     * it), and the white fallback then put a white box on a night sky. The
+     * palette keeps the skin's hue and drops its transparency, so what comes back
+     * here is opaque by construction.
+     *
+     * @returns a CSS colour for the editor's own background.
+     */
+    function pageBackground() {
+      try {
+        if (typeof getComputedStyle === 'function' && typeof document !== 'undefined' && document.body) {
+          const panel = String(getComputedStyle(document.body).getPropertyValue('--dshet-panel') || '').trim()
+          const match = /rgba?\(([^)]+)\)/.exec(panel)
+          if (match !== null) {
+            const parts = match[1].split(',').map((value) => Number.parseFloat(value))
+            const opaque = parts.length >= 3 && parts.every((value) => Number.isFinite(value)) && (parts.length < 4 || parts[3] >= 0.9)
+            if (opaque) return panel
+          }
+          const value = getComputedStyle(document.body).backgroundColor
+          if (value && value !== 'transparent' && !/rgba?\(0, 0, 0, 0\)/.test(value)) return value
+        }
+      } catch {
+        /* fall through */
+      }
+      return '#ffffff'
+    }
+
+    function viewportSize() {
+      const win = typeof window === 'undefined' ? undefined : window
+      const doc = typeof document === 'undefined' ? undefined : document
+      const width = (win !== undefined && win.innerWidth) ||
+        (doc !== undefined && doc.documentElement && doc.documentElement.clientWidth) || 0
+      const height = (win !== undefined && win.innerHeight) ||
+        (doc !== undefined && doc.documentElement && doc.documentElement.clientHeight) || 0
+      return { width, height }
+    }
+
+    // Put the box under the row it belongs to: same width, just below its lower
+    // edge. The layer is fixed to the viewport, so a row near the bottom (or one
+    // taller than the screen) used to push the footer - and its save button -
+    // past the bottom edge where nothing could reach it. Flip above the row when
+    // there is room, otherwise pin the box to the bottom of the viewport and let
+    // its own scrollbar carry the content; the footer stays sticky either way.
+    /**
+     * The bubble the editor stands in for.
+     *
+     * A prompt is a right-aligned input bubble; a reply is the output content
+     * block. The editor takes that element's width and left edge and overlays its
+     * position, so it reads as the message being edited instead of a floating
+     * panel. Class hashes change between builds, so the suffixes are matched.
+     */
+    function bubbleFor(row, mode, blockKind = null) {
+      let selectors
+      if (mode === 'reply' && blockKind === 'reasoning') {
+        selectors = ['details', '[class*="_reasoning"]', '[class*="_thinking"]', '[class*="reasoning"]']
+      } else if (mode === 'reply') {
+        selectors = ['[class*="_markdown"]', '[class*="_bubble"]', '[class*="messageBody"]']
+      } else {
+        selectors = ['[class*="_bubble"]', '[class*="userStack"]', '[class*="_markdown"]']
+      }
+      for (const selector of selectors) {
+        let nodes = []
+        try {
+          nodes = [...row.querySelectorAll(selector)]
+        } catch {
+          nodes = []
+        }
+        let best = null
+        for (const element of nodes) {
+          if (typeof element.closest === 'function' && element.closest('.dshet-editor') !== null) continue
+          const rect = element.getBoundingClientRect()
+          if (rect.width < 80 || rect.height <= 0) continue
+          if (best === null || rect.width * rect.height > best.rect.width * best.rect.height) best = { element, rect }
+        }
+        if (best !== null) return best
+      }
+      const rect = row.getBoundingClientRect()
+      return { element: row, rect }
+    }
+
+    /**
+     * Which row an editor should attach to when several cover the edited seq.
+     *
+     * A reply's seq appears in both the assistant-step row and the turn-tail
+     * row that carries its action strip; the tail also covers the reply, so a
+     * last-write-wins loop handed the editor the tail's little action bar and
+     * the box came out message-sized instead of bubble-sized. The message row
+     * always wins.
+     */
+    function editorRowRank(row, mode) {
+      const kind = row.getAttribute('data-chat-flow-kind')
+      if (mode === 'prompt') {
+        if (kind === 'user') return 4
+        if (kind === 'revision' || kind === 'user-revision') return 3
+        if (kind === 'turn-tail' || kind === 'turn-process') return 1
+        return 2
+      }
+      if (kind === 'assistant-step') return 4
+      if (kind === 'turn-tail' || kind === 'turn-process') return 1
+      return 2
+    }
+
+    /**
+     * The vertical band the conversation owns: below its top, above the composer.
+     *
+     * This runs on every scroll frame, so the lookups are cached briefly: the
+     * composer element and the conversation top do not move between frames, and
+     * a global `[class*=...]` scan per frame is what made scrolling feel heavy.
+     */
+    let conversationBoundsCache = null
+    let conversationBoundsAt = 0
+    let composerElementCache = null
+    function conversationBounds(row = null) {
+      const now = Date.now()
+      if (conversationBoundsCache !== null && now - conversationBoundsAt < 250) return conversationBoundsCache
+      const viewportHeight = typeof window !== 'undefined' && typeof window.innerHeight === 'number' ? window.innerHeight : 0
+      const bounds = { top: 0, bottom: viewportHeight, composerLeft: 0, composerWidth: 0 }
+      try {
+        const conversation = document.querySelector('[data-slot="main.conversation"]')
+        if (conversation !== null && typeof conversation.getBoundingClientRect === 'function') {
+          bounds.top = conversation.getBoundingClientRect().top
+        }
+      } catch {}
+      // The real scroll area is the nearest scrollable ancestor of the edited
+      // row; the slot wrapper can start above the header, which let the box
+      // cover the tab bar.
+      try {
+        let node = row !== null && row !== undefined ? row.parentElement : null
+        while (node !== null && node !== undefined && node !== document.body) {
+          const style = getComputedStyle(node)
+          if ((style.overflowY === 'auto' || style.overflowY === 'scroll') && node.getBoundingClientRect().height > 120) {
+            bounds.top = Math.max(bounds.top, node.getBoundingClientRect().top)
+            break
+          }
+          node = node.parentElement
+        }
+      } catch {}
+      // The composer stack has several wrappers with "composer" in the class;
+      // the boundary is the LOWEST one that still sits above the viewport edge,
+      // otherwise the box runs under the input box.
+      try {
+        // The composer CARD is the rounded surface that owns the input, not the
+        // outer seat (which is wider and made the editor overhang). Walk up from
+        // the input element to the first rounded, painted ancestor.
+        let card = document.querySelector('textarea[placeholder], [contenteditable="true"]')
+        while (card !== null && card !== undefined && card !== document.body) {
+          const style = getComputedStyle(card)
+          const radius = Number.parseFloat(style.borderTopLeftRadius)
+          if (radius > 6 && style.backgroundColor !== 'rgba(0, 0, 0, 0)') break
+          card = card.parentElement
+        }
+        let lowest = 0
+        let lowestRect = null
+        if (card !== null && card !== undefined && card !== document.body && typeof card.getBoundingClientRect === 'function') {
+          const rect = card.getBoundingClientRect()
+          if (rect.top > 0 && (viewportHeight === 0 || rect.top < viewportHeight)) {
+            lowest = rect.top
+            lowestRect = rect
+          }
+        }
+        if (lowestRect === null) {
+          const candidates = document.querySelectorAll('[data-slot="conversation.input"], [class*="composerSeat"], [class*="composer"]')
+          for (const candidate of candidates) {
+            if (typeof candidate.getBoundingClientRect !== 'function') continue
+            const rect = candidate.getBoundingClientRect()
+            if (rect.top > lowest && (viewportHeight === 0 || rect.top < viewportHeight - 40)) {
+              lowest = rect.top
+              lowestRect = rect
+            }
+          }
+        }
+        bounds.bottom = lowest > 0 ? lowest : Math.min(viewportHeight, viewportHeight - 120)
+        if (lowestRect !== null) {
+          bounds.composerLeft = lowestRect.left
+          bounds.composerWidth = lowestRect.width
+        }
+      } catch {
+        bounds.bottom = viewportHeight > 0 ? viewportHeight - 120 : viewportHeight
+      }
+      conversationBoundsCache = bounds
+      conversationBoundsAt = now
+      return bounds
+    }
+
+    function placeEditor(row, box, mode = 'reply', style = 'frame', blockKind = null, blocks = null, controller = null) {
       const layer = ensureEditorLayer()
       if (box.parentElement !== layer) layer.appendChild(box)
-      const rect = row.getBoundingClientRect()
-      box.style.left = `${Math.round(rect.left)}px`
-      box.style.top = `${Math.round(rect.bottom + 6)}px`
-      box.style.width = `${Math.round(rect.width)}px`
+      const placement = readStoredEditorPlacement() ?? 'overlay'
+      const legacy = placement === 'legacy'
+      const inline = placement === 'inline'
+      // Every fixed mode is clamped to the conversation band by default; the
+      // in-page mode keeps its page coordinates and page scroll.
+      const clamped = !inline
+      if (legacy) style = 'frame'
+      if (inline) layer.dataset.dshetInline = '1'
+      else delete layer.dataset.dshetInline
+      const rowRect = row.getBoundingClientRect()
+      const bubble = bubbleFor(row, mode, blockKind)
+      const storedStyle = readStoredEditorStyle()
+      if (storedStyle !== null) style = storedStyle
+      const chipsInBox = typeof box.querySelector === 'function' ? box.querySelector('.dshet-chips') : null
+      const minimumHeight = chipsInBox !== null && chipsInBox !== undefined ? 190 : 150
+      const viewport = viewportSize()
+      const margin = 8
+      const area = typeof box.querySelector === 'function' ? box.querySelector('textarea') : null
+      const frame = typeof box.querySelector === 'function' ? box.querySelector('.dshet-frame') : null
+      const allBox = typeof box.querySelector === 'function' ? box.querySelector('.dshet-all') : null
+      const heightMode = readStoredEditorHeight() ?? 'fill'
+      if (frame !== null && frame !== undefined) frame.style.display = style === 'frame' ? '' : 'none'
+      box.style.boxShadow = 'none'
+      const footerEl = typeof box.querySelector === 'function' ? box.querySelector('.dshet-footer') : null
+      if (footerEl !== null && footerEl !== undefined && !(style === 'center' && !inline)) {
+        footerEl.style.position = ''
+        footerEl.style.height = ''
+        footerEl.style.marginTop = ''
+        footerEl.style.borderRadius = ''
+      }
+      if (style === 'center' && !inline) {
+        // A large centred panel, the first shape that shipped. The textarea
+        // grows with its content; the original message stays where it is.
+        delete box.dataset.dshetInplace
+        if (area !== null && area !== undefined) {
+          area.style.position = ''
+          area.style.left = ''
+          area.style.top = ''
+          area.style.width = ''
+          area.style.height = ''
+          area.style.maxHeight = ''
+          area.style.background = ''
+          area.style.paddingBottom = '16px'
+          fitEditorHeight(area)
+          const centerFooter = typeof box.querySelector === 'function' ? box.querySelector('.dshet-footer') : null
+          if (centerFooter !== null && centerFooter !== undefined) {
+            centerFooter.style.position = 'static'
+            centerFooter.style.height = '46px'
+            centerFooter.style.marginTop = '0'
+            centerFooter.style.borderRadius = '0 0 16px 16px'
+          }
+        }
+        const width = viewport.width > 0 ? Math.max(320, Math.min(1400, viewport.width - margin * 2)) : Math.max(320, rowRect.width)
+        box.style.boxSizing = 'border-box'
+      box.style.width = `${Math.round(width)}px`
+        box.style.left = `${Math.round(viewport.width > 0 ? (viewport.width - width) / 2 : rowRect.left)}px`
+        const bounds = conversationBounds(row)
+        const topLimit = bounds.top + margin
+        const bottomLimit = (bounds.bottom > 0 ? bounds.bottom : viewport.height) - margin
+        const usable = bottomLimit > topLimit ? bottomLimit - topLimit : 0
+        box.style.height = ''
+        box.style.maxHeight = usable > 0
+          ? `${Math.max(180, usable)}px`
+          : viewport.height > 0
+            ? `${Math.max(180, viewport.height - margin * 2)}px`
+            : ''
+        const measured = box.getBoundingClientRect()
+        const height = (measured && measured.height) || box.offsetHeight || 0
+        const top = usable > 0 && height > 0
+          ? Math.round(Math.max(topLimit, Math.min(topLimit + (usable - height) / 2, bottomLimit - height)))
+          : viewport.height > 0 && height > 0
+            ? Math.round(Math.max(margin, Math.min((viewport.height - height) / 2, viewport.height - height - margin)))
+            : Math.round((rowRect.bottom || 0) + 6)
+        box.style.top = `${top}px`
+        return
+      }
+      // `bubble` and `frame` both paint over the message, so the textarea gets
+      // an opaque surface: the recorded text underneath must not show through
+      // the draft. `frame` outlines the whole row; `bubble` outlines just the
+      // message block.
+      box.dataset.dshetInplace = '1'
+      // A full opaque backdrop: the frame covers the whole row, so the host's
+      // status line and action bar underneath must not show through either.
+      const opaque = pageBackground()
+      box.style.background = opaque
+      if (area !== null && area !== undefined) {
+        area.style.background = opaque
+      }
+      // A reply edit is scoped to the selected block (answer text or reasoning),
+      // not to the whole assistant row: the other blocks stay out of the frame.
+      const base = legacy ? rowRect : mode === 'reply' ? bubble.rect : style === 'frame' ? rowRect : bubble.rect
+      let width = base.width
+      let alignedLeft = null
+      const fillAllView = allBox !== null && allBox !== undefined && heightMode !== 'content'
+      if (fillAllView) {
+        // The all-blocks page lines up with the composer card: same left edge,
+        // same width, so the two boxes read as one column.
+        const aligned = conversationBounds(row)
+        if (aligned.composerWidth > 0) {
+          width = aligned.composerWidth
+          alignedLeft = aligned.composerLeft
+        }
+      }
+      if (!fillAllView && mode === 'reply' && typeof rowRect.width === 'number' && rowRect.width > width) {
+        // A reply block is narrower than the conversation row; the editor gets
+        // the full row width so the text is not squeezed into the bubble.
+        width = rowRect.width
+      }
+      let left = alignedLeft === null ? base.left : alignedLeft
+      if (inline) {
+        const pageX = typeof window !== 'undefined' && typeof window.scrollX === 'number' ? window.scrollX : 0
+        left += pageX
+        if (viewport.width > 0) width = Math.min(width, viewport.width - margin * 2)
+      } else if (viewport.width > 0) {
+        width = Math.min(width, viewport.width - margin * 2)
+        left = Math.max(margin, Math.min(left, viewport.width - width - margin))
+      }
+      box.style.boxSizing = 'border-box'
+      box.style.width = `${Math.round(width)}px`
+      box.style.left = `${Math.round(left)}px`
+      // The host's action strip sits under the reported bubble. Extend the
+      // editor down to the row's bottom so that strip is covered, and the
+      // footer controls end up where those host buttons used to be.
+      const baseBottom = typeof base.bottom === 'number' ? base.bottom : base.top + base.height
+      const rowBottom = typeof rowRect.bottom === 'number' ? rowRect.bottom : rowRect.top + rowRect.height
+      // The action strip can be a sibling of the row (the turn-tail row), not
+      // its child. Find the nearest one from our own injected action buttons
+      // and include its bottom in the cover.
+      let actionBottom = 0
+      if (legacy) try {
+        const actions = document.querySelectorAll('.dshet-action')
+        for (const action of actions) {
+          const bar = action.parentElement
+          if (bar === null || bar === undefined || typeof bar.getBoundingClientRect !== 'function') continue
+          const rect = bar.getBoundingClientRect()
+          if (rect.top >= rowRect.top - 8 && rect.top <= rowRect.bottom + 160) {
+            actionBottom = Math.max(actionBottom, rect.bottom)
+          }
+        }
+      } catch {}
+      // The action strip is rendered as its own turn-tail row under the
+      // message row. Use that row's bottom; if the host renders it in a shape
+      // we cannot identify, reserve one action-band height so the buttons can
+      // never peek out underneath the opaque editor.
+      let tailBottom = 0
+      if (legacy) try {
+        const tails = document.querySelectorAll('[data-chat-flow-kind="turn-tail"]')
+        for (const tail of tails) {
+          if (typeof tail.getBoundingClientRect !== 'function') continue
+          const rect = tail.getBoundingClientRect()
+          if (rect.top >= rowRect.top - 8 && rect.top <= rowRect.bottom + 200) {
+            tailBottom = Math.max(tailBottom, rect.bottom)
+          }
+        }
+      } catch {}
+      const coverBottom = Math.max(rowBottom, actionBottom, tailBottom)
+      const coveredHeight = Math.max(base.height, coverBottom - base.top + 48)
+      // Non-legacy modes hug the content: the box ends right after the last
+      // line plus the control band, instead of stretching to the row bottom.
+      const FOOTER_BAND = 46
+      const boxRect0 = typeof box.getBoundingClientRect === 'function' ? box.getBoundingClientRect() : { top: base.top }
+      const chipStrip0 = typeof box.querySelector === 'function' ? box.querySelector('.dshet-chips') : null
+      const chipBottom0 = chipStrip0 === null || chipStrip0 === undefined || typeof chipStrip0.getBoundingClientRect !== 'function'
+        ? 0
+        : Math.max(0, chipStrip0.getBoundingClientRect().bottom - boxRect0.top + 8)
+      const headerOffset = Math.max(38, chipBottom0, bubble.rect.top - base.top)
+      let contentHeight = Math.round(base.height)
+      if (area !== null && area !== undefined && (allBox === null || allBox === undefined)) {
+        try {
+          const previousValue = area.value
+          const previousHeight = area.style.height
+          // Assigning `value` drops a textarea's scroll position to the top -
+          // even when the assignment is only a measuring detour. Verified in
+          // Chromium: the SAME string keeps the scroll, a DIFFERENT string
+          // resets it to 0, and putting the original back does not bring it
+          // back. The "turn max" pass below writes every other block's text into
+          // this field, so every cache-miss layout (the first one, a page
+          // switch, and every pass while the turn's blocks change - i.e. while
+          // the model streams) threw the reader back to the top. That is what
+          // "the 思维链/正文 page cannot be scrolled down" was: the wheel worked,
+          // the position did not survive the next layout.
+          const previousScroll = typeof area.scrollTop === 'number' ? area.scrollTop : 0
+          const measure = (text) => {
+            area.value = text
+            // The settled height: one pass reads a line short (see
+            // settleAreaHeight), and this number decides the whole box. The
+            // scroller is the box itself, so its position is kept too.
+            return Math.round(withScrollKept(box, () => settleAreaHeight(area)))
+          }
+          const own = measure(previousValue)
+          if (own > 0) contentHeight = own
+          // "Turn max" pins the box to the tallest block of the turn, so
+          // switching between a short answer and a long thought does not resize
+          // the frame under the user's hands. The measurement is cached: doing
+          // it for every block on every scroll frame is what made the editor
+          // drag while the conversation moved.
+          if (heightMode !== 'content' && Array.isArray(blocks)) {
+            const key = `${Math.round(area.clientWidth || 0)}|${blocks.map((block) => `${block.seq ?? ''}:${block.index}:${typeof block.text === 'string' ? block.text.length : 0}`).join(',')}`
+            if (maxHeightCache.key === key) {
+              contentHeight = Math.max(contentHeight, maxHeightCache.value)
+            } else {
+              let tallest = 0
+              for (const block of blocks) {
+                if (block === null || block === undefined || typeof block.text !== 'string') continue
+                const measured = measure(block.text)
+                if (measured > tallest) tallest = measured
+              }
+              maxHeightCache = { key, value: tallest }
+              if (tallest > contentHeight) contentHeight = tallest
+            }
+          }
+          area.value = previousValue
+          area.style.height = previousHeight
+          if (typeof area.scrollTop === 'number' && area.scrollTop !== previousScroll) {
+            area.scrollTop = previousScroll
+          }
+        } catch {}
+      }
+      // Every mode hugs the measured content; `coveredHeight` is only a
+      // fallback for a host whose textarea cannot be measured.
+      // While the editor is open its height FOLLOWS the draft: more lines grow
+      // the box, deleting lines shrinks it - but never below the height it had
+      // when it opened, and never past the composer below or the conversation
+      // top above. The floor belongs to the whole edit (a page switch keeps it)
+      // and only a save or a cancel ends it.
+      const baseHeight =
+        controller !== null &&
+        controller !== undefined &&
+        typeof controller.editorBaseHeight === 'number' &&
+        controller.editorBaseHeight > 0
+          ? controller.editorBaseHeight
+          : null
+      let height = Math.max(minimumHeight, contentHeight + headerOffset + FOOTER_BAND, baseHeight === null ? 0 : baseHeight)
+      let clampedTop = null
+      if (clamped) {
+        const bounds = conversationBounds(row)
+        const bottomLimit = (bounds.bottom > 0 ? bounds.bottom : viewport.height) - margin
+        const topLimit = bounds.top + margin
+        if (bottomLimit > topLimit) {
+          // All-blocks mode shows one page of blocks behind ONE scrollbar: it
+          // fills the WHOLE band (not just the message's own position), so the
+          // top touches the conversation edge and the bottom the composer.
+          const fillAll = allBox !== null && allBox !== undefined && heightMode !== 'content'
+          const band = bottomLimit - topLimit
+          if (fillAll) {
+            clampedTop = topLimit
+            height = Math.max(minimumHeight, band)
+          } else if (height <= band) {
+            // It fits: grow DOWN from the row while there is room for it, and
+            // when there is not, keep the bottom at the composer edge and grow
+            // UP instead - the direction follows the space, the box never covers
+            // the composer and never leaves the conversation's top.
+            const room = bottomLimit - Math.max(base.top, topLimit)
+            clampedTop = height <= room ? Math.max(base.top, topLimit) : Math.max(topLimit, bottomLimit - height)
+            height = Math.min(height, band)
+          } else {
+            // Taller than the whole band: fill it and let the field scroll.
+            clampedTop = topLimit
+            height = Math.max(minimumHeight, band)
+          }
+        }
+      }
+      if (!inline && !clamped && viewport.height > 0) height = Math.min(height, Math.max(minimumHeight, viewport.height - margin * 2))
+      height = Math.max(minimumHeight, height)
+      if (baseHeight === null && controller !== null && controller !== undefined) {
+        // The first layout of this open fixes the floor: from here on the box
+        // may grow and shrink with the draft, but not below this.
+        controller.editorBaseHeight = height
+      }
+      box.style.height = `${height}px`
+      box.style.maxHeight = ''
+      let top = clampedTop === null ? base.top : clampedTop
+      if (inline) {
+        const pageY = typeof window !== 'undefined' && typeof window.scrollY === 'number' ? window.scrollY : 0
+        top += pageY
+      } else if (viewport.height > 0) {
+        top = Math.max(margin, Math.min(top, viewport.height - height - margin))
+      }
+      box.style.top = `${Math.round(top)}px`
+      if (allBox !== null && allBox !== undefined) {
+        allBox.style.position = 'absolute'
+        allBox.style.left = '8px'
+        allBox.style.right = '8px'
+        // The all-blocks page has its own sticky outline, so it does not need
+        // the 38px control header the single-block editor reserves.
+        allBox.style.top = '6px'
+        allBox.style.bottom = `${FOOTER_BAND + 8}px`
+        allBox.style.overflowY = 'auto'
+        // The container is now laid out; re-measure each block so the document
+        // is exactly as tall as its text and the ONE scrollbar appears when it
+        // overflows the band.
+        if (typeof allBox.querySelectorAll === 'function') {
+          withScrollKept(allBox, () => {
+            for (const blockArea of allBox.querySelectorAll('.dshet-all-area')) settleAreaHeight(blockArea)
+          })
+        }
+      } else if (area !== null && area !== undefined) {
+        const offsetLeft = Math.max(0, bubble.rect.left - base.left)
+        // Reserve a header band for the controls; when the prompt carries image
+        // chips they sit above the text, so the text starts below them too.
+        const offsetTop = headerOffset
+        // The control band is painted over the box's bottom edge, so the field
+        // has to stop above it: the old `height - offsetTop - 8` let the field
+        // run 40px under the footer, and the last lines of a long block were
+        // covered for good (the field scrolled, the footer never moved).
+        const footerHeight =
+          footerEl !== null && footerEl !== undefined && typeof footerEl.offsetHeight === 'number' && footerEl.offsetHeight > 0
+            ? footerEl.offsetHeight
+            : FOOTER_BAND
+        const available = Math.max(40, height - offsetTop - footerHeight)
+        area.style.position = 'absolute'
+        area.style.boxSizing = 'border-box'
+        area.style.left = `${Math.round(offsetLeft)}px`
+        area.style.top = `${Math.round(offsetTop)}px`
+        area.style.width = `${Math.round(mode === 'reply' ? Math.max(80, width - offsetLeft - 8) : Math.max(80, Math.min(bubble.rect.width, width - offsetLeft)))}px`
+        // Never let the textarea paint outside the box: when the measured
+        // content is taller than the box (viewport-capped overlay), it scrolls
+        // inside instead of spilling past the border.
+        area.style.height = `${Math.round(Math.max(32, Math.min(contentHeight, available)))}px`
+        area.style.maxHeight = 'none'
+        area.style.padding = ''
+        area.style.paddingBottom = '8px'
+      }
+      box.style.borderRadius = ''
+      try {
+        const skin = getComputedStyle(bubble.element)
+        if (skin.borderRadius && skin.borderRadius !== '0px') box.style.borderRadius = skin.borderRadius
+      } catch {
+        /* a detached node keeps the stylesheet skin */
+      }
+    }
+
+    /**
+     * Run `work` without losing the reader's place.
+     *
+     * Measuring a textarea means collapsing it (`height: auto`), which shrinks
+     * the document; the browser then clamps the scroller's `scrollTop` to the
+     * new maximum, and the position is gone even though the heights come back.
+     * The host re-renders constantly (a streaming turn, a state refresh), so
+     * this is what "scroll down and it jumps back up" was. The position is
+     * captured before the work and put back after.
+     *
+     * @param scroller - the scrolling element that holds the textareas.
+     * @param work - the measuring pass.
+     * @returns whatever `work` returned.
+     */
+    function withScrollKept(scroller, work) {
+      const keep =
+        scroller !== null && scroller !== undefined && typeof scroller.scrollTop === 'number'
+          ? scroller.scrollTop
+          : null
+      const result = work()
+      if (keep !== null && scroller.scrollTop !== keep) scroller.scrollTop = keep
+      return result
+    }
+
+    /**
+     * The content height of one textarea, SETTLED and applied.
+     *
+     * One measurement is not enough. With the height reset to `auto`, the first
+     * read comes back exactly one line short - the wrap is resolved after the
+     * style write - and the element is then pinned to that height with
+     * `overflow:hidden`. In the all-blocks page that made the last line of a
+     * long body unreachable: the surrounding scroller's height is computed from
+     * the pinned value, so it cannot scroll to a line the textarea is hiding
+     * (reported from the field: a long 正文 could not be scrolled past).
+     *
+     * Measured live: first read 2392, second read 2415, line height 23px.
+     *
+     * @param area - the textarea to measure and size.
+     * @returns the applied height in CSS pixels, or 0 when unmeasurable.
+     */
+    function settleAreaHeight(area) {
+      if (area === null || area === undefined || typeof area.scrollHeight !== 'number') return 0
+      area.style.height = 'auto'
+      const first = area.scrollHeight
+      if (!(typeof first === 'number' && first > 0)) return 0
+      area.style.height = `${first}px`
+      const settled = area.scrollHeight
+      const height = typeof settled === 'number' && settled > first ? settled : first
+      area.style.height = `${height}px`
+      return height
+    }
+
+    /**
+     * One block's identity inside the editor's draft store.
+     *
+     * A turn's blocks are addressed by (seq, index): the same block reached from
+     * the 正文 page and from its sub-page inside 全部 must resolve to the SAME
+     * key, or an unsaved edit disappears when the user switches pages.
+     *
+     * @param block - an editor block (seq, index).
+     * @returns the stable key.
+     */
+    function blockDraftKey(block) {
+      if (block === null || block === undefined) return ''
+      return `${typeof block.seq === 'number' ? block.seq : ''}:${block.index}`
     }
 
     // Grow the textarea to its content, the way a normal input box behaves.
@@ -1806,10 +3081,16 @@ window.__ModuleLoader__.load({
     // in half an empty box. The stylesheet owns the limits (`min-height`,
     // `max-height`); the element only ever gets the measured height, and the
     // `+2` is the top and bottom border `scrollHeight` does not count.
+    let maxHeightCache = { key: '', value: 0 }
+
     function fitEditorHeight(area) {
-      area.style.height = 'auto'
-      const height = area.scrollHeight
-      if (typeof height === 'number' && height > 0) area.style.height = `${height + 2}px`
+      if (typeof area.closest === 'function' && area.closest('[data-dshet-inplace="1"]') !== null) return
+      const scroller =
+        typeof area.closest === 'function'
+          ? area.closest('.dshet-all') ?? area.closest('.dshet-editor')
+          : null
+      const height = withScrollKept(scroller, () => settleAreaHeight(area))
+      if (height > 0) area.style.height = `${height + 2}px`
     }
 
     // Wire an action so a host re-render cannot eat the click.
@@ -1828,7 +3109,7 @@ window.__ModuleLoader__.load({
         pressed = true
         event.preventDefault()
         event.stopPropagation()
-        action()
+        action(event)
       }
       button.onclick = (event) => {
         event.preventDefault()
@@ -1837,7 +3118,7 @@ window.__ModuleLoader__.load({
           pressed = false
           return
         }
-        action()
+        action(event)
       }
     }
 
@@ -1956,6 +3237,12 @@ window.__ModuleLoader__.load({
         // saving would write, so both have to redraw the strip - and the chip
         // keys are enough to tell one list from another.
         view.parts.map((part) => part.key).join('.'),
+        // The mode itself: leaving the all-blocks view must rebuild even when the
+        // single block that comes back is the one that was selected before it.
+        view.allBlocks === true ? 'all' : 'one',
+        // The selected reply block: switching blocks has to rebuild the box.
+        view.blockIndex === null || view.blockIndex === undefined ? '' : String(view.blockIndex),
+        view.targetSeq === null || view.targetSeq === undefined ? '' : String(view.targetSeq),
       ].join('|')
     }
 
@@ -1964,9 +3251,10 @@ window.__ModuleLoader__.load({
     // from drifting apart in wording.
     function editorTexts(t, target) {
       const reply = target.mode === 'reply'
+      const block = reply && target.patch === true
       return {
         title: t(reply ? 'editor.title-reply' : 'editor.title'),
-        placeholder: t(reply ? 'editor.placeholder-reply' : 'editor.placeholder'),
+        placeholder: t(block ? 'editor.placeholder-block' : reply ? 'editor.placeholder-reply' : 'editor.placeholder'),
         warn: t(reply ? 'editor.warn-reply' : 'editor.warn.attachments'),
         // Saving writes the revision into the context; only the opt-in config asks
         // the model again, and the button says which one will happen.
@@ -2030,6 +3318,16 @@ window.__ModuleLoader__.load({
       return strip
     }
 
+    /** The FileList of a paste/drop payload, without assuming the event shape. */
+    function filesFromData(data) {
+      if (data === null || data === undefined) return []
+      try {
+        return data.files === null || data.files === undefined ? [] : Array.prototype.slice.call(data.files)
+      } catch {
+        return []
+      }
+    }
+
     /**
      * The add/replace entry: a picker that puts a block on the list.
      *
@@ -2058,7 +3356,10 @@ window.__ModuleLoader__.load({
       const add = document.createElement('button')
       add.type = 'button'
       add.className = 'dshet-attach'
-      add.textContent = t('editor.attach.add')
+      add.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" stroke-width="1.3"><path d="M8 2V14" stroke="currentColor"></path><path d="M2 8H14" stroke="currentColor"></path></svg>'
+      add.setAttribute('aria-haspopup', 'listbox')
+      add.title = t('editor.attach.add')
+      add.setAttribute('aria-label', t('editor.attach.add'))
       add.disabled = view.pending
       pressable(add, () => {
         if (typeof picker.click === 'function') picker.click()
@@ -2076,7 +3377,7 @@ window.__ModuleLoader__.load({
         ? controller.editorBox
         : null
       if (existing && existing.dataset.dshetFor === marker) {
-        placeEditor(row, existing)
+        placeEditor(row, existing, controller.editorMode, controller.editorStyle, controller.editorBlockKind, controller.editorBlocks, controller)
         return
       }
 
@@ -2098,6 +3399,68 @@ window.__ModuleLoader__.load({
       box.className = 'dshet-editor'
       box.dataset[EDITOR_ATTR] = '1'
       box.dataset.dshetFor = marker
+      // The frame is a child, not the box's own border: host skins mark the
+      // editor chrome `!important` and win the cascade against the box itself,
+      // but they cannot name this child. It draws the blue outline of the
+      // reference UI on top of whatever border the skin puts on the box.
+      const frame = document.createElement('span')
+      frame.className = 'dshet-frame'
+      frame.style.position = 'absolute'
+      frame.style.inset = '-1px'
+      frame.style.border = '2px solid #4a7dff'
+      frame.style.borderRadius = 'inherit'
+      frame.style.boxSizing = 'border-box'
+      frame.style.pointerEvents = 'none'
+      frame.style.zIndex = '3'
+      box.appendChild(frame)
+
+      // A reply on the patch path may carry several editable blocks (answer
+      // text and reasoning). The picker chooses which one this save targets;
+      // every option carries the block's CURRENT projected text, so switching
+      // never shows the recorded original over a landed patch.
+      if (target.mode === 'reply' && target.patch === true && Array.isArray(target.blocks) && target.blocks.length >= 1) {
+        const picker = document.createElement('label')
+        picker.className = 'dshet-pick'
+        const caption = document.createElement('span')
+        caption.className = 'dshet-sr-only'
+        caption.textContent = t('editor.block')
+        const select = document.createElement('select')
+        select.className = 'dshet-select'
+        select.disabled = view.pending || view.confirming
+        select.setAttribute('aria-label', t('editor.block'))
+        // A single reply can carry several answer texts and several reasoning
+        // blocks; number the labels so each one is addressable in the picker.
+        const totals = {}
+        for (const block of target.blocks) totals[block.kind] = (totals[block.kind] ?? 0) + 1
+        const seen = {}
+        for (const block of target.blocks) {
+          const option = document.createElement('option')
+          option.value = typeof block.seq === 'number' ? `${block.seq}:${block.index}` : String(block.index)
+          const kind = block.kind === 'reasoning' ? 'editor.block.reasoning' : 'editor.block.text'
+          seen[block.kind] = (seen[block.kind] ?? 0) + 1
+          option.textContent = totals[block.kind] > 1 ? `${t(kind)} ${seen[block.kind]}` : t(kind)
+          option.selected = block.index === view.blockIndex
+          select.appendChild(option)
+        }
+        // "All blocks" is always offered for a multi-block turn, not only once
+        // it is already active - otherwise there is no way to select it.
+        if (target.blocks.length > 1) {
+          const allOption = document.createElement('option')
+          allOption.value = 'all'
+          allOption.textContent = t('editor.block.all')
+          select.appendChild(allOption)
+        }
+        if (view.allBlocks === true) {
+          select.value = 'all'
+        } else if (view.blockIndex !== null && view.blockIndex !== undefined) {
+          const current = target.blocks.find((block) => block.index === view.blockIndex && (view.targetSeq === null || view.targetSeq === undefined || block.seq === undefined || block.seq === view.targetSeq))
+          select.value = current !== undefined && typeof current.seq === 'number' ? `${current.seq}:${current.index}` : String(view.blockIndex)
+        }
+        select.addEventListener('change', () => controller.selectBlock(select.value))
+        picker.appendChild(caption)
+        picker.appendChild(select)
+        box.appendChild(picker)
+      }
 
       const area = document.createElement('textarea')
       area.rows = 1
@@ -2113,8 +3476,16 @@ window.__ModuleLoader__.load({
         // "eats" pinyin.
         if (event.isComposing === true) return
         fitEditorHeight(area)
+        const row = controller.editorRow
+        const box = controller.editorBox
+        if (row !== null && box !== null && box.isConnected === true) placeEditor(row, box, controller.editorMode, controller.editorStyle, controller.editorBlockKind, controller.editorBlocks, controller)
       })
-      area.addEventListener('compositionend', () => fitEditorHeight(area))
+      area.addEventListener('compositionend', () => {
+        fitEditorHeight(area)
+        const row = controller.editorRow
+        const box = controller.editorBox
+        if (row !== null && box !== null && box.isConnected === true) placeEditor(row, box, controller.editorMode, controller.editorStyle, controller.editorBlockKind, controller.editorBlocks, controller)
+      })
       area.addEventListener('focus', () => {
         controller.editorFocus = true
       })
@@ -2128,17 +3499,113 @@ window.__ModuleLoader__.load({
         if (event.isComposing === true || event.keyCode === 229) return
         if (event.key === 'Enter' && event.shiftKey !== true) {
           event.preventDefault()
-          if (view.confirming) controller.confirm()
+          const live = liveView()
+          if (live !== null && live !== undefined && live.confirming === true) controller.confirm()
           else controller.review()
           return
         }
         if (event.key === 'Escape') {
           event.preventDefault()
-          if (view.confirming) controller.back()
+          const live = liveView()
+          if (live !== null && live !== undefined && live.confirming === true) controller.back()
           else controller.close()
         }
       })
       box.appendChild(area)
+
+      // "All blocks": every reasoning and text block of the turn on one page,
+      // each in its own textarea under a light separator.
+      if (view.allBlocks === true && Array.isArray(target.blocks)) {
+        const allBox = document.createElement('div')
+        allBox.className = 'dshet-all'
+        // A sticky outline over the page: one chip per block that scrolls the
+        // container to it, so the document keeps its single scrollbar and still
+        // has navigation.
+        const nav = document.createElement('div')
+        nav.className = 'dshet-all-nav'
+        const totals = {}
+        for (const block of target.blocks) totals[block.kind] = (totals[block.kind] ?? 0) + 1
+        const seen = {}
+        for (const block of target.blocks) {
+          const key = `${typeof block.seq === 'number' ? block.seq : ''}:${block.index}`
+          const section = document.createElement('div')
+          section.className = 'dshet-all-block'
+          const head = document.createElement('div')
+          head.className = 'dshet-all-head'
+          const label = document.createElement('span')
+          seen[block.kind] = (seen[block.kind] ?? 0) + 1
+          const kindKey = block.kind === 'reasoning' ? 'editor.block.reasoning' : 'editor.block.text'
+          const labelText = totals[block.kind] > 1 ? `${t(kindKey)} ${seen[block.kind]}` : t(kindKey)
+          label.textContent = labelText
+          const navButton = document.createElement('button')
+          navButton.type = 'button'
+          navButton.textContent = labelText
+          navButton.addEventListener('click', () => {
+            if (typeof section.scrollIntoView === 'function') section.scrollIntoView({ block: 'start' })
+            else allBox.scrollTop = section.offsetTop ?? 0
+          })
+          nav.appendChild(navButton)
+          const line = document.createElement('span')
+          line.className = 'dshet-all-line'
+          head.appendChild(label)
+          head.appendChild(line)
+          const blockArea = document.createElement('textarea')
+          blockArea.className = 'dshet-all-area'
+          blockArea.rows = 1
+          blockArea.spellcheck = false
+          blockArea.style.overflow = 'hidden'
+          blockArea.style.position = 'static'
+          blockArea.style.left = 'auto'
+          blockArea.style.top = 'auto'
+          blockArea.value = controller.draftOfBlock(block)
+          blockArea.disabled = view.pending || view.confirming
+          const grow = () =>
+            withScrollKept(
+              typeof blockArea.closest === 'function' ? blockArea.closest('.dshet-all') : null,
+              () => settleAreaHeight(blockArea),
+            )
+          blockArea.addEventListener('input', () => {
+            controller.setDraftFor(block, blockArea.value)
+            grow()
+          })
+          section.appendChild(head)
+          section.appendChild(blockArea)
+          allBox.appendChild(section)
+          // Only now is the textarea in the document, so `scrollHeight` is the
+          // real content height; measuring before the append returned 0 and the
+          // block stayed 32px tall with its text clipped.
+          grow()
+        }
+        allBox.insertBefore(nav, allBox.firstChild)
+        box.appendChild(allBox)
+        area.style.display = 'none'
+      }
+
+      // Input parity with the composer: a screenshot pasted from the clipboard
+      // and files dropped onto the box join the same chip list as the picker.
+      // Reply edits cannot carry blocks, so the handlers exist only for prompts
+      // whose host proved it can keep them.
+      if (target.mode === 'prompt' && view.attachmentsOk === true) {
+        area.addEventListener('paste', (event) => {
+          const files = filesFromData(event.clipboardData)
+          if (files.length === 0) return
+          event.preventDefault()
+          controller.attachFiles(files)
+        })
+        box.addEventListener('dragover', (event) => {
+          event.preventDefault()
+          box.dataset.dshetDrop = '1'
+        })
+        box.addEventListener('dragleave', () => {
+          delete box.dataset.dshetDrop
+        })
+        box.addEventListener('drop', (event) => {
+          event.preventDefault()
+          delete box.dataset.dshetDrop
+          const files = filesFromData(event.dataTransfer)
+          if (files.length > 0) controller.attachFiles(files)
+        })
+      }
 
       // The blocks this message carries, each one a chip the user can remove,
       // and the entry that adds another. Drawn only when the host answered that
@@ -2158,33 +3625,61 @@ window.__ModuleLoader__.load({
       if (view.confirming) {
         const note = document.createElement('p')
         note.className = 'dshet-note'
-        note.textContent = t('confirm.body')
+        note.textContent = t(target.mode === 'reply' && target.patch === true ? 'confirm.body-block' : 'confirm.body')
         box.appendChild(note)
       }
       // Shown when saving really would drop something: a reply's tool calls
       // always, and a prompt's blocks when this host cannot carry them.
-      if (target.attachments > 0 && !chips) {
+      if (target.attachments > 0 && !chips && !(target.mode === 'reply' && target.patch === true)) {
         const warn = document.createElement('p')
         warn.className = 'dshet-warn'
         warn.textContent = texts.warn
         box.appendChild(warn)
       }
-      if (typeof view.failure === 'string' && view.failure !== '') {
+      // A running turn only blocks the paths that move the surface (a prompt
+      // rewrite, or a reply edit on a host without the in-place record). The
+      // in-place record appends one event and changes nothing that is already
+      // on the surface, so waiting for the agent to finish is not required -
+      // the model picks the edit up on its next fold.
+      const inPlaceEdit = target.mode === 'reply' && target.patch === true
+      const busyBlocked = view.busy === true && !inPlaceEdit
+      const failureCode = typeof view.failure === 'string' && view.failure !== ''
+        ? view.failure
+        : busyBlocked
+          ? 'busy'
+          : null
+      if (failureCode !== null) {
         const error = document.createElement('p')
         error.className = 'dshet-error'
         error.setAttribute('role', 'status')
-        error.textContent = errorText(t, view.failure)
+        const detail = typeof view.failureDetail === 'string' && view.failureDetail !== '' ? view.failureDetail : null
+        error.textContent = (failureCode === 'internal' || failureCode === 'generic') && detail !== null
+          ? `${errorText(t, failureCode)}（${detail.slice(0, 300)}）`
+          : errorText(t, failureCode)
         box.appendChild(error)
       }
 
+      // Handlers must read the CURRENT controller state: the host may not have
+      // rebuilt the button after the first press, and a stale `view.confirming`
+      // made the confirmation step a dead end (press again -> review again).
+      const liveView = () => (typeof controller.getSnapshot === 'function' ? controller.getSnapshot() : view)
+
       const footer = document.createElement('div')
       footer.className = 'dshet-footer'
+      const footerActions = document.createElement('div')
+      footerActions.className = 'dshet-footer-actions'
 
       const cancel = document.createElement('button')
       cancel.type = 'button'
-      cancel.className = 'dshet-btn'
-      cancel.textContent = t('editor.cancel')
-      cancel.title = `${t('editor.cancel')} (Esc)`
+      cancel.className = 'dshet-btn dshet-btn-icon dshet-btn-cancel'
+      const cancelLabel = t('editor.cancel')
+      cancel.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 3.5l9 9" stroke="currentColor"/><path d="M12.5 3.5l-9 9" stroke="currentColor"/></svg>'
+      const cancelText = document.createElement('span')
+      cancelText.className = 'dshet-sr-only'
+      cancelText.textContent = cancelLabel
+      cancel.appendChild(cancelText)
+      cancel.title = `${cancelLabel} (Esc)`
+      cancel.setAttribute('aria-label', cancelLabel)
       cancel.disabled = view.pending
       pressable(cancel, () => {
         if (view.confirming) controller.back()
@@ -2193,20 +3688,35 @@ window.__ModuleLoader__.load({
 
       const submit = document.createElement('button')
       submit.type = 'button'
-      submit.className = 'dshet-btn dshet-btn-primary'
-      submit.textContent = view.pending
+      submit.className = 'dshet-btn dshet-btn-primary dshet-btn-save'
+      const submitLabel = view.pending
         ? t('editor.pending')
         : view.confirming
           ? t('editor.review')
           : texts.save
-      submit.title = `${submit.textContent} (Enter)`
-      submit.disabled = view.pending
+      // The official composer uses a bare double-check for confirm, not a black
+      // pill. The label stays in the accessible name (and in the test-visible
+      // textContent) through a visually hidden span.
+      submit.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12.5l4.5 4.5L18 6.5"/><path d="M10 12.5l4.5 4.5L24 6.5"/></svg>'
+      const submitText = document.createElement('span')
+      submitText.className = 'dshet-sr-only'
+      submitText.textContent = submitLabel
+      submit.appendChild(submitText)
+      submit.title = `${submitLabel} (Enter)`
+      submit.setAttribute('aria-label', submitLabel)
+      submit.disabled = view.pending || busyBlocked
       pressable(submit, () => {
-        if (view.confirming) controller.confirm()
+        const live = liveView()
+        if (live !== null && live !== undefined && live.confirming === true) controller.confirm()
         else controller.review()
       })
+      if (view.confirming === true) {
+        // The save label is visually hidden, so the confirmation step needs a
+        // visible state of its own or the first press looks like nothing.
+        submit.classList.add('dshet-btn-confirm')
+      }
 
-      footer.appendChild(cancel)
+      footerActions.appendChild(cancel)
       // The re-run button belongs to the sibling (dsh-rerun-turn): it appears
       // only when that plugin is mounted, only for a prompt edit, and only
       // outside the confirmation step - the intent is carried through it. Save
@@ -2215,19 +3725,48 @@ window.__ModuleLoader__.load({
       if (target.mode === 'prompt' && view.siblingRerun === 'present' && view.confirming !== true) {
         const rerun = document.createElement('button')
         rerun.type = 'button'
-        rerun.className = 'dshet-btn dshet-rerun'
-        rerun.textContent = t('editor.rerun')
+        rerun.className = 'dshet-btn dshet-btn-icon dshet-rerun'
+        const rerunLabel = t('editor.rerun')
+        rerun.innerHTML = '<svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true" stroke-width="1.2"><path d="M13.65 2.6v2.9h-2.9" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"></path><path d="M13.3 8a5.3 5.3 0 1 1-1.55-3.75l1.9 1.25" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"></path></svg>'
+        const rerunText = document.createElement('span')
+        rerunText.className = 'dshet-sr-only'
+        rerunText.textContent = rerunLabel
+        rerun.appendChild(rerunText)
+        rerun.title = rerunLabel
+        rerun.setAttribute('aria-label', rerunLabel)
         rerun.disabled = view.pending
         pressable(rerun, () => controller.reviewRerun())
-        footer.appendChild(rerun)
+        footerActions.appendChild(rerun)
       }
-      footer.appendChild(submit)
+      footerActions.appendChild(submit)
+      footer.appendChild(footerActions)
+      const attachRow = typeof box.querySelector === 'function' ? box.querySelector('.dshet-attach-row') : null
+      if (attachRow !== null && attachRow !== undefined) {
+        attachRow.style.position = 'static'
+        attachRow.style.left = ''
+        attachRow.style.bottom = ''
+        attachRow.style.margin = '0'
+        footer.insertBefore(attachRow, footer.firstChild)
+      }
+      // The block picker shares the control band and sits at its far right.
+      const pickerEl = typeof box.querySelector === 'function' ? box.querySelector('.dshet-pick') : null
+      if (pickerEl !== null && pickerEl !== undefined) {
+        pickerEl.style.position = 'static'
+        pickerEl.style.left = ''
+        pickerEl.style.top = ''
+        pickerEl.style.marginLeft = 'auto'
+        pickerEl.style.marginRight = '0'
+        pickerEl.style.display = 'flex'
+        pickerEl.style.flex = '0 0 auto'
+        pickerEl.style.visibility = ''
+        footer.appendChild(pickerEl)
+      }
       box.appendChild(footer)
 
-      placeEditor(row, box)
       controller.editorBox = box
       controller.editorRow = row
       controller.editorElement = area
+      placeEditor(row, box, controller.editorMode, controller.editorStyle, controller.editorBlockKind, controller.editorBlocks, controller)
       fitEditorHeight(area)
       if (!view.confirming && !view.pending && (fresh || wasFocused)) {
         try {
@@ -2255,11 +3794,531 @@ window.__ModuleLoader__.load({
       controller.load(true)
     }
 
+    // --- projected reply display ---------------------------------------------
+    //
+    // The host draws a reply from the recorded event, not from the projected
+    // message, so a landed patch would be invisible in the transcript. The
+    // projection is the model's copy; this is the reader's copy. Text blocks are
+    // replaced in place inside the host's own markdown container (the row,
+    // actions and tool cards stay untouched); a patched reasoning block gets a
+    // small note under the reply, because the host renders reasoning as a
+    // collapsed panel that may not be in the DOM at all.
+
+    const PATCH_ATTR = 'data-dshet-patch'
+    const patchOriginals = new WeakMap()
+    // The text this plugin last painted for a key, so a second edit of the same
+    // block can still find the element after the first text replaced the
+    // recorded original in the DOM.
+    const patchedTexts = new Map()
+    // React may re-render the assistant container and reset its attributes and
+    // style while leaving the text node we replaced. Remember the element by
+    // seq:block so the next pass can restore the marker and, on a later edit,
+    // update it without having to re-find the original text (which is gone).
+    const patchedElements = new Map()
+
+    function normalizedText(value) {
+      return String(value ?? '').replace(/\s+/g, ' ').trim()
+    }
+
+    // Markdown syntax is not part of the rendered textContent. Strip the
+    // structural characters before comparing, so a reply that uses **bold** or
+    // a fenced block still matches its own recorded text.
+    function plainText(value) {
+      return normalizedText(String(value ?? '').replace(/[`*_#>~[\]()!|]/g, ' ').replace(/\s+/g, ' '))
+    }
+
+    // Identity, not display: markdown emphasis (`**1**`) renders as `1。`, and
+    // the spaces left by stripping the markers must not defeat the comparison.
+    // Whitespace carries no block identity here, so remove it entirely.
+    function matchText(value) {
+      return plainText(value).replace(/\s+/g, '')
+    }
+
+    // What the reader sees for a patched block. The model context keeps the
+    // raw Markdown the editor wrote; the transcript should not show the markers
+    // as literal text (`**1**`), which is what made a successful edit look like
+    // an unrendered draft. This is deliberately minimal: bold, inline code and
+    // headings are unwrapped; everything else stays as written.
+    function displayText(value) {
+      return String(value ?? '')
+        .replace(/```[\s\S]*?```/g, (fence) => fence.replace(/^```[^\n]*\n?/gm, '').replace(/```$/gm, ''))
+        .replace(/`([^`]*)`/g, '$1')
+        .replace(/\*\*([^*]+)\*\*/g, '$1')
+        .replace(/__([^_]+)__/g, '$1')
+        .replace(/^#{1,6}\s+/gm, '')
+    }
+
+    function isMarkdownContainer(el) {
+      if (el === null || el === undefined || !el.children) return false
+      const kids = el.children
+      if (kids.length === 0) return false
+      let blocks = 0
+      for (const kid of kids) {
+        try {
+          if (kid.matches && kid.matches('p, pre, ul, ol, blockquote, h1, h2, h3, h4, h5, h6, table')) blocks += 1
+        } catch {
+          return false
+        }
+      }
+      return blocks >= 1 && blocks * 2 >= kids.length
+    }
+
+    function conversationRootForPatches() {
+      const root = document.querySelector('[data-slot="main.conversation"], [data-slot="conversation"]')
+      return root ?? document.body
+    }
+
+    function restorePatchedBlock(el) {
+      const saved = patchOriginals.get(el)
+      if (saved !== null && saved !== undefined) {
+        try {
+          if (typeof saved.html === 'string' && saved.html !== '') el.innerHTML = saved.html
+          else if (typeof saved.text === 'string') el.textContent = saved.text
+        } catch {
+          /* a detached row is not worth a throw */
+        }
+      }
+      el.removeAttribute(PATCH_ATTR)
+      el.style.whiteSpace = ''
+    }
+
+    // A short reply can be a bare text node (or a span) rather than the
+    // block-level markdown container the picker looks for. Match the deepest
+    // element in the owning row whose whole text is exactly the recorded text;
+    // never a button, a timestamp, our own chrome, or an ancestor that merely
+    // contains the text.
+    function findPatchTextFallback(owner, wanted, previousText = '') {
+      if (owner === null || owner === undefined || typeof owner.querySelectorAll !== 'function') return null
+      const original = matchText(wanted.original)
+      const previous = matchText(previousText)
+      if (original === '' && previous === '') return null
+      let scope = owner
+      try {
+        const node = owner.querySelector('[data-slot="conversation.chat.node"]')
+        if (node !== null && node !== undefined) scope = node
+      } catch {
+        /* keep the row as the scope */
+      }
+      for (const el of scope.querySelectorAll('*')) {
+        if (el === scope) continue
+        if (el.getAttribute(PATCH_ATTR) !== null) continue
+        try {
+          if (el.closest('.dshet-editor, .dshet-action, .dshet-pick, button, time') !== null) continue
+        } catch {
+          continue
+        }
+        const text = matchText(el.textContent)
+        if (text !== original && !(previous !== '' && text === previous)) continue
+        let deeper = false
+        for (const child of el.children ?? []) {
+          if (matchText(child.textContent) === text) {
+            deeper = true
+            break
+          }
+        }
+        if (!deeper) return el
+      }
+      return null
+    }
+
+    /**
+     * The collapsed reasoning header draws its own truncation of the RECORDED
+     * text ("思考 · ..."), and when the panel is closed the body is not in the
+     * DOM at all - so a patch of the reasoning body alone leaves the edit
+     * invisible. Rewrite that snippet too, keeping whatever the host appended
+     * (its ellipsis) and its own truncation length.
+     */
+    function patchReasoningSummary(owner, wanted) {
+      if (owner === null || owner === undefined || typeof owner.querySelectorAll !== 'function') return false
+      const original = String(wanted.original ?? '')
+      const patched = String(wanted.text ?? '')
+      if (original === '' || patched === '') return false
+      const head = original.slice(0, 12)
+      let changed = false
+      const apply = (get, set) => {
+        const data = String(get() ?? '')
+        if (data === '' || !data.includes(head)) return
+        // A node holding the whole text gets the whole replacement; a truncated
+        // snippet keeps the host's length and gains an ellipsis when the new
+        // text is longer.
+        const next = data.length >= original.length ? patched : `${patched.slice(0, data.length)}${patched.length > data.length ? '…' : ''}`
+        if (next === data) return
+        set(next)
+        changed = true
+      }
+      const walk = (node) => {
+        for (const child of node.childNodes ?? []) {
+          const type = child.nodeType
+          if (type === 3) {
+            apply(() => child.data, (value) => { child.data = value })
+            continue
+          }
+          if (type !== 1) continue
+          try {
+            if (typeof child.closest === 'function' && child.closest('.dshet-editor, .dshet-action, .dshet-pick, button, time') !== null) continue
+          } catch {
+            /* a node without closest is walked anyway */
+          }
+          const kids = child.childNodes ?? []
+          if (kids.length === 0) {
+            apply(() => child.textContent, (value) => { child.textContent = value })
+            continue
+          }
+          walk(child)
+        }
+      }
+      walk(owner)
+      return changed
+    }
+
+    /**
+     * The reasoning body on this host is its own row (the flow key carries a
+     * `,reasoning` group part), so neither the answer row nor the first chat node
+     * the shared fallback picks contains it. Search the whole conversation for
+     * the deepest element whose text is the recorded original (or what we last
+     * painted there).
+     */
+    /**
+     * EVERY element that shows this reasoning text.
+     *
+     * Plural on purpose: the host keeps more than one copy of a turn's reasoning.
+     * The collapsed process row stays in the DOM with `display: none`, and opening
+     * the panel renders a second, visible body. Patching only the first one left
+     * the copy the user was looking at showing the recorded text.
+     *
+     * @param root - the conversation root to search.
+     * @param wanted - the patch (`original` text, new `text`).
+     * @param previousText - what the patch showed before this pass, if anything.
+     * @returns the deepest matching elements, best match first.
+     */
+    function findReasoningElements(root, wanted, previousText) {
+      if (root === null || root === undefined || typeof root.querySelectorAll !== 'function') return []
+      const original = matchText(wanted.original)
+      const previous = matchText(previousText)
+      if (original === '' && previous === '') return []
+      const found = []
+      for (const el of root.querySelectorAll('*')) {
+        if (el.getAttribute(PATCH_ATTR) !== null) continue
+        try {
+          if (el.closest('.dshet-editor, .dshet-action, .dshet-pick, button, time') !== null) continue
+        } catch {
+          /* a detached node is still a candidate */
+        }
+        const text = matchText(el.textContent)
+        if (text === '') continue
+        if (text !== original && !(previous !== '' && text === previous)) continue
+        let deeper = false
+        for (const child of el.children ?? []) {
+          if (matchText(child.textContent) === text) {
+            deeper = true
+            break
+          }
+        }
+        if (deeper) continue
+        found.push({ el, score: Math.abs(text.length - original.length) })
+      }
+      found.sort((a, b) => a.score - b.score)
+      return found.map((entry) => entry.el)
+    }
+
+    function findReasoningElement(root, wanted, previousText) {
+      if (root === null || root === undefined || typeof root.querySelectorAll !== 'function') return null
+      const original = matchText(wanted.original)
+      const previous = matchText(previousText)
+      if (original === '' && previous === '') return null
+      let best = null
+      let bestScore = Infinity
+      for (const el of root.querySelectorAll('*')) {
+        if (el.getAttribute(PATCH_ATTR) !== null) continue
+        try {
+          if (el.closest('.dshet-editor, .dshet-action, .dshet-pick, button, time') !== null) continue
+        } catch {
+          /* a detached node is still a candidate */
+        }
+        const text = matchText(el.textContent)
+        if (text === '') continue
+        if (text !== original && !(previous !== '' && text === previous)) continue
+        let deeper = false
+        for (const child of el.children ?? []) {
+          if (matchText(child.textContent) === text) {
+            deeper = true
+            break
+          }
+        }
+        if (deeper) continue
+        const score = Math.abs(text.length - original.length)
+        if (score < bestScore) {
+          best = el
+          bestScore = score
+        }
+      }
+      return best
+    }
+
+    function applyPatchDisplay(snapshot, view, t) {
+      // Map a reply seq to the host row that draws it, so a short answer like
+      // "好的" cannot be matched in a different row. Fall back to a global
+      // search when the row is not mounted (virtualised histories).
+      const rowBySeq = new Map()
+      // A turn-process row also covers the turn's assistant seq (seqsFor reads
+      // its anchor), and it comes before the assistant row in document order.
+      // First-win mapping therefore pointed the patch at the process row, whose
+      // subtree has no message body: zero matches. Prefer the row that actually
+      // draws the message; the process/tail rows are only a last resort.
+      const rowRank = new Map()
+      try {
+        for (const row of document.querySelectorAll('[data-chat-flow-key]')) {
+          const key = row.getAttribute('data-chat-flow-key')
+          if (!key || !snapshot || !snapshot.nodes || typeof snapshot.nodes.get !== 'function') continue
+          const node = snapshot.nodes.get(key)
+          if (!node) continue
+          const rank = node.kind === 'assistant-step' ? 0 : node.kind === 'user' ? 1 : 2
+          for (const seq of seqsFor(node)) {
+            const previous = rowRank.get(seq)
+            if (previous === undefined || rank < previous) {
+              rowBySeq.set(seq, row)
+              rowRank.set(seq, rank)
+            }
+          }
+        }
+      } catch {
+        /* a host shape this pass cannot read falls back below */
+      }
+      const root = conversationRootForPatches()
+      if (root === null) return
+      const replies = view.replies instanceof Map ? view.replies : new Map()
+      const wantedText = new Map()
+      const wantedReasoning = new Map()
+      for (const patch of Array.isArray(view.patches) ? view.patches : []) {
+        // Find the block by (seq, index) AND the entry that carries it.
+        //
+        // One reply entry carries its whole TURN's blocks, so several blocks
+        // share an index - the first step's reasoning and the fourth step's
+        // reasoning are both "index 0" - and a later step's block lives in the
+        // entry keyed by the ANSWER's seq, not by its own. Keying the lookup by
+        // `patch.seq` alone found no entry, and `find(index === ...)` alone found
+        // the wrong block: either way the patch matched nothing in the DOM and
+        // the reasoning body kept the recorded text until a reload (reported from
+        // the field for the 思维链 page; a save on another step's reasoning wrote
+        // the record and /state reported it, yet the transcript did not move).
+        let reply = replies.get(patch.seq)
+        let block = Array.isArray(reply?.blocks)
+          ? reply.blocks.find(
+              (entry) =>
+                entry.index === patch.blockIndex &&
+                (entry.seq === undefined || patch.seq === undefined || entry.seq === patch.seq),
+            )
+          : undefined
+        if (block === undefined) {
+          for (const candidate of replies.values()) {
+            if (!Array.isArray(candidate?.blocks)) continue
+            const found = candidate.blocks.find(
+              (entry) => entry.index === patch.blockIndex && entry.seq === patch.seq,
+            )
+            if (found !== undefined) {
+              reply = candidate
+              block = found
+              break
+            }
+          }
+        }
+        if (block === undefined) continue
+        if (patch.kind === 'text') {
+          wantedText.set(`${patch.seq}:${patch.blockIndex}`, {
+            key: `${patch.seq}:${patch.blockIndex}`,
+            seq: patch.seq,
+            original: String(block.original ?? ''),
+            text: String(patch.text ?? ''),
+          })
+        } else if (patch.kind === 'reasoning') {
+          wantedReasoning.set(`${patch.seq}:${patch.blockIndex}`, {
+            key: `${patch.seq}:${patch.blockIndex}`,
+            seq: patch.seq,
+            original: String(block.original ?? ''),
+            text: String(patch.text ?? ''),
+            reply,
+            block,
+          })
+        }
+      }
+
+      // A patch that no longer exists must give the host's recorded text back,
+      // even when a re-render already stripped our marker from the element.
+      for (const [key, el] of [...patchedElements]) {
+        if (wantedText.has(key) || wantedReasoning.has(key)) continue
+        patchedElements.delete(key)
+        if (el.isConnected === true) restorePatchedBlock(el)
+      }
+      // Remove overrides whose patch is gone (or was superseded by a prompt
+      // rollback). The original HTML is what the host rendered.
+      for (const el of [...root.querySelectorAll(`[${PATCH_ATTR}]`)]) {
+        const key = el.getAttribute(PATCH_ATTR)
+        const wanted = wantedText.get(key)
+        if (wanted === undefined) {
+          restorePatchedBlock(el)
+          continue
+        }
+        const shown = displayText(wanted.text)
+        if (normalizedText(el.textContent) !== normalizedText(shown)) {
+          el.textContent = shown
+        }
+      }
+      if (wantedText.size === 0 && wantedReasoning.size === 0) return
+
+      const nodes = [...root.querySelectorAll('[data-slot="conversation.chat.node"]')]
+      const containers = []
+      for (const node of nodes) {
+        for (const el of node.querySelectorAll('*')) {
+          try {
+            if (isMarkdownContainer(el) && el.closest('.dshet-editor, .dshet-pick') === null) containers.push(el)
+          } catch {
+            /* a detached node is skipped */
+          }
+        }
+      }
+      for (const [key, wanted] of wantedText) {
+        const owner = rowBySeq.get(wanted.seq)
+        const remembered = patchedElements.get(key)
+        if (remembered !== undefined) {
+          const stillThere = remembered.isConnected === true &&
+            (owner === undefined || remembered.closest('[data-chat-flow-key]') === owner)
+          if (!stillThere) {
+            patchedElements.delete(key)
+          } else {
+            const shown = displayText(wanted.text)
+            if (normalizedText(remembered.textContent) !== normalizedText(shown)) {
+              remembered.textContent = shown
+            }
+            if (remembered.getAttribute(PATCH_ATTR) !== key) remembered.setAttribute(PATCH_ATTR, key)
+            remembered.style.whiteSpace = 'pre-wrap'
+            continue
+          }
+        }
+        const done = [...root.querySelectorAll(`[${PATCH_ATTR}]`)].find((el) => el.getAttribute(PATCH_ATTR) === key)
+        if (done !== undefined) {
+          patchedElements.set(key, done)
+          if (done.style.whiteSpace !== 'pre-wrap') done.style.whiteSpace = 'pre-wrap'
+          continue
+        }
+        const original = matchText(wanted.original)
+        const previous = matchText(patchedTexts.get(key) ?? '')
+        if (original === '' && previous === '') continue
+        let best = null
+        let bestScore = Infinity
+        for (const el of containers) {
+          if (el.getAttribute(PATCH_ATTR) !== null) continue
+          if (owner !== undefined) {
+            try {
+              if (el.closest('[data-chat-flow-key]') !== owner) continue
+            } catch {
+              /* no closest on this node: keep the global match */
+            }
+          }
+          const text = matchText(el.textContent)
+          if (text === '') continue
+          const exact = text === original || (previous !== '' && text === previous)
+          const prefix = text.startsWith(original.slice(0, 60)) || original.startsWith(text.slice(0, 60))
+          if (!exact && !prefix) continue
+          // Prefer the exact match, then the container closest in length: a
+          // nested paragraph and the whole markdown body can both match a
+          // prefix, and the paragraph is the one to rewrite.
+          const score = (exact ? 0 : 1000) + Math.abs(text.length - original.length)
+          if (score < bestScore) {
+            best = el
+            bestScore = score
+          }
+        }
+        if (best === null) best = findPatchTextFallback(owner, wanted, patchedTexts.get(key) ?? '')
+        if (best === null) continue
+        patchOriginals.set(best, { html: best.innerHTML, text: best.textContent })
+        best.textContent = displayText(wanted.text)
+        best.setAttribute(PATCH_ATTR, key)
+        best.style.whiteSpace = 'pre-wrap'
+        patchedElements.set(key, best)
+        patchedTexts.set(key, wanted.text)
+      }
+
+      // A reasoning patch is drawn in place when the host renders that
+      // reasoning body; the note is only the fallback for a panel that is not
+      // in the DOM (or is drawn as a short summary without the full text).
+      for (const [key, wanted] of wantedReasoning) {
+        const owner = rowBySeq.get(wanted.seq)
+        const shown = displayText(wanted.text)
+        const previousText = patchedTexts.get(key) ?? ''
+        const original = matchText(wanted.original)
+        const previous = matchText(previousText)
+        // EVERY copy of this reasoning, not just the one this pass remembers.
+        //
+        // The host keeps the collapsed process row in the DOM with `display:
+        // none` and renders a SECOND body when the panel is opened. Trusting the
+        // remembered element because it is still `isConnected` meant the copy the
+        // user was looking at kept the recorded text until a reload - which is
+        // exactly the reported "思维链页保存后不能马上渲染".
+        const targets = new Set()
+        const remembered = patchedElements.get(key)
+        if (remembered !== undefined) {
+          if (remembered.isConnected === true) targets.add(remembered)
+          else patchedElements.delete(key)
+        }
+        for (const el of root.querySelectorAll(`[${PATCH_ATTR}]`)) {
+          if (el.getAttribute(PATCH_ATTR) === key) targets.add(el)
+        }
+        if (original !== '' || previous !== '') {
+          // The owning row first (a host that draws the reasoning inside the
+          // answer row), then the whole conversation: on this host the reasoning
+          // is its own row, so the answer row holds no reasoning text at all.
+          // EVERY scope is merged, never just the first one that matched: the
+          // point of this pass is to catch all copies at once.
+          for (const scope of owner === undefined ? [null] : [owner, null]) {
+            let foundInScope = false
+            for (const el of containers) {
+              if (el.getAttribute(PATCH_ATTR) !== null) continue
+              if (scope !== null) {
+                try {
+                  if (el.closest('[data-chat-flow-key]') !== scope) continue
+                } catch {
+                  /* keep the global match */
+                }
+              }
+              const text = matchText(el.textContent)
+              if (text === '') continue
+              if (text !== original && !(previous !== '' && text === previous)) continue
+              targets.add(el)
+              foundInScope = true
+            }
+            if (foundInScope) break
+          }
+          const fallback = findPatchTextFallback(owner ?? null, wanted, previousText)
+          if (fallback !== null) targets.add(fallback)
+          for (const el of findReasoningElements(root, wanted, previousText)) targets.add(el)
+        }
+        if (targets.size === 0) {
+          // No body in the DOM (the panel is closed): the header snippet is the
+          // only place the edit can show.
+          if (owner !== undefined) patchReasoningSummary(owner, wanted)
+          patchReasoningSummary(root, wanted)
+          continue
+        }
+        for (const el of targets) {
+          if (!patchOriginals.has(el)) patchOriginals.set(el, { html: el.innerHTML, text: el.textContent })
+          if (normalizedText(el.textContent) !== normalizedText(shown)) el.textContent = shown
+          if (el.getAttribute(PATCH_ATTR) !== key) el.setAttribute(PATCH_ATTR, key)
+          el.style.whiteSpace = 'pre-wrap'
+          patchedElements.set(key, el)
+        }
+        patchedTexts.set(key, wanted.text)
+        if (owner !== undefined) patchReasoningSummary(owner, wanted)
+        patchReasoningSummary(root, wanted)
+      }
+    }
+
     function applyDom(snapshot, view, controller, t) {
       if (!snapshot || !snapshot.nodes || typeof snapshot.nodes.get !== 'function') return
       const animate = controller.consumeAnimate()
       const rows = document.querySelectorAll('[data-chat-flow-key]')
       syncEditableSet(controller, rows.length)
+      let editorCandidate = null
+      let editorRank = -1
       for (const row of rows) {
         if (!(row instanceof HTMLElement)) continue
         const key = row.getAttribute('data-chat-flow-key')
@@ -2312,13 +4371,33 @@ window.__ModuleLoader__.load({
           (seqsFor(node).includes(editing.seq) ||
             seqsFor(node).some((seq) => headRevision(seq, view.revisions) === editing.seq))
         if (coversEditing && (!hidden || row.style.display !== 'none')) {
-          renderEditor(row, controller, view, t)
+          const rank = editorRowRank(row, editing.mode)
+          if (rank > editorRank) {
+            editorRank = rank
+            editorCandidate = row
+          }
+        }
+      }
+      if (view.editing !== null) {
+        if (editorCandidate !== null) {
+          renderEditor(editorCandidate, controller, view, t)
+        } else {
+          clearEditor()
+          controller.editorBox = null
+          controller.editorRow = null
         }
       }
       if (view.editing === null) {
         clearEditor()
         controller.editorBox = null
         controller.editorRow = null
+      }
+      // Draw the projected reply text last: the host has just rebuilt the rows,
+      // and an override applied before that would be wiped by the rebuild.
+      try {
+        applyPatchDisplay(snapshot, view, t)
+      } catch (error) {
+        console.error('[dsh-edit-turn] patch display failed:', error)
       }
       // Whatever of ours no row of this pass claimed is a ghost of an earlier
       // apply: the host rebuilt the row under it, or the bundle was reloaded
@@ -2383,16 +4462,18 @@ window.__ModuleLoader__.load({
         event.preventDefault()
         event.stopPropagation()
         controller.open({
+          anchor: event.currentTarget,
           seq: entry.seq,
           mode: 'reply',
           turn: entry.turn,
           messageId: entry.messageId,
           text: typeof entry.text === 'string' ? entry.text : '',
           attachments: typeof entry.attachments === 'number' ? entry.attachments : 0,
-          // A reply edits text only on purpose: the tool calls and reasoning it
-          // carries stop being true the moment it is replaced, so they are not
-          // offered as chips (the editor warns about them instead).
-          blocks: [],
+          // On the in-place path the reply keeps its tool calls and other
+          // blocks, so the editor can offer each editable block (output text
+          // and reasoning). On the replay path there is no block picker: the
+          // whole reply is replaced.
+          ...(Array.isArray(entry.blocks) ? { blocks: entry.blocks, patch: true } : { blocks: [] }),
         })
       }
       // The config object is always an object: this runtime's `jsx` reads
@@ -2432,23 +4513,51 @@ window.__ModuleLoader__.load({
             && target.closest('.dshet-editor') !== null
           if (!inside) controller.editorFocus = false
         }
+        let placementScheduled = false
+        let lastPlacementKey = ''
         const keepPlaced = () => {
-          const row = controller.editorRow
-          const box = controller.editorBox
-          if (row !== null && box !== null && box.isConnected === true) placeEditor(row, box)
+          if (placementScheduled) return
+          placementScheduled = true
+          const run = () => {
+            placementScheduled = false
+            const row = controller.editorRow
+            const box = controller.editorBox
+            if (row === null || box === null || box.isConnected !== true) return
+            const rect = row.getBoundingClientRect()
+            const viewportWidth = typeof window !== 'undefined' && typeof window.innerWidth === 'number' ? window.innerWidth : 0
+            const viewportHeight = typeof window !== 'undefined' && typeof window.innerHeight === 'number' ? window.innerHeight : 0
+            const key = `${Math.round(rect.top)}:${Math.round(rect.height)}:${Math.round(typeof window !== 'undefined' && typeof window.scrollY === 'number' ? window.scrollY : 0)}:${viewportWidth}x${viewportHeight}:${controller.editorBlockKind}:${controller.editorAll === true ? 'all' : ''}`
+            if (key === lastPlacementKey) return
+            lastPlacementKey = key
+            placeEditor(row, box, controller.editorMode, controller.editorStyle, controller.editorBlockKind, controller.editorBlocks, controller)
+          }
+          if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run)
+          else window.setTimeout(run, 16)
+        }
+        const onResize = () => {
+          // A window resize (or a fullscreen toggle / zoom) moves the composer
+          // and the conversation edges; the cached band must not survive it.
+          conversationBoundsCache = null
+          keepPlaced()
         }
         document.addEventListener('pointerdown', onPointerDown, true)
         // Scroll events do not bubble; capture reaches the inner scroller too.
         document.addEventListener('scroll', keepPlaced, { capture: true, passive: true })
-        window.addEventListener('resize', keepPlaced)
+        window.addEventListener('resize', onResize)
+        let resizeObserver = null
+        if (typeof ResizeObserver === 'function') {
+          resizeObserver = new ResizeObserver(onResize)
+          try { resizeObserver.observe(document.body) } catch {}
+        }
         return () => {
           document.removeEventListener('pointerdown', onPointerDown, true)
           document.removeEventListener('scroll', keepPlaced, true)
-          window.removeEventListener('resize', keepPlaced)
+          window.removeEventListener('resize', onResize)
+          if (resizeObserver !== null) resizeObserver.disconnect()
         }
       }, [controller])
 
-      react.useEffect(() => {
+      useBrowserLayoutEffect(() => {
         if (snapshot === undefined) return undefined
         let scheduled = false
         const run = () => {
@@ -2460,7 +4569,33 @@ window.__ModuleLoader__.load({
           applyDom(snapshot, live, controller, t)
         }
         run()
-        const observer = new MutationObserver(() => {
+        const observer = new MutationObserver((records) => {
+          // Our own editor writes attributes and text while the user types;
+          // feeding those back into a full document pass is what made typing
+          // and streaming compete for the same frames.
+          let relevant = false
+          let lostOurAction = false
+          for (const record of records) {
+            const target = record.target
+            if (target !== null && target !== undefined && typeof target.closest === 'function' && target.closest('.dshet-layer') !== null) continue
+            relevant = true
+            if (record.removedNodes && record.removedNodes.length > 0) {
+              for (const node of record.removedNodes) {
+                if (node === null || node === undefined) continue
+                if (typeof node.closest === 'function' && node.closest('.dshet-action') !== null) lostOurAction = true
+                else if (typeof node.querySelector === 'function' && node.querySelector('.dshet-action') !== null) lostOurAction = true
+              }
+            }
+            break
+          }
+          if (!relevant) return
+          // The host rebuilt a row and our button went with it: put it back in
+          // the same task instead of waiting a frame for the rAF pass.
+          if (lostOurAction) {
+            scheduled = false
+            run()
+            return
+          }
           if (scheduled) return
           scheduled = true
           if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run)
@@ -2567,9 +4702,203 @@ window.__ModuleLoader__.load({
       editorLayer = null
     }
 
+    // --- editor-style preference ----------------------------------------------
+    //
+    // The style is a browser preference so the manager page and the editor read
+    // one value with no host round-trip. The host config's editorStyle is the
+    // default when nothing has been chosen here.
+    const EDITOR_STYLE_KEY = 'dsh-edit-turn/editorStyle'
+    const EDITOR_STYLES = ['frame', 'bubble', 'center']
+
+    function readStoredEditorStyle() {
+      try {
+        if (typeof localStorage === 'undefined') return null
+        const value = localStorage.getItem(EDITOR_STYLE_KEY)
+        return EDITOR_STYLES.includes(value) ? value : null
+      } catch {
+        return null
+      }
+    }
+
+    let editorStylePreference = readStoredEditorStyle() ?? 'frame'
+    const EDITOR_PLACEMENT_KEY = 'dsh-edit-turn/editorPlacement'
+    const EDITOR_PLACEMENTS = ['overlay', 'inline', 'legacy']
+
+    function readStoredEditorPlacement() {
+      try {
+        if (typeof localStorage === 'undefined') return null
+        const value = localStorage.getItem(EDITOR_PLACEMENT_KEY)
+        return EDITOR_PLACEMENTS.includes(value) ? value : null
+      } catch {
+        return null
+      }
+    }
+
+    let editorPlacementPreference = readStoredEditorPlacement() ?? 'overlay'
+    const EDITOR_HEIGHT_KEY = 'dsh-edit-turn/editorHeight'
+    const EDITOR_HEIGHTS = ['max', 'content', 'fill']
+
+    function readStoredEditorHeight() {
+      try {
+        if (typeof localStorage === 'undefined') return null
+        const value = localStorage.getItem(EDITOR_HEIGHT_KEY)
+        return EDITOR_HEIGHTS.includes(value) ? value : null
+      } catch {
+        return null
+      }
+    }
+
+    let editorHeightPreference = readStoredEditorHeight() ?? 'fill'
+    const editorHeightListeners = new Set()
+
+    function subscribeEditorHeight(listener) {
+      editorHeightListeners.add(listener)
+      return () => editorHeightListeners.delete(listener)
+    }
+
+    function setEditorHeightPreference(mode) {
+      if (!EDITOR_HEIGHTS.includes(mode)) return
+      editorHeightPreference = mode
+      try {
+        if (typeof localStorage !== 'undefined') localStorage.setItem(EDITOR_HEIGHT_KEY, mode)
+      } catch {}
+      for (const listener of [...editorHeightListeners]) {
+        try { listener() } catch {}
+      }
+    }
+
+    const editorPlacementListeners = new Set()
+
+    function subscribeEditorPlacement(listener) {
+      editorPlacementListeners.add(listener)
+      return () => editorPlacementListeners.delete(listener)
+    }
+
+    function setEditorPlacementPreference(placement) {
+      if (!EDITOR_PLACEMENTS.includes(placement)) return
+      editorPlacementPreference = placement
+      try {
+        if (typeof localStorage !== 'undefined') localStorage.setItem(EDITOR_PLACEMENT_KEY, placement)
+      } catch {
+        /* private mode keeps the in-memory choice */
+      }
+      for (const listener of [...editorPlacementListeners]) {
+        try {
+          listener()
+        } catch {}
+      }
+    }
+
+    const editorStyleListeners = new Set()
+
+    function subscribeEditorStyle(listener) {
+      editorStyleListeners.add(listener)
+      return () => editorStyleListeners.delete(listener)
+    }
+
+    function setEditorStylePreference(style) {
+      if (!EDITOR_STYLES.includes(style)) return
+      editorStylePreference = style
+      try {
+        if (typeof localStorage !== 'undefined') localStorage.setItem(EDITOR_STYLE_KEY, style)
+      } catch {
+        /* private mode keeps the in-memory choice */
+      }
+      for (const listener of [...editorStyleListeners]) {
+        try {
+          listener()
+        } catch {}
+      }
+    }
+
+    /**
+     * The component row's configure page (`plugins.row.config`), the same slot
+     * dsh-delete-turn uses. The manager's summary asks for a one-liner; the page
+     * itself renders the three-way picker.
+     */
+    function EditorStyleOption({ view, t }) {
+      const tr = typeof t === 'function' ? t : (key) => key
+      const [style, setStyle] = react.useState(editorStylePreference)
+      const [placement, setPlacement] = react.useState(editorPlacementPreference)
+      const [heightMode, setHeightMode] = react.useState(editorHeightPreference)
+      react.useEffect(() => subscribeEditorStyle(() => setStyle(editorStylePreference)), [])
+      react.useEffect(() => subscribeEditorPlacement(() => setPlacement(editorPlacementPreference)), [])
+      react.useEffect(() => subscribeEditorHeight(() => setHeightMode(editorHeightPreference)), [])
+      const summaryKey = style === 'bubble' ? 'config.summary.bubble' : style === 'center' ? 'config.summary.center' : 'config.summary.frame'
+      if (view === 'summary') return `${tr(summaryKey)} · ${tr(placement === 'inline' ? 'config.summary.inline' : placement === 'legacy' ? 'config.summary.legacy' : 'config.summary.overlay')} · ${tr(heightMode === 'content' ? 'config.summary.height.content' : heightMode === 'fill' ? 'config.summary.height.fill' : 'config.summary.height.max')}`
+      const hintKey = style === 'bubble' ? 'config.hint.bubble' : style === 'center' ? 'config.hint.center' : 'config.hint.frame'
+      const placementHint = placement === 'inline' ? 'config.hint.inline' : placement === 'legacy' ? 'config.hint.legacy' : 'config.hint.overlay'
+      const heightHint = heightMode === 'content' ? 'config.hint.height.content' : heightMode === 'fill' ? 'config.hint.height.fill' : 'config.hint.height.max'
+      const choices = [
+        ['frame', 'style.frame'],
+        ['bubble', 'style.bubble'],
+        ['center', 'style.center'],
+      ]
+      return jsxs('div', {
+        className: 'dshet-config',
+        children: [
+          jsxs('label', {
+            className: 'dshet-config-row',
+            children: [
+              jsx('span', { children: tr('config.style') }),
+              jsx('select', {
+                className: 'dshet-select',
+                value: style,
+                onChange: (event) => setEditorStylePreference(event.target.value),
+                children: choices.map(([value, key]) => jsx('option', { value, children: tr(key) }, value)),
+              }),
+            ],
+          }),
+          jsx('p', { className: 'dshet-config-hint', children: tr(hintKey) }),
+          jsxs('label', {
+            className: 'dshet-config-row',
+            children: [
+              jsx('span', { children: tr('config.placement') }),
+              jsx('select', {
+                className: 'dshet-select',
+                value: placement,
+                onChange: (event) => setEditorPlacementPreference(event.target.value),
+                children: [
+                  jsx('option', { value: 'overlay', children: tr('placement.overlay') }),
+                  jsx('option', { value: 'inline', children: tr('placement.inline') }),
+                  jsx('option', { value: 'legacy', children: tr('placement.legacy') }),
+                ],
+              }),
+            ],
+          }),
+          jsx('p', { className: 'dshet-config-hint', children: tr(placementHint) }),
+          jsxs('label', {
+            className: 'dshet-config-row',
+            children: [
+              jsx('span', { children: tr('config.height') }),
+              jsx('select', {
+                className: 'dshet-select',
+                value: heightMode,
+                onChange: (event) => setEditorHeightPreference(event.target.value),
+                children: [
+                  jsx('option', { value: 'max', children: tr('height.max') }),
+                  jsx('option', { value: 'content', children: tr('height.content') }),
+                  jsx('option', { value: 'fill', children: tr('height.fill') }),
+                ],
+              }),
+            ],
+          }),
+          jsx('p', { className: 'dshet-config-hint', children: tr(heightHint) }),
+        ],
+      })
+    }
+
     // --- plugin ---------------------------------------------------------------
 
     function apply(ctx) {
+      // Diagnostic only: the host restart does not reload the page's JS, so a
+      // stale client bundle and a live host can coexist. This marker says which
+      // browser half actually ran (the old bundle has none).
+      try {
+        document.documentElement.dataset.dshetVersion = PLUGIN_VERSION
+      } catch {
+        /* a non-DOM host is not worth failing over */
+      }
       ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-edit-turn: dictionaries')
 
       const controllers = new Map()
@@ -2597,6 +4926,31 @@ window.__ModuleLoader__.load({
       // A reply's edit entry lives in the official assistant-actions strip, one
       // entry per assistant message. order 5 puts it ahead of the feedback
       // entries (order 10), so the pencil sits with the leading icons.
+      // The active skin repaints its surfaces at any time (switching one
+      // rewrites body's attributes and inline variables), so the palette is
+      // resolved once and then again on every theme or skin change.
+      ctx.effect(() => {
+        const run = () => {
+          try {
+            resolveSkinPalette()
+          } catch {
+            /* the stylesheet defaults stand */
+          }
+        }
+        run()
+        const observer =
+          typeof MutationObserver === 'function' && document && document.body
+            ? new MutationObserver(run)
+            : null
+        if (observer !== null) {
+          observer.observe(document.body, { attributes: true, attributeFilter: ['class', 'style', 'data-ds-dark-theme'] })
+          if (document.documentElement) observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style'] })
+        }
+        return () => {
+          if (observer !== null) observer.disconnect()
+        }
+      }, 'dsh-edit-turn:skin-palette')
+
       ctx.slots.inject('conversation.chat.assistant-actions', () =>
         ctx.slots.register(
           {
@@ -2610,6 +4964,20 @@ window.__ModuleLoader__.load({
             }),
           },
           ReplyActionEntry,
+        ),
+      )
+
+      // The row's configure arrow in the plugin manager. Without this the
+      // component page is a read-only overview (the card cannot be opened); the
+      // key is the manager's `<bundle package>#<row id>` contract.
+      ctx.slots.inject('plugins.row.config', () =>
+        ctx.slots.register(
+          {
+            name: 'plugins.row.config',
+            key: 'dsh-edit-turn#dsh-edit-turn',
+            locale: NS,
+          },
+          EditorStyleOption,
         ),
       )
 
@@ -2642,22 +5010,25 @@ window.__ModuleLoader__.load({
     const react = require('react')
     const jsxRuntime = require('react/jsx-runtime')
     const { jsx, jsxs, Fragment } = jsxRuntime
+    const primitives = require('@deepseek-ai/dsh-client-ui-primitives')
 
     const NS = 'dsh-rerun-turn'
     const ROUTE_PREFIX = '/dsh-rerun-turn'
 
     /** Keep in sync with package.json and lib/index.js. */
-    const PLUGIN_VERSION = '0.1.27'
+    const PLUGIN_VERSION = '0.2.3'
 
     // --- copy -----------------------------------------------------------------
 
     const zh = {
       'action.rerun': '重跑这一轮',
       'confirm.title': '重跑这一轮？',
-      'confirm.body': '这条回答连同它之后的内容会先从模型上下文移除，再用原提示词重新生成；之后的轮次会原样重放。后续调用将读到 A B C1 D E F G。',
+      'confirm.body': '这条回答连同它之后的内容会先从模型上下文移除，再用原提示词重新生成；之后的轮次会原样重放。',
+      'confirm.note': '重跑只影响模型后续看到的内容，不会改写历史日志。',
       'confirm.yes': '重跑',
       'confirm.no': '取消',
       'notice.deferred': '重跑已中断：后续轮次的回放将在会话空闲时自动完成。',
+      'notice.dismiss': '关闭这条提示',
       'notice.loadError': '状态加载失败，稍后重试。',
       'error.invalid': '请求无效，请刷新后重试。',
       'error.session-not-active': '这个会话当前未激活，请先打开该会话再重跑。',
@@ -2675,16 +5046,28 @@ window.__ModuleLoader__.load({
       'error.method': '请求方式不被接受，请刷新后重试。',
       'error.generic': '重跑失败，请重试。',
       'error.internal': '服务器内部错误，请稍后重试。',
+      'config.ask': '重跑时询问',
+      'config.hint.ask': '每次重跑前都会先弹出确认，说明这一轮会怎么重放。',
+      'config.hint.auto': '点一下就直接重跑，不再询问。',
+      'config.summary.ask': '重跑前询问',
+      'config.summary.auto': '直接重跑',
     }
 
     const en = {
       'action.rerun': 'Rerun this turn',
       'confirm.title': 'Rerun this turn?',
-      'confirm.body': "The reply and everything after it leave the model context first; the turn's own prompt is sent again, and the later turns are replayed verbatim. The next call will read A B C1 D E F G.",
+      'confirm.body': "The reply and everything after it leave the model context first; the turn's own prompt is sent again, and the later turns are replayed verbatim.",
+      'confirm.note': 'A rerun only changes what the model reads next; the session log is never rewritten.',
       'confirm.yes': 'Rerun',
       'confirm.no': 'Cancel',
       'notice.deferred': 'Rerun interrupted: the replay of the later turns will resume automatically once the session is idle.',
+      'notice.dismiss': 'Dismiss this notice',
       'notice.loadError': 'Loading the state failed; try again shortly.',
+      'config.ask': 'Ask before rerunning',
+      'config.hint.ask': 'Show the confirmation step before every rerun.',
+      'config.hint.auto': 'Rerun right away without asking.',
+      'config.summary.ask': 'Ask before rerunning',
+      'config.summary.auto': 'Rerun without asking',
       'error.invalid': 'Invalid request; refresh and try again.',
       'error.session-not-active': 'This session is not open in DSH; open it first.',
       'error.session-not-found': 'No session log was found for this id.',
@@ -2711,6 +5094,76 @@ window.__ModuleLoader__.load({
       return t(typeof code === 'string' && ERROR_KEYS.has(`error.${code}`) ? `error.${code}` : 'error.generic')
     }
 
+    // A notice derived from live progress is dismissed per phase, rerun and
+    // text: the same interruption stays closed, while a new one still shows.
+    function progressKeyOf(progress) {
+      if (progress === null || typeof progress !== 'object') return null
+      const phase = typeof progress.phase === 'string' ? progress.phase : ''
+      const rerunId = typeof progress.rerunId === 'string' ? progress.rerunId : ''
+      const error = typeof progress.error === 'string' ? progress.error : ''
+      const promptError = typeof progress.promptError === 'string' ? progress.promptError : ''
+      return `${phase}|${rerunId}|${error}|${promptError}`
+    }
+
+    // --- preferences ----------------------------------------------------------
+
+    // One client-side preference: whether a rerun opens its confirmation step
+    // first. It lives in localStorage - the store the official client plugins
+    // keep their view options in - so it survives reloads with no host
+    // round-trip, and a subscription keeps the settings page and the rerun
+    // action on one value. Nothing stored means "follow the host config".
+    const PREFS_KEY = 'dsh-rerun-turn:prefs'
+
+    function readStoredAsk() {
+      try {
+        if (typeof window === 'undefined' || !window.localStorage) return null
+        const raw = window.localStorage.getItem(PREFS_KEY)
+        if (raw === null) return null
+        const parsed = JSON.parse(raw)
+        return parsed && typeof parsed.ask === 'boolean' ? parsed.ask : null
+      } catch {
+        // A missing or malformed entry falls back to the host config rather than
+        // breaking the plugin.
+        return null
+      }
+    }
+
+    let storedAsk = readStoredAsk()
+    let hostConfirm = false
+    const prefListeners = new Set()
+
+    /** @returns the effective setting: the stored choice, else the host config. */
+    function getPrefs() {
+      return { ask: storedAsk === null ? hostConfirm : storedAsk }
+    }
+
+    function setAskBeforeRerun(value) {
+      const ask = value === true
+      if (storedAsk === ask) return
+      storedAsk = ask
+      try {
+        if (typeof window !== 'undefined' && window.localStorage) {
+          window.localStorage.setItem(PREFS_KEY, JSON.stringify({ ask }))
+        }
+      } catch {
+        // Storage that refuses writes (private mode) must not break the toggle.
+      }
+      for (const listener of prefListeners) {
+        try {
+          listener()
+        } catch (error) {
+          console.error('[dsh-rerun-turn] preference subscriber threw:', error)
+        }
+      }
+    }
+
+    function subscribePrefs(listener) {
+      prefListeners.add(listener)
+      return () => {
+        prefListeners.delete(listener)
+      }
+    }
+
     // --- style ----------------------------------------------------------------
 
     // Same policy as the sibling plugins: the plugin paints its own surfaces
@@ -2723,8 +5176,8 @@ window.__ModuleLoader__.load({
       'body[data-ds-dark-theme]{--dsrr-panel:rgba(22,28,44,.96);--dsrr-field:rgba(14,19,33,.98);--dsrr-line:rgba(255,255,255,.18);--dsrr-ink:#eef2f8;--dsrr-ink-dim:#a6b1c6;--dsrr-hover:rgba(255,255,255,.11);--dsrr-shadow:0 12px 32px rgba(0,0,0,.5)}',
       // The rerun icon sits among the platform's own action icons and takes
       // their colour (the fallback is what the default theme resolves to).
-      '.dsrr-action{width:28px;height:28px;padding:6px;display:inline-flex;align-items:center;justify-content:center;border:none;border-radius:28px;background:transparent;color:var(--dsw-alias-label-tertiary,#81858c);cursor:pointer;transition:background-color .12s,color .12s}',
-      '.dsrr-action:hover:not(:disabled){background:var(--dsrr-field);box-shadow:inset 0 0 0 1px var(--dsrr-line);color:var(--dsw-alias-label-primary,var(--dsrr-ink))}',
+      '.dsrr-action{width:28px;height:28px;padding:6px;box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;border:none;border-radius:28px;background:transparent;color:var(--dsw-alias-label-tertiary,#81858c);cursor:pointer;transition:background-color .12s,color .12s}',
+      '.dsrr-action:hover:not(:disabled){background:var(--dsrr-field);color:var(--dsw-alias-label-primary,var(--dsrr-ink))}',
       '.dsrr-action:focus-visible{outline:2px solid var(--dsw-alias-button-primary-fill,var(--dsrr-accent));outline-offset:2px}',
       '.dsrr-action:disabled{cursor:default;opacity:.4}',
       '.dsrr-action svg{width:15px;height:15px}',
@@ -2739,11 +5192,19 @@ window.__ModuleLoader__.load({
       // edge, so its children would spill over the input. The stack lifts
       // itself by its own height, landing fully above the composer.
       '.dsrr-stack{transform:translateY(-100%)}',
-      '.dsrr-notice{margin:4px 0;padding:6px 10px;border:1px solid var(--dsrr-line);border-radius:8px;background:var(--dsrr-panel);backdrop-filter:blur(18px) saturate(1.2);box-shadow:var(--dsrr-shadow);color:var(--dsrr-ink-dim);font-size:12px;line-height:19px}',
+      '.dsrr-notice{display:flex;align-items:flex-start;gap:8px;margin:4px 0;padding:6px 10px;border:1px solid var(--dsrr-line);border-radius:8px;background:var(--dsrr-panel);backdrop-filter:blur(18px) saturate(1.2);box-shadow:var(--dsrr-shadow);color:var(--dsrr-ink-dim);font-size:12px;line-height:19px}',
+      '.dsrr-notice-text{flex:1;min-width:0}',
+      '.dsrr-notice-close{flex:none;width:18px;height:18px;margin:0 -2px 0 0;padding:0;border:none;border-radius:50%;background:transparent;color:inherit;font:inherit;font-size:14px;line-height:18px;cursor:pointer;opacity:.7}',
+      '.dsrr-notice-close:hover{opacity:1;background:var(--dsrr-hover)}',
+      '.dsrr-notice-close:focus-visible{outline:2px solid var(--dsw-alias-button-primary-fill,var(--dsrr-accent));outline-offset:1px}',
       '.dsrr-notice.dsrr-notice-error{color:var(--dsw-alias-state-error-primary,#c93a31)}',
-      '.dsrr-confirm{margin:4px 0;padding:8px 10px;border:1px solid var(--dsrr-line);border-radius:8px;background:var(--dsrr-panel);backdrop-filter:blur(18px) saturate(1.2);box-shadow:var(--dsrr-shadow);color:var(--dsrr-ink);font-size:12px;line-height:19px}',
-      '.dsrr-confirm-title{font-weight:600;margin-bottom:2px}',
-      '.dsrr-confirm-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:6px}',
+      // The confirmation is the platform's own modal (the sibling delete plugin
+      // draws its dialog the same way), so the only copy style here is the body
+      // paragraph - the same 14/22 the platform's dialog text uses.
+      '.dsrr-dialog-text{margin:0;color:var(--dsw-alias-label-primary,var(--dsrr-ink));font-size:14px;line-height:22px}',
+      '.dsrr-dialog-note{margin:10px 0 0;color:var(--dsw-alias-label-tertiary,var(--dsrr-ink-dim));font-size:13px;line-height:20px}',
+      '.dsrr-config{display:flex;flex-direction:column;gap:6px}',
+      '.dsrr-config-hint{margin:0;color:var(--dsrr-ink-dim);font-size:12px;line-height:18px}',
       '.dsrr-btn{padding:4px 12px;border:1px solid var(--dsrr-line);border-radius:999px;background:var(--dsrr-field);color:var(--dsrr-ink);font:inherit;font-size:12px;line-height:18px;cursor:pointer;transition:background-color .12s}',
       '.dsrr-btn:hover{background:var(--dsrr-hover)}',
       '.dsrr-btn:focus-visible{outline:2px solid var(--dsw-alias-button-primary-fill,var(--dsrr-accent));outline-offset:2px}',
@@ -2809,11 +5270,14 @@ window.__ModuleLoader__.load({
           progress: null,
           pending: false,
           failure: null,
+          failureDetail: null,
           notice: null,
           noticeError: false,
+          dismissedKey: null,
           confirming: false,
           loaded: false,
           loadError: false,
+          loadErrorDetail: null,
           confirm: false,
           revision: 0,
         })
@@ -2916,6 +5380,7 @@ window.__ModuleLoader__.load({
                 }
               }
             }
+            hostConfirm = Boolean(data.config && data.config.confirm)
             this.publish({
               hidden,
               replies,
@@ -2929,6 +5394,7 @@ window.__ModuleLoader__.load({
               progress: data.progress || null,
               loaded: true,
               loadError: false,
+              loadErrorDetail: null,
               confirm: Boolean(data.config && data.config.confirm),
             })
             // While a rerun runs in the host, keep asking; one last refresh
@@ -2936,8 +5402,12 @@ window.__ModuleLoader__.load({
             if (rerunning) this.ensurePolling()
             else this.stopPolling()
           })
-          .catch(() => {
-            this.publish({ loadError: true })
+          .catch((error) => {
+            // The host says WHY (`invalid session id`, `no session log for this
+            // id`, a 500, a network failure). Swallowing it left the panel with
+            // "状态加载失败，稍后重试。" for every cause alike - including the
+            // causes a user can act on.
+            this.publish({ loadError: true, loadErrorDetail: error instanceof Error ? error.message : String(error) })
           })
           .finally(() => {
             this.inflight = null
@@ -2974,7 +5444,10 @@ window.__ModuleLoader__.load({
       rerun(entry) {
         if (this.disposed === true) return
         if (this.view.pending) return
-        if (this.view.confirm) {
+        // The settings-page checkbox (stored) wins over the host config; with
+        // asking off the click goes straight to the host, and a failure still
+        // surfaces through the notice path.
+        if (getPrefs().ask === true) {
           this.confirmTarget = entry
           this.publish({ confirming: true, failure: null })
           return
@@ -2995,7 +5468,11 @@ window.__ModuleLoader__.load({
       }
 
       dismissNotice() {
-        this.publish({ notice: null, noticeError: false })
+        // A transient notice (view.notice) is not derived from progress;
+        // closing it must not also dismiss the progress notice underneath.
+        const transient = this.view.notice !== null && this.view.notice !== undefined
+        const key = transient ? this.view.dismissedKey : progressKeyOf(this.view.progress)
+        this.publish({ notice: null, noticeError: false, dismissedKey: key })
       }
 
       async send(entry) {
@@ -3015,11 +5492,11 @@ window.__ModuleLoader__.load({
               // the rerun that just completed, clicked once more before the
               // client refreshed. Not an error: refresh silently and let the
               // stale row disappear.
-              this.publish({ pending: false, failure: null })
+              this.publish({ pending: false, failure: null, failureDetail: null })
               this.load(true)
               return
             }
-            this.publish({ pending: false, failure: code })
+            this.publish({ pending: false, failure: code, failureDetail: typeof data.error === 'string' && data.error !== '' ? data.error : null })
             return
           }
           // Do NOT hide the retired rows here: the rerun's replacement (fresh
@@ -3210,7 +5687,6 @@ window.__ModuleLoader__.load({
       }
       const focus = view.rerunning === true && view.rerunFocus ? view.rerunFocus : null
       const infos = []
-      let hasFresh = false
       for (const row of rows) {
         if (!(row instanceof HTMLElement)) continue
         const key = row.getAttribute('data-chat-flow-key')
@@ -3234,11 +5710,6 @@ window.__ModuleLoader__.load({
           const freshBySeq = info.seqs.some((seq) => seq > focus.carrierSeq)
           const freshByTurn = info.keyTurn !== null && info.keyTurn > focus.turn
           info.fresh = !info.inTarget && !info.inTail && (freshBySeq || freshByTurn)
-          // Only a real answer row proves the replacement is on screen. The
-          // fresh turn's process/tail strips mount the moment the rerun starts,
-          // so counting them would retire the old answer while it is still
-          // generating - leaving a hole where the answer was.
-          if (info.fresh && (info.kind === 'assistant-step' || info.kind === 'tool-call')) hasFresh = true
         }
         infos.push(info)
       }
@@ -3277,9 +5748,11 @@ window.__ModuleLoader__.load({
             } else {
               order = '1'
             }
-          } else if (info.inTarget && info.kind !== 'user' && hasFresh) {
-            // The old answer retires only once its replacement is on screen -
-            // the streaming row occupies the same spot.
+          } else if (info.inTarget && info.kind !== 'user') {
+            // The old answer retires the moment the rerun starts, so the fresh
+            // "thinking" row streams where the answer was instead of below it.
+            // Waiting for an assistant-step row left the old answer on screen
+            // for the whole generation.
             decision = true
           }
         }
@@ -3381,6 +5854,93 @@ window.__ModuleLoader__.load({
           bar.insertBefore(entry.host, next)
         }
       }
+      syncTurnRail(view)
+    }
+
+    // --- turn rail ------------------------------------------------------------
+
+    /** The turn a rail mark addresses: its label carries the real turn number. */
+    function turnOfRailMark(mark) {
+      const label = mark.getAttribute('aria-label') || mark.getAttribute('title') || ''
+      const match = /(\d+)/.exec(label)
+      return match === null ? null : Number(match[1])
+    }
+
+    /**
+     * Every turn that has a row in the DOM, mapped to whether any of its rows is
+     * visible. A turn with no row at all is absent here: it is not empty, just
+     * not loaded, and the rail may still jump to it.
+     */
+    function turnRowVisibility() {
+      const seen = new Map()
+      let rows
+      try {
+        rows = document.querySelectorAll('[data-chat-flow-key][data-chat-turn]')
+      } catch {
+        return seen
+      }
+      for (const row of rows) {
+        const turn = Number(row.getAttribute('data-chat-turn'))
+        if (!Number.isInteger(turn)) continue
+        const style = row.style
+        const hidden =
+          row.dataset.dsrrHidden === '1' ||
+          row.dataset.dshetHidden === '1' ||
+          row.dataset.dshdtHidden === '1' ||
+          (style !== undefined && style !== null && style.display === 'none') ||
+          (typeof row.getBoundingClientRect === 'function' && row.getBoundingClientRect().height === 0)
+        if (seen.get(turn) !== true) seen.set(turn, hidden !== true)
+      }
+      return seen
+    }
+
+    /**
+     * The official rail keeps one mark per turn of the session - including the
+     * turns this plugin retired, whose rows are hidden. So a rerun left marks
+     * for turns the conversation no longer shows, and their slots left a gap.
+     * Drop the marks of turns with no visible row, re-space the rest inside the
+     * host's own ladder and centre them; the container keeps the host's height,
+     * because that height is what the host's virtualisation measures: shrinking
+     * it unmounts the marks past the new window (a ten-turn transcript showed
+     * six marks).
+     */
+    function syncTurnRail(view) {
+      const rows = turnRowVisibility()
+      const hiddenTurns = []
+      for (const [turn, visible] of rows) if (visible !== true) hiddenTurns.push(turn)
+      let navs
+      try {
+        navs = document.querySelectorAll('nav')
+      } catch {
+        return
+      }
+      for (const nav of navs) {
+        let marks
+        try {
+          marks = [...nav.querySelectorAll('button[data-index]')]
+        } catch {
+          continue
+        }
+        if (marks.length === 0) continue
+        const container = marks[0].parentElement
+        if (container === null || container === undefined) continue
+        const observed = Math.round((Number.parseFloat(container.style.height) - 2) / 10)
+        const total = Math.max(Number.isFinite(observed) && observed > 0 ? observed : 0, marks.length)
+        const inRail = hiddenTurns.filter((turn) => turn <= total)
+        const kept = total - inRail.length
+        const offset = kept > 0 && kept < total ? Math.floor((total - kept) / 2) : 0
+        for (const mark of marks) {
+          const turn = turnOfRailMark(mark)
+          if (turn === null) continue
+          if (hiddenTurns.includes(turn)) {
+            mark.style.display = 'none'
+            continue
+          }
+          mark.style.display = ''
+          const before = hiddenTurns.filter((hidden) => hidden < turn).length
+          mark.style.transform = `translate3d(0px, ${(turn - 1 - before + offset) * 10 + 1}px, 0px)`
+        }
+      }
     }
 
     // --- react entries --------------------------------------------------------
@@ -3455,6 +6015,27 @@ window.__ModuleLoader__.load({
 
     // The overlay: hides retired rows, follows the background rerun, and
     // shows the confirm step plus any failure the host reported.
+    // The plugin's own page in the manager: the row this bundle inserts
+    // (`cordis.patch.yml`, id `dsh-rerun-turn`) gains a configure arrow that
+    // opens this card. Same shape as the sibling plugins' cards.
+    function AskBeforeRerunOption({ view, t }) {
+      const tr = typeof t === 'function' ? t : (key) => key
+      const [ask, setAsk] = react.useState(getPrefs().ask)
+      react.useEffect(() => subscribePrefs(() => setAsk(getPrefs().ask)), [])
+      if (view === 'summary') return tr(ask ? 'config.summary.ask' : 'config.summary.auto')
+      return jsxs('div', {
+        className: 'dsrr-config',
+        children: [
+          jsx(primitives.Checkbox, {
+            checked: ask,
+            label: tr('config.ask'),
+            onChange: (checked) => setAskBeforeRerun(checked),
+          }),
+          jsx('p', { className: 'dsrr-config-hint', children: tr(ask ? 'config.hint.ask' : 'config.hint.auto') }),
+        ],
+      })
+    }
+
     function OverlayEntry({ useChat, useRerunTurn, controller, t }) {
       const snapshot = typeof useChat === 'function' ? useChat((state) => state) : undefined
       const view = useRerunTurn((state) => state)
@@ -3499,63 +6080,100 @@ window.__ModuleLoader__.load({
       }, [view.rerunning, controller])
 
       const progress = view.progress
+      const progressKey = progressKeyOf(progress)
+      const progressDismissed = progressKey !== null && view.dismissedKey === progressKey
+      // `error` is only meaningful while the rerun is interrupted or failed.
+      // Older hosts merged progress records, so a finished rerun could still
+      // carry the interruption text; trusting the phase keeps that stale text
+      // off the screen even before the host is upgraded.
+      const progressError =
+        progressDismissed !== true && progress !== null && typeof progress === 'object' &&
+        (progress.phase === 'interrupted' || progress.phase === 'failed') &&
+        typeof progress.error === 'string' && progress.error !== ''
+          ? progress.error
+          : ''
+      const progressPromptError =
+        progressDismissed !== true && progress !== null && typeof progress === 'object' && typeof progress.promptError === 'string' && progress.promptError !== ''
+          ? progress.promptError
+          : ''
       const notice =
         view.notice !== null && view.notice !== undefined
           ? { text: view.notice, error: view.noticeError === true }
           : view.loadError === true
-            ? { text: t('notice.loadError'), error: true }
-            : progress && typeof progress.error === 'string' && progress.error !== ''
-              ? { text: `${t('notice.deferred')} (${progress.error})`, error: true }
-              : progress && typeof progress.promptError === 'string' && progress.promptError !== ''
-                ? { text: progress.promptError, error: true }
+            ? {
+                text:
+                  typeof view.loadErrorDetail === 'string' && view.loadErrorDetail !== ''
+                    ? `${t('notice.loadError')} (${view.loadErrorDetail})`
+                    : t('notice.loadError'),
+                error: true,
+              }
+            : progressError !== ''
+              ? { text: `${t('notice.deferred')} (${progressError})`, error: true }
+              : progressPromptError !== ''
+                ? { text: progressPromptError, error: true }
                 : null
 
       return jsxs('div', {
         className: 'dsrr-stack',
         'data-dsrr-overlay': '1',
         children: [
-          view.confirming === true
-            ? jsxs('div', {
-                className: 'dsrr-confirm',
-                role: 'alertdialog',
-                'aria-label': t('confirm.title'),
-                children: [
-                  jsx('div', { className: 'dsrr-confirm-title', children: t('confirm.title') }),
-                  jsx('div', { children: t('confirm.body') }),
-                  jsxs('div', {
-                    className: 'dsrr-confirm-actions',
-                    children: [
-                      jsx('button', {
-                        type: 'button',
-                        className: 'dsrr-btn',
-                        onClick: () => controller.confirmNo(),
-                        children: t('confirm.no'),
-                      }),
-                      jsx('button', {
-                        type: 'button',
-                        className: 'dsrr-btn dsrr-btn-primary',
-                        onClick: () => controller.confirmYes(),
-                        children: t('confirm.yes'),
-                      }),
-                    ],
-                  }),
-                ],
-              })
-            : null,
+          jsx(primitives.Modal, {
+            open: view.confirming === true,
+            title: t('confirm.title'),
+            closeLabel: t('confirm.no'),
+            onClose: () => controller.confirmNo(),
+            footer: jsxs(Fragment, {
+              children: [
+                jsx(primitives.Button, {
+                  variant: 'ghost',
+                  size: 'md',
+                  onClick: () => controller.confirmNo(),
+                  children: t('confirm.no'),
+                }),
+                jsx(primitives.Button, {
+                  variant: 'primary',
+                  size: 'md',
+                  onClick: () => controller.confirmYes(),
+                  children: t('confirm.yes'),
+                }),
+              ],
+            }),
+            children: jsxs(Fragment, {
+              children: [
+                jsx('p', { className: 'dsrr-dialog-text', children: t('confirm.body') }),
+                jsx('p', { className: 'dsrr-dialog-note', children: t('confirm.note') }),
+              ],
+            }),
+          }),
           view.failure !== null && view.failure !== undefined
             ? jsx('div', {
                 className: 'dsrr-notice dsrr-notice-error',
                 role: 'status',
-                onClick: () => controller.publish({ failure: null }),
-                children: errorText(t, view.failure),
+                onClick: () => controller.publish({ failure: null, failureDetail: null }),
+                children: (view.failure === 'internal' || view.failure === 'generic') && typeof view.failureDetail === 'string' && view.failureDetail !== ''
+                  ? `${errorText(t, view.failure)}（${view.failureDetail.slice(0, 300)}）`
+                  : errorText(t, view.failure),
               })
             : null,
           notice !== null
-            ? jsx('div', {
+            ? jsxs('div', {
                 className: notice.error ? 'dsrr-notice dsrr-notice-error' : 'dsrr-notice',
                 role: 'status',
                 onClick: () => controller.dismissNotice(),
-                children: notice.text,
+                children: [
+                  jsx('span', { className: 'dsrr-notice-text', children: notice.text }),
+                  jsx('button', {
+                    type: 'button',
+                    className: 'dsrr-notice-close',
+                    'aria-label': t('notice.dismiss'),
+                    title: t('notice.dismiss'),
+                    onClick: (event) => {
+                      event.stopPropagation()
+                      controller.dismissNotice()
+                    },
+                    children: '×',
+                  }),
+                ],
               })
             : null,
         ],
@@ -3631,6 +6249,20 @@ window.__ModuleLoader__.load({
             inject: (sessionId) => ({ hooks: { rerunTurn: controllerFor(sessionId) }, controller: controllerFor(sessionId) }),
           },
           OverlayEntry,
+        ),
+      )
+
+      // The plugin's own page in the manager. The key is the manager's
+      // `<bundle package>#<row id>` contract (the row this bundle inserts in
+      // cordis.patch.yml), exactly as the sibling plugins declare it.
+      ctx.slots.inject('plugins.row.config', () =>
+        ctx.slots.register(
+          {
+            name: 'plugins.row.config',
+            key: 'dsh-rerun-turn#dsh-rerun-turn',
+            locale: NS,
+          },
+          AskBeforeRerunOption,
         ),
       )
     }
@@ -3732,6 +6364,9 @@ window.__ModuleLoader__.load({
       'dialog.desc.step': '这一步的回复与它请求的工具结果将一并从模型上下文中移除，同一回合的其它步骤保留。',
       'dialog.desc.reply': '这条回复连同它的思考、工具调用与注入上下文将从模型上下文中移除，你的提问会保留。',
       'dialog.note': '删除只影响模型后续看到的内容，不会改写历史日志。',
+      'dialog.busyWarning': '当前回复正在生成；删除会先停止它，再继续。',
+      'dialog.extraWarning': '这段范围里还夹着别的内容；确认后会一并移除。',
+      'dialog.confirmExtra': '一并删除',
       'dialog.cancel': '取消',
       'dialog.confirm': '删除',
       'dialog.pending': '删除中…',
@@ -3744,7 +6379,8 @@ window.__ModuleLoader__.load({
       'error.invalid': '请求无效，请刷新后重试。',
       'error.session-not-active': '这个会话当前未激活，请先打开该会话再删除。',
       'error.session-not-found': '找不到该会话的日志。',
-      'error.busy': '该会话正在进行中，请等回复结束后再删除。',
+      'error.busy': '该会话正在进行中，且当前无法自动停止（可能正在压缩），请稍后重试。',
+      'error.stop-timeout': '已请求停止当前生成，但该回合没有及时停下；请稍后再试。',
       'error.already-deleted': '这条内容已经从上下文中删除了。',
       'error.not-deletable': '这个位置不支持删除。',
       'error.range-not-clean': '目标区间包含其它内容，已取消删除。',
@@ -3768,6 +6404,9 @@ window.__ModuleLoader__.load({
       'dialog.desc.step': 'This step and the tool results it requested leave the model context together; other steps in the same turn stay.',
       'dialog.desc.reply': 'This reply leaves the model context together with its reasoning, tool calls and injected context; your prompt stays.',
       'dialog.note': 'Deletion only changes what the model sees next; the append-only log is never rewritten.',
+      'dialog.busyWarning': 'A reply is still generating; deleting will stop it first.',
+      'dialog.extraWarning': 'This range also covers other content; confirming removes it as well.',
+      'dialog.confirmExtra': 'Delete all of it',
       'dialog.cancel': 'Cancel',
       'dialog.confirm': 'Delete',
       'dialog.pending': 'Deleting...',
@@ -3780,7 +6419,8 @@ window.__ModuleLoader__.load({
       'error.invalid': 'Invalid request; refresh and try again.',
       'error.session-not-active': 'This session is not open in DSH; open it first.',
       'error.session-not-found': 'No session log was found for this id.',
-      'error.busy': 'This session is still working; wait for the reply to finish.',
+      'error.busy': 'This session is working and cannot be stopped right now (a compaction may be running); try again in a moment.',
+      'error.stop-timeout': 'The running turn did not stop in time; try again in a moment.',
       'error.already-deleted': 'This content is already removed from the context.',
       'error.not-deletable': 'This position cannot be deleted.',
       'error.range-not-clean': 'The target window contains unrelated content; the delete was cancelled.',
@@ -3820,6 +6460,7 @@ window.__ModuleLoader__.load({
       '[data-dshdt-no-target="1"] .dshdt-action{display:none!important}',
       '.dshdt-dialog-text{margin:0;color:var(--dsw-alias-label-primary,inherit);font-size:14px;line-height:22px}',
       '.dshdt-dialog-note{margin:10px 0 0;color:var(--dsw-alias-label-tertiary,#8a8f98);font-size:13px;line-height:20px}',
+      '.dshdt-dialog-warn{margin:10px 0 0;color:var(--dsw-alias-state-warn-primary,#a15c00);font-size:13px;line-height:20px}',
       '.dshdt-dialog-error{margin:10px 0 0;color:var(--dsw-alias-state-error-primary,#d54941);font-size:13px;line-height:20px}',
       '.dshdt-config{display:flex;flex-direction:column;gap:8px}',
       '.dshdt-config-hint{margin:0;color:var(--dsw-alias-label-tertiary,#8a8f98);font-size:13px;line-height:20px}',
@@ -3905,11 +6546,17 @@ window.__ModuleLoader__.load({
           markerTurns: new Set(),
           surfaceReady: false,
           surfaceThrough: -1,
+          // The host reports a running turn (or a compaction) so the dialog can
+          // say that a delete will stop the generation first.
+          busy: false,
           loaded: false,
           loadError: false,
           dialog: null,
           pending: false,
           failure: null,
+          // How many unrelated nodes the last attempt reported it would also
+          // remove (the forced-confirmation prompt).
+          foreignCount: 0,
           revision: 0,
         })
       }
@@ -3979,7 +6626,7 @@ window.__ModuleLoader__.load({
               if (typeof turn === 'number') markerTurns.add(turn)
             }
             const surfaceThrough = typeof data.lastSeq === 'number' ? data.lastSeq : -1
-            this.publish({ hidden, hiddenVia, surface, turnSeqs, replyTurns, edits, markerTurns, surfaceReady: true, surfaceThrough, loaded: true, loadError: false })
+            this.publish({ hidden, hiddenVia, surface, turnSeqs, replyTurns, edits, markerTurns, busy: data.busy === true, surfaceReady: true, surfaceThrough, loaded: true, loadError: false })
           })
           .catch(() => {
             this.publish({ loadError: true })
@@ -3998,11 +6645,14 @@ window.__ModuleLoader__.load({
 
       close() {
         if (this.view.pending) return
-        this.publish({ dialog: null, failure: null })
+        this.publish({ dialog: null, failure: null, foreignCount: 0 })
       }
 
-      async confirm() {
-        await this.perform(this.view.dialog)
+      // `force` re-submits after the "the window also swallows N unrelated
+      // nodes" report, which is the only refusal the dialog turns into a second
+      // question instead of a dead end.
+      async confirm(options) {
+        await this.perform(this.view.dialog, { force: options && options.force === true })
       }
 
       // The entry every action uses. With "ask" on, it opens the confirmation
@@ -4019,9 +6669,10 @@ window.__ModuleLoader__.load({
         if (result.failure !== null) this.publish({ dialog: target, pending: false, failure: result.failure })
       }
 
-      async perform(requested) {
+      async perform(requested, options) {
         if (requested === null || this.view.pending) return { failure: null }
-        this.publish({ pending: true, failure: null })
+        const force = options !== undefined && options.force === true
+        this.publish({ pending: true, failure: null, foreignCount: 0 })
         try {
           // The live node can move while the dialog sits open: another producer
           // (dsh-edit-turn) rewrites the message in place, and the replacement
@@ -4030,17 +6681,18 @@ window.__ModuleLoader__.load({
           // first attempt reports content that has already left the context.
           await this.load(true)
           let target = this.resolveTarget(requested)
-          let result = await this.deleteOnce(target)
+          let result = await this.deleteOnce(target, force)
           if (!result.ok && result.code === 'already-deleted') {
             await this.load(true)
             const next = this.resolveTarget(target)
             if (next.seq !== target.seq) {
               target = next
-              result = await this.deleteOnce(next)
+              result = await this.deleteOnce(next, force)
             }
           }
           if (!result.ok) {
-            this.publish({ pending: false, failure: result.code })
+            const foreignCount = result.details && typeof result.details.foreign === 'number' ? result.details.foreign : 0
+            this.publish({ pending: false, failure: result.code, foreignCount })
             return { failure: result.code }
           }
           const data = result.data
@@ -4068,15 +6720,19 @@ window.__ModuleLoader__.load({
         return seq === target.seq ? target : { ...target, seq }
       }
 
-      async deleteOnce(target) {
+      async deleteOnce(target, force) {
         const res = await fetch(`${ROUTE_PREFIX}/delete`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ sessionId: this.sessionId, ...target }),
+          body: JSON.stringify({ sessionId: this.sessionId, ...target, ...(force === true ? { force: true } : {}) }),
         })
         const data = await res.json().catch(() => ({}))
         if (res.ok && data.ok) return { ok: true, data }
-        return { ok: false, code: data && data.code ? String(data.code) : 'generic' }
+        return {
+          ok: false,
+          code: data && data.code ? String(data.code) : 'generic',
+          details: data && data.details ? data.details : undefined,
+        }
       }
 
       dispose() {
@@ -4511,11 +7167,38 @@ window.__ModuleLoader__.load({
       return Boolean(closing && closing.finalNode && closing.finalNode.messageId !== undefined)
     }
 
+    // Node kinds that carry visible conversation content, and the turn-level
+    // disclosure rows that must go with them. A failure card ("处理失败"), a
+    // process disclosure ("已思考", "用时 N 秒"), a retry notice or a turn tail is
+    // drawn from the TURN, not from a surface node, so shadowing the nodes a
+    // delete aimed at leaves it behind - a deleted failed turn keeps an orphaned
+    // card. A turn is gone once none of its content rows is visible, and its
+    // disclosure rows leave with it.
+    const CONTENT_KINDS = new Set(['user', 'context', 'steering', 'tool-call', 'assistant-step'])
+    const DISCLOSURE_KINDS = new Set(['turn-error', 'model-retry', 'turn-tail', 'turn-process'])
+
     function applyDom(snapshot, view, controller, t) {
       if (!snapshot || !snapshot.nodes || typeof snapshot.nodes.get !== 'function') return
       const animate = controller.consumeAnimate()
       const rows = document.querySelectorAll('[data-chat-flow-key]')
       let maxSeq = -1
+
+      // Turns that still have a visible content row. Computed from the ledger
+      // (not from DOM heights) so it is stable across the pass.
+      const contentTurns = new Set()
+      for (const row of rows) {
+        const key = row.getAttribute('data-chat-flow-key')
+        if (!key) continue
+        const node = snapshot.nodes.get(key)
+        if (!node || !CONTENT_KINDS.has(node.kind)) continue
+        const turn = row.getAttribute('data-chat-turn')
+        if (turn === null || turn === '') continue
+        if (row.dataset.dshdtHidden === '1' || foreignHideOn(row, 'dshdt')) continue
+        const seqs = expandSeqs(seqsFor(node), view.edits)
+        if (isRowHidden(view.hidden, view.hiddenVia, seqs)) continue
+        contentTurns.add(turn)
+      }
+
       for (const row of rows) {
         if (!(row instanceof HTMLElement)) continue
         const key = row.getAttribute('data-chat-flow-key')
@@ -4545,7 +7228,10 @@ window.__ModuleLoader__.load({
         }
         const seqs = expandSeqs(seqsFor(node), view.edits)
         for (const seq of seqs) if (typeof seq === 'number' && seq > maxSeq) maxSeq = seq
-        const hidden = isRowHidden(view.hidden, view.hiddenVia, seqs)
+        // A disclosure row follows its turn: with no visible content row left,
+        // it is an orphan and leaves too.
+        const orphaned = DISCLOSURE_KINDS.has(node.kind) && turn !== null && turn !== '' && !contentTurns.has(turn)
+        const hidden = orphaned || isRowHidden(view.hidden, view.hiddenVia, seqs)
         setRowHidden(row, hidden, animate)
         const target = hidden ? null : liveTarget(targetFor(node), view.edits)
         const covered = target !== null || slotCoversRow(node)
@@ -4579,40 +7265,65 @@ window.__ModuleLoader__.load({
       updateTurnNavigation()
     }
 
-    // The host's turn-navigation rail lists loaded turns by number. A turn
-    // whose rows are all gone (deleted by us, or collapsed by the host itself)
-    // must not keep a jump mark, or an emptied transcript still shows a rail of
-    // entries pointing at nothing. Turns without any loaded row are left alone:
-    // an unmounted window is not an empty one.
-    function updateTurnNavigation() {
-      const marks = document.querySelectorAll('nav button[data-index]')
-      if (marks.length === 0) return
+    /** The turn a rail mark addresses: its label carries the real turn number. */
+    function turnOfRailMark(mark) {
+      const label = mark.getAttribute('aria-label') || mark.getAttribute('title') || ''
+      const match = /(\d+)/.exec(label)
+      return match === null ? null : Number(match[1])
+    }
+
+    /**
+     * Every turn with a row in the DOM, mapped to whether any row is visible. A
+     * turn with no row at all is absent: not empty, just not loaded.
+     */
+    function turnRowVisibility() {
       const seen = new Map()
       for (const row of document.querySelectorAll('[data-chat-flow-key][data-chat-turn]')) {
-        const turn = row.getAttribute('data-chat-turn')
-        if (turn === null || turn === '') continue
-        // A row another component declared hidden is not visible content either.
-        const visible =
-          row.dataset.dshdtHidden !== '1' && !foreignHideOn(row, 'dshdt') && row.getBoundingClientRect().height > 0
-        if (seen.get(turn) !== true) seen.set(turn, visible)
+        const turn = Number(row.getAttribute('data-chat-turn'))
+        if (!Number.isInteger(turn)) continue
+        const hidden =
+          row.dataset.dshdtHidden === '1' ||
+          foreignHideOn(row, 'dshdt') ||
+          (row.style !== undefined && row.style !== null && row.style.display === 'none') ||
+          (typeof row.getBoundingClientRect === 'function' && row.getBoundingClientRect().height === 0)
+        if (seen.get(turn) !== true) seen.set(turn, hidden !== true)
       }
-      let visibleMarks = 0
-      for (const mark of marks) {
-        const label = mark.getAttribute('aria-label') || ''
-        const turn = (label.match(/\d+/) || [])[0]
-        const state = turn === undefined ? undefined : seen.get(turn)
-        const hasContent = state === undefined ? true : state
-        if (hasContent) {
+      return seen
+    }
+
+    /**
+     * The official rail keeps one mark per turn of the session, including the
+     * turns whose rows are gone, so deleting a turn left a mark pointing at
+     * nothing and an empty slot. Drop the marks of turns with no visible row and
+     * re-space the rest inside the host's own ladder, centred; a turn that is
+     * merely not loaded keeps its mark. The container keeps the host's height:
+     * that height is what the host's virtualisation measures, so shrinking it
+     * unmounts the marks past the new window.
+     */
+    function updateTurnNavigation() {
+      const rows = turnRowVisibility()
+      const hiddenTurns = []
+      for (const [turn, visible] of rows) if (visible !== true) hiddenTurns.push(turn)
+      for (const nav of document.querySelectorAll('nav')) {
+        const marks = [...nav.querySelectorAll('button[data-index]')]
+        if (marks.length === 0) continue
+        const container = marks[0].parentElement
+        if (container === null || container === undefined) continue
+        const observed = Math.round((Number.parseFloat(container.style.height) - 2) / 10)
+        const total = Math.max(Number.isFinite(observed) && observed > 0 ? observed : 0, marks.length)
+        const kept = total - hiddenTurns.filter((turn) => turn <= total).length
+        const offset = kept > 0 && kept < total ? Math.floor((total - kept) / 2) : 0
+        for (const mark of marks) {
+          const turn = turnOfRailMark(mark)
+          if (turn === null) continue
+          if (hiddenTurns.includes(turn)) {
+            mark.dataset.dshdtHidden = '1'
+            continue
+          }
           delete mark.dataset.dshdtHidden
-          visibleMarks += 1
-        } else {
-          mark.dataset.dshdtHidden = '1'
+          const before = hiddenTurns.filter((hidden) => hidden < turn).length
+          mark.style.transform = `translate3d(0px, ${(turn - 1 - before + offset) * 10 + 1}px, 0px)`
         }
-      }
-      const nav = marks[0].closest('nav')
-      if (nav !== null) {
-        if (visibleMarks === 0) nav.dataset.dshdtHidden = '1'
-        else delete nav.dataset.dshdtHidden
       }
     }
 
@@ -4636,6 +7347,10 @@ window.__ModuleLoader__.load({
       const target = view.dialog
       const mode = target && typeof target.mode === 'string' ? target.mode : 'message'
       const failure = view.failure
+      // The one refusal that is a question rather than a dead end: the window
+      // also swallows N unrelated nodes. The button becomes an explicit
+      // "delete them too", and confirming re-submits with `force`.
+      const forced = failure === 'range-not-clean'
       return jsx(primitives.Modal, {
         open: target !== null,
         title: t(`dialog.title.${mode}`),
@@ -4655,8 +7370,14 @@ window.__ModuleLoader__.load({
               size: 'md',
               className: 'dshdt-danger',
               disabled: view.pending,
-              onClick: () => controller.confirm(),
-              children: view.pending ? t('dialog.pending') : failure ? t('dialog.retry') : t('dialog.confirm'),
+              onClick: () => controller.confirm(forced ? { force: true } : undefined),
+              children: view.pending
+                ? t('dialog.pending')
+                : forced
+                  ? t('dialog.confirmExtra')
+                  : failure
+                    ? t('dialog.retry')
+                    : t('dialog.confirm'),
             }),
           ],
         }),
@@ -4664,7 +7385,14 @@ window.__ModuleLoader__.load({
           children: [
             jsx('p', { className: 'dshdt-dialog-text', children: t(`dialog.desc.${mode}`) }),
             jsx('p', { className: 'dshdt-dialog-note', children: t('dialog.note') }),
-            failure === null
+            view.busy ? jsx('p', { className: 'dshdt-dialog-warn', children: t('dialog.busyWarning') }) : null,
+            forced
+              ? jsx('p', {
+                  className: 'dshdt-dialog-warn',
+                  children: t('dialog.extraWarning') + (view.foreignCount > 0 ? ' ×' + String(view.foreignCount) : ''),
+                })
+              : null,
+            failure === null || forced
               ? null
               : jsx('p', { className: 'dshdt-dialog-error', role: 'status', children: t(`error.${failure}`) }),
           ],
@@ -4822,7 +7550,7 @@ window.__ModuleLoader__.load({
     const NS = 'dsh-markdown-bubble'
 
     /** Keep in sync with package.json and src/index.js. */
-    const PLUGIN_VERSION = '0.1.4'
+    const PLUGIN_VERSION = '0.1.5'
 
     /** Presence marker the live verifier reads. */
     const DEBUG_KEY = '__DSH_MARKDOWN_BUBBLE__'
@@ -4962,7 +7690,27 @@ window.__ModuleLoader__.load({
      * @param text - raw logged message text.
      * @returns markdown source for the renderer.
      */
+    // Prepared markdown source, keyed by the raw text. A bubble repaints on
+    // every transcript update (a streaming turn re-renders constantly) and the
+    // preparation is a split/join plus a regex per line, so the same message was
+    // re-walked dozens of times while an unrelated row streamed. Cleared whole
+    // when it grows past the cap: the entries are strings, and a long transcript
+    // has far fewer distinct message texts than it has repaints.
+    const markdownSourceCache = new Map()
+    const MARKDOWN_CACHE_LIMIT = 64
+
     function toMarkdown(text) {
+      const key = typeof text === 'string' ? text : ''
+      const cached = markdownSourceCache.get(key)
+      if (cached !== undefined) return cached
+      const source = prepareMarkdown(key)
+      if (markdownSourceCache.size >= MARKDOWN_CACHE_LIMIT) markdownSourceCache.clear()
+      markdownSourceCache.set(key, source)
+      return source
+    }
+
+    /** The uncached preparation: CRLF, session wire links, soft breaks. */
+    function prepareMarkdown(text) {
       const normalized = text.replace(/\r\n?/gu, '\n')
       return walkOutsideFences(normalized, (line, next) => hardBreakLine(line.replace(SESSION_WIRE_RE, '$1'), next))
     }
@@ -5040,12 +7788,24 @@ window.__ModuleLoader__.load({
      * @param text - the message text.
      * @param referenceLabels - session recall labels.
      * @param skillNames - skill names.
-     * @param references - file/skill open callbacks.
+     * @param renderFactorySlot - the seat's Factory binding (chips + plain runs).
      * @returns the degraded body, never null and never a throw.
      */
-    function degradedBody(text, referenceLabels, skillNames, references) {
+    function degradedBody(text, referenceLabels, skillNames, renderFactorySlot) {
       try {
-        return primitives.projectUserText(text, referenceLabels, skillNames, 'skill', references)
+        if (typeof renderFactorySlot !== 'function') throw new Error('the seat handed over no renderFactorySlot')
+        // The projection moved into the host's own Factory in 0.2.1-rc.2
+        // (`conversation.user.text`, registered by dsh-client-ui-conversation;
+        // it owns the keyed child slot that renders a reference chip). The old
+        // public primitive `primitives.projectUserText` was REMOVED in the same
+        // release, which is why this call used to throw and chips degraded to
+        // plain text.
+        return renderFactorySlot('conversation.user.text', {
+          text,
+          facts: { sessionLabels: referenceLabels, skillNames },
+          interactive: true,
+          ellipsis: false,
+        })
       } catch (error) {
         warnOnce('the host user-text projection failed; showing raw text', error)
         return h('span', { className: 'dshmb-plain' }, text)
@@ -5069,13 +7829,12 @@ window.__ModuleLoader__.load({
      * @param t - the injected chat translator.
      * @param referenceLabels - session recall labels.
      * @param skillNames - skill names.
-     * @param references - file/skill open callbacks.
+     * @param renderFactorySlot - the seat's Factory binding.
      * @returns the composed body, or null when markdown cannot be produced.
      */
-    function safeMarkdownBody(text, t, referenceLabels, skillNames, references) {
+    function safeMarkdownBody(text, t, referenceLabels, skillNames, renderFactorySlot, labels) {
       try {
-        const labels = buildMarkdownLabels(t)
-        return composeUserMarkdown(text, labels, referenceLabels, skillNames, references)
+        return composeUserMarkdown(text, labels, referenceLabels, skillNames, renderFactorySlot)
       } catch (error) {
         warnOnce('markdown composition failed; showing the degraded projection', error)
         return null
@@ -5114,14 +7873,14 @@ window.__ModuleLoader__.load({
      * @param labels - markdown chrome labels.
      * @param referenceLabels - session recall labels the host associates with the message.
      * @param skillNames - skill names the host loaded for the message.
-     * @param references - file/skill open callbacks for clickable chips.
+     * @param renderFactorySlot - the seat's Factory binding.
      * @returns the composed body, or null for empty text.
      */
-    function composeUserMarkdown(text, labels, referenceLabels, skillNames, references) {
+    function composeUserMarkdown(text, labels, referenceLabels, skillNames, renderFactorySlot) {
       if (typeof text !== 'string' || text === '') return null
       // The same single degraded projection, so a projection that throws inside
       // composition degrades exactly as one that throws on the healthy path.
-      const projected = degradedBody(text, referenceLabels, skillNames, references)
+      const projected = degradedBody(text, referenceLabels, skillNames, renderFactorySlot)
       const pieces =
         react.isValidElement(projected) && projected.type === Fragment && Array.isArray(projected.props.children)
           ? projected.props.children
@@ -5298,7 +8057,12 @@ window.__ModuleLoader__.load({
       }
 
       render() {
-        return this.state.failed ? this.props.fallback : this.props.children
+        if (!this.state.failed) return this.props.children
+        const { fallback } = this.props
+        // A thunk is called only when it is actually needed: building the
+        // degraded projection on every healthy render is wasted work (and, on a
+        // host whose projection is gone, a caught throw every time).
+        return typeof fallback === 'function' ? fallback() : fallback
       }
     }
 
@@ -5388,9 +8152,24 @@ window.__ModuleLoader__.load({
       }
     }
 
-    function renderAttachmentEntry({ attachment, renderMessageImages, compactImages }) {
+    function renderAttachmentEntry({ attachment, renderFactorySlot, loadImage, compactImages }) {
       if (attachment.type === 'image') {
-        return h(Fragment, null, renderMessageImages({ images: [attachment.image], align: 'end', compact: compactImages }))
+        // The host's image gallery, through the SAME Factory seam as the text
+        // projection. The three routes that look obvious are all closed on
+        // 0.2.1-rc.2: the `renderMessageImages` seat prop is gone, the child
+        // slot `conversation.chat.user.images` cannot be declared by a plugin
+        // ("already declared (by factory conversation.chat.user.content)",
+        // verified live), and `@deepseek-ai/dsh-client-ui-attachment` exports
+        // only apply/inject. The gallery Factory is the one that works: the
+        // attachment plugin registers `conversation.images.content` at root
+        // scope and its own `MessageImages` is nothing but a call to it.
+        if (typeof renderFactorySlot !== 'function') throw new Error('the seat handed over no renderFactorySlot')
+        return h(Fragment, null, renderFactorySlot('conversation.images.content', {
+          images: [attachment.image],
+          loadImage,
+          align: 'end',
+          compact: compactImages,
+        }))
       }
       const file = attachment.file ?? {}
       const name = typeof file.name === 'string' ? file.name : ''
@@ -5441,23 +8220,31 @@ window.__ModuleLoader__.load({
     function renderMarkdownBubble(props) {
       const safeProps = props !== null && typeof props === 'object' ? props : {}
       const node = safeProps.node !== null && typeof safeProps.node === 'object' ? safeProps.node : {}
-      const renderMessageImages = safeProps.renderMessageImages
-      const openFile = safeProps.openFile
-      const openSkill = safeProps.openSkill
+      // The seat's props on 0.2.1-rc.2: the two renderer bindings and the image
+      // loader. The old `renderMessageImages` / `openFile` / `openSkill` pair is
+      // gone; images now go through the declared child slot and reference chips
+      // through the `conversation.user.text` Factory.
+      const renderFactorySlot = safeProps.renderFactorySlot
+      const renderSlot = safeProps.renderSlot
+      const loadImage = safeProps.loadImage
       const t = safeProps.t
       const data = node.data !== null && typeof node.data === 'object' ? node.data : {}
       const { text, attachments, rest } = contentParts(Array.isArray(data.content) ? data.content : [])
       const referenceLabels = Array.isArray(data.referenceLabels) ? data.referenceLabels : []
       const skillNames = Array.isArray(data.skillNames) ? data.skillNames : []
-      const references = react.useMemo(() => ({ openFile, openSkill }), [openFile, openSkill])
       const compactImages = attachments.length > 1
       const showBubble = text !== '' || rest.length > 0
+      // The host memoizes its own label object before handing it to MarkdownText
+      // (`ReasoningContent` does exactly this); a fresh object every render
+      // defeats that memoization and re-renders the whole markdown tree.
+      const labels = react.useMemo(() => buildMarkdownLabels(t), [t])
 
       // Never let composition throw out of this render — see safeMarkdownBody.
-      // One degraded body per render, shared by the composition guard and the
-      // boundary's own fallback; the last-resort net calls it too.
-      const body = safeMarkdownBody(text, t, referenceLabels, skillNames, references)
-      const degraded = degradedBody(text, referenceLabels, skillNames, references)
+      // ONE degraded body per render: it is the composition guard's projection
+      // and the boundary's fallback, so building it eagerly (as this used to)
+      // ran the projection twice per render and, on 0.2.1-rc.2, threw twice.
+      const body = safeMarkdownBody(text, t, referenceLabels, skillNames, renderFactorySlot, labels)
+      const degraded = () => degradedBody(text, referenceLabels, skillNames, renderFactorySlot)
 
       // The action strip leads the row in DOM order and is pushed below the
       // bubble by flex `order`. Sibling plugins pick their bar with
@@ -5481,7 +8268,8 @@ window.__ModuleLoader__.load({
                 h(AttachmentEntry, {
                   key: `${attachment.type}:${index}`,
                   attachment,
-                  renderMessageImages,
+                  renderFactorySlot,
+                  loadImage,
                   compactImages,
                 }),
               ),
@@ -5490,7 +8278,7 @@ window.__ModuleLoader__.load({
             h(
               'div',
               { className: 'dshmb-bubble' },
-              h(MarkdownBoundary, { key: text, fallback: degraded }, body === null ? degraded : body),
+              h(MarkdownBoundary, { key: text, fallback: degraded }, body === null ? degraded() : body),
               rest.map((block, index) =>
                 h(primitives.JsonBlock, {
                   key: 'rest' + index,
@@ -5535,7 +8323,7 @@ window.__ModuleLoader__.load({
         text,
         Array.isArray(data.referenceLabels) ? data.referenceLabels : [],
         Array.isArray(data.skillNames) ? data.skillNames : [],
-        { openFile: safeProps.openFile, openSkill: safeProps.openSkill },
+        safeProps.renderFactorySlot,
       )
       return h(
         'div',
@@ -5692,7 +8480,7 @@ window.__ModuleLoader__.load({
     const NS = 'dsh-as-aistudio'
 
     /** Keep in sync with package.json and src/components.js. */
-    const PLUGIN_VERSION = '0.2.13'
+    const PLUGIN_VERSION = '0.2.14'
 
     /** Presence marker the live verifier reads. */
     const DEBUG_KEY = '__DSH_AS_AISTUDIO__'

@@ -1,6 +1,6 @@
 // dsh-rerun-turn browser half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-rerun-turn/lib/client.js  (v0.1.27, sha256 1db55a5a2a12ac66)
+// Source: ../dsh-rerun-turn/lib/client.js  (v0.2.3, sha256 b0b1d718c3c30c10)
 // Regenerate with `npm run vendor`; test/vendor-sync.test.js fails when this is stale.
 //
 // The component registers its factory with the host module loader; inside this
@@ -14,22 +14,25 @@ export default (require) => {
     const react = require('react')
     const jsxRuntime = require('react/jsx-runtime')
     const { jsx, jsxs, Fragment } = jsxRuntime
+    const primitives = require('@deepseek-ai/dsh-client-ui-primitives')
 
     const NS = 'dsh-rerun-turn'
     const ROUTE_PREFIX = '/dsh-rerun-turn'
 
     /** Keep in sync with package.json and lib/index.js. */
-    const PLUGIN_VERSION = '0.1.27'
+    const PLUGIN_VERSION = '0.2.3'
 
     // --- copy -----------------------------------------------------------------
 
     const zh = {
       'action.rerun': '重跑这一轮',
       'confirm.title': '重跑这一轮？',
-      'confirm.body': '这条回答连同它之后的内容会先从模型上下文移除，再用原提示词重新生成；之后的轮次会原样重放。后续调用将读到 A B C1 D E F G。',
+      'confirm.body': '这条回答连同它之后的内容会先从模型上下文移除，再用原提示词重新生成；之后的轮次会原样重放。',
+      'confirm.note': '重跑只影响模型后续看到的内容，不会改写历史日志。',
       'confirm.yes': '重跑',
       'confirm.no': '取消',
       'notice.deferred': '重跑已中断：后续轮次的回放将在会话空闲时自动完成。',
+      'notice.dismiss': '关闭这条提示',
       'notice.loadError': '状态加载失败，稍后重试。',
       'error.invalid': '请求无效，请刷新后重试。',
       'error.session-not-active': '这个会话当前未激活，请先打开该会话再重跑。',
@@ -47,16 +50,28 @@ export default (require) => {
       'error.method': '请求方式不被接受，请刷新后重试。',
       'error.generic': '重跑失败，请重试。',
       'error.internal': '服务器内部错误，请稍后重试。',
+      'config.ask': '重跑时询问',
+      'config.hint.ask': '每次重跑前都会先弹出确认，说明这一轮会怎么重放。',
+      'config.hint.auto': '点一下就直接重跑，不再询问。',
+      'config.summary.ask': '重跑前询问',
+      'config.summary.auto': '直接重跑',
     }
 
     const en = {
       'action.rerun': 'Rerun this turn',
       'confirm.title': 'Rerun this turn?',
-      'confirm.body': "The reply and everything after it leave the model context first; the turn's own prompt is sent again, and the later turns are replayed verbatim. The next call will read A B C1 D E F G.",
+      'confirm.body': "The reply and everything after it leave the model context first; the turn's own prompt is sent again, and the later turns are replayed verbatim.",
+      'confirm.note': 'A rerun only changes what the model reads next; the session log is never rewritten.',
       'confirm.yes': 'Rerun',
       'confirm.no': 'Cancel',
       'notice.deferred': 'Rerun interrupted: the replay of the later turns will resume automatically once the session is idle.',
+      'notice.dismiss': 'Dismiss this notice',
       'notice.loadError': 'Loading the state failed; try again shortly.',
+      'config.ask': 'Ask before rerunning',
+      'config.hint.ask': 'Show the confirmation step before every rerun.',
+      'config.hint.auto': 'Rerun right away without asking.',
+      'config.summary.ask': 'Ask before rerunning',
+      'config.summary.auto': 'Rerun without asking',
       'error.invalid': 'Invalid request; refresh and try again.',
       'error.session-not-active': 'This session is not open in DSH; open it first.',
       'error.session-not-found': 'No session log was found for this id.',
@@ -83,6 +98,76 @@ export default (require) => {
       return t(typeof code === 'string' && ERROR_KEYS.has(`error.${code}`) ? `error.${code}` : 'error.generic')
     }
 
+    // A notice derived from live progress is dismissed per phase, rerun and
+    // text: the same interruption stays closed, while a new one still shows.
+    function progressKeyOf(progress) {
+      if (progress === null || typeof progress !== 'object') return null
+      const phase = typeof progress.phase === 'string' ? progress.phase : ''
+      const rerunId = typeof progress.rerunId === 'string' ? progress.rerunId : ''
+      const error = typeof progress.error === 'string' ? progress.error : ''
+      const promptError = typeof progress.promptError === 'string' ? progress.promptError : ''
+      return `${phase}|${rerunId}|${error}|${promptError}`
+    }
+
+    // --- preferences ----------------------------------------------------------
+
+    // One client-side preference: whether a rerun opens its confirmation step
+    // first. It lives in localStorage - the store the official client plugins
+    // keep their view options in - so it survives reloads with no host
+    // round-trip, and a subscription keeps the settings page and the rerun
+    // action on one value. Nothing stored means "follow the host config".
+    const PREFS_KEY = 'dsh-rerun-turn:prefs'
+
+    function readStoredAsk() {
+      try {
+        if (typeof window === 'undefined' || !window.localStorage) return null
+        const raw = window.localStorage.getItem(PREFS_KEY)
+        if (raw === null) return null
+        const parsed = JSON.parse(raw)
+        return parsed && typeof parsed.ask === 'boolean' ? parsed.ask : null
+      } catch {
+        // A missing or malformed entry falls back to the host config rather than
+        // breaking the plugin.
+        return null
+      }
+    }
+
+    let storedAsk = readStoredAsk()
+    let hostConfirm = false
+    const prefListeners = new Set()
+
+    /** @returns the effective setting: the stored choice, else the host config. */
+    function getPrefs() {
+      return { ask: storedAsk === null ? hostConfirm : storedAsk }
+    }
+
+    function setAskBeforeRerun(value) {
+      const ask = value === true
+      if (storedAsk === ask) return
+      storedAsk = ask
+      try {
+        if (typeof window !== 'undefined' && window.localStorage) {
+          window.localStorage.setItem(PREFS_KEY, JSON.stringify({ ask }))
+        }
+      } catch {
+        // Storage that refuses writes (private mode) must not break the toggle.
+      }
+      for (const listener of prefListeners) {
+        try {
+          listener()
+        } catch (error) {
+          console.error('[dsh-rerun-turn] preference subscriber threw:', error)
+        }
+      }
+    }
+
+    function subscribePrefs(listener) {
+      prefListeners.add(listener)
+      return () => {
+        prefListeners.delete(listener)
+      }
+    }
+
     // --- style ----------------------------------------------------------------
 
     // Same policy as the sibling plugins: the plugin paints its own surfaces
@@ -95,8 +180,8 @@ export default (require) => {
       'body[data-ds-dark-theme]{--dsrr-panel:rgba(22,28,44,.96);--dsrr-field:rgba(14,19,33,.98);--dsrr-line:rgba(255,255,255,.18);--dsrr-ink:#eef2f8;--dsrr-ink-dim:#a6b1c6;--dsrr-hover:rgba(255,255,255,.11);--dsrr-shadow:0 12px 32px rgba(0,0,0,.5)}',
       // The rerun icon sits among the platform's own action icons and takes
       // their colour (the fallback is what the default theme resolves to).
-      '.dsrr-action{width:28px;height:28px;padding:6px;display:inline-flex;align-items:center;justify-content:center;border:none;border-radius:28px;background:transparent;color:var(--dsw-alias-label-tertiary,#81858c);cursor:pointer;transition:background-color .12s,color .12s}',
-      '.dsrr-action:hover:not(:disabled){background:var(--dsrr-field);box-shadow:inset 0 0 0 1px var(--dsrr-line);color:var(--dsw-alias-label-primary,var(--dsrr-ink))}',
+      '.dsrr-action{width:28px;height:28px;padding:6px;box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;border:none;border-radius:28px;background:transparent;color:var(--dsw-alias-label-tertiary,#81858c);cursor:pointer;transition:background-color .12s,color .12s}',
+      '.dsrr-action:hover:not(:disabled){background:var(--dsrr-field);color:var(--dsw-alias-label-primary,var(--dsrr-ink))}',
       '.dsrr-action:focus-visible{outline:2px solid var(--dsw-alias-button-primary-fill,var(--dsrr-accent));outline-offset:2px}',
       '.dsrr-action:disabled{cursor:default;opacity:.4}',
       '.dsrr-action svg{width:15px;height:15px}',
@@ -111,11 +196,19 @@ export default (require) => {
       // edge, so its children would spill over the input. The stack lifts
       // itself by its own height, landing fully above the composer.
       '.dsrr-stack{transform:translateY(-100%)}',
-      '.dsrr-notice{margin:4px 0;padding:6px 10px;border:1px solid var(--dsrr-line);border-radius:8px;background:var(--dsrr-panel);backdrop-filter:blur(18px) saturate(1.2);box-shadow:var(--dsrr-shadow);color:var(--dsrr-ink-dim);font-size:12px;line-height:19px}',
+      '.dsrr-notice{display:flex;align-items:flex-start;gap:8px;margin:4px 0;padding:6px 10px;border:1px solid var(--dsrr-line);border-radius:8px;background:var(--dsrr-panel);backdrop-filter:blur(18px) saturate(1.2);box-shadow:var(--dsrr-shadow);color:var(--dsrr-ink-dim);font-size:12px;line-height:19px}',
+      '.dsrr-notice-text{flex:1;min-width:0}',
+      '.dsrr-notice-close{flex:none;width:18px;height:18px;margin:0 -2px 0 0;padding:0;border:none;border-radius:50%;background:transparent;color:inherit;font:inherit;font-size:14px;line-height:18px;cursor:pointer;opacity:.7}',
+      '.dsrr-notice-close:hover{opacity:1;background:var(--dsrr-hover)}',
+      '.dsrr-notice-close:focus-visible{outline:2px solid var(--dsw-alias-button-primary-fill,var(--dsrr-accent));outline-offset:1px}',
       '.dsrr-notice.dsrr-notice-error{color:var(--dsw-alias-state-error-primary,#c93a31)}',
-      '.dsrr-confirm{margin:4px 0;padding:8px 10px;border:1px solid var(--dsrr-line);border-radius:8px;background:var(--dsrr-panel);backdrop-filter:blur(18px) saturate(1.2);box-shadow:var(--dsrr-shadow);color:var(--dsrr-ink);font-size:12px;line-height:19px}',
-      '.dsrr-confirm-title{font-weight:600;margin-bottom:2px}',
-      '.dsrr-confirm-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:6px}',
+      // The confirmation is the platform's own modal (the sibling delete plugin
+      // draws its dialog the same way), so the only copy style here is the body
+      // paragraph - the same 14/22 the platform's dialog text uses.
+      '.dsrr-dialog-text{margin:0;color:var(--dsw-alias-label-primary,var(--dsrr-ink));font-size:14px;line-height:22px}',
+      '.dsrr-dialog-note{margin:10px 0 0;color:var(--dsw-alias-label-tertiary,var(--dsrr-ink-dim));font-size:13px;line-height:20px}',
+      '.dsrr-config{display:flex;flex-direction:column;gap:6px}',
+      '.dsrr-config-hint{margin:0;color:var(--dsrr-ink-dim);font-size:12px;line-height:18px}',
       '.dsrr-btn{padding:4px 12px;border:1px solid var(--dsrr-line);border-radius:999px;background:var(--dsrr-field);color:var(--dsrr-ink);font:inherit;font-size:12px;line-height:18px;cursor:pointer;transition:background-color .12s}',
       '.dsrr-btn:hover{background:var(--dsrr-hover)}',
       '.dsrr-btn:focus-visible{outline:2px solid var(--dsw-alias-button-primary-fill,var(--dsrr-accent));outline-offset:2px}',
@@ -181,11 +274,14 @@ export default (require) => {
           progress: null,
           pending: false,
           failure: null,
+          failureDetail: null,
           notice: null,
           noticeError: false,
+          dismissedKey: null,
           confirming: false,
           loaded: false,
           loadError: false,
+          loadErrorDetail: null,
           confirm: false,
           revision: 0,
         })
@@ -288,6 +384,7 @@ export default (require) => {
                 }
               }
             }
+            hostConfirm = Boolean(data.config && data.config.confirm)
             this.publish({
               hidden,
               replies,
@@ -301,6 +398,7 @@ export default (require) => {
               progress: data.progress || null,
               loaded: true,
               loadError: false,
+              loadErrorDetail: null,
               confirm: Boolean(data.config && data.config.confirm),
             })
             // While a rerun runs in the host, keep asking; one last refresh
@@ -308,8 +406,12 @@ export default (require) => {
             if (rerunning) this.ensurePolling()
             else this.stopPolling()
           })
-          .catch(() => {
-            this.publish({ loadError: true })
+          .catch((error) => {
+            // The host says WHY (`invalid session id`, `no session log for this
+            // id`, a 500, a network failure). Swallowing it left the panel with
+            // "状态加载失败，稍后重试。" for every cause alike - including the
+            // causes a user can act on.
+            this.publish({ loadError: true, loadErrorDetail: error instanceof Error ? error.message : String(error) })
           })
           .finally(() => {
             this.inflight = null
@@ -346,7 +448,10 @@ export default (require) => {
       rerun(entry) {
         if (this.disposed === true) return
         if (this.view.pending) return
-        if (this.view.confirm) {
+        // The settings-page checkbox (stored) wins over the host config; with
+        // asking off the click goes straight to the host, and a failure still
+        // surfaces through the notice path.
+        if (getPrefs().ask === true) {
           this.confirmTarget = entry
           this.publish({ confirming: true, failure: null })
           return
@@ -367,7 +472,11 @@ export default (require) => {
       }
 
       dismissNotice() {
-        this.publish({ notice: null, noticeError: false })
+        // A transient notice (view.notice) is not derived from progress;
+        // closing it must not also dismiss the progress notice underneath.
+        const transient = this.view.notice !== null && this.view.notice !== undefined
+        const key = transient ? this.view.dismissedKey : progressKeyOf(this.view.progress)
+        this.publish({ notice: null, noticeError: false, dismissedKey: key })
       }
 
       async send(entry) {
@@ -387,11 +496,11 @@ export default (require) => {
               // the rerun that just completed, clicked once more before the
               // client refreshed. Not an error: refresh silently and let the
               // stale row disappear.
-              this.publish({ pending: false, failure: null })
+              this.publish({ pending: false, failure: null, failureDetail: null })
               this.load(true)
               return
             }
-            this.publish({ pending: false, failure: code })
+            this.publish({ pending: false, failure: code, failureDetail: typeof data.error === 'string' && data.error !== '' ? data.error : null })
             return
           }
           // Do NOT hide the retired rows here: the rerun's replacement (fresh
@@ -582,7 +691,6 @@ export default (require) => {
       }
       const focus = view.rerunning === true && view.rerunFocus ? view.rerunFocus : null
       const infos = []
-      let hasFresh = false
       for (const row of rows) {
         if (!(row instanceof HTMLElement)) continue
         const key = row.getAttribute('data-chat-flow-key')
@@ -606,11 +714,6 @@ export default (require) => {
           const freshBySeq = info.seqs.some((seq) => seq > focus.carrierSeq)
           const freshByTurn = info.keyTurn !== null && info.keyTurn > focus.turn
           info.fresh = !info.inTarget && !info.inTail && (freshBySeq || freshByTurn)
-          // Only a real answer row proves the replacement is on screen. The
-          // fresh turn's process/tail strips mount the moment the rerun starts,
-          // so counting them would retire the old answer while it is still
-          // generating - leaving a hole where the answer was.
-          if (info.fresh && (info.kind === 'assistant-step' || info.kind === 'tool-call')) hasFresh = true
         }
         infos.push(info)
       }
@@ -649,9 +752,11 @@ export default (require) => {
             } else {
               order = '1'
             }
-          } else if (info.inTarget && info.kind !== 'user' && hasFresh) {
-            // The old answer retires only once its replacement is on screen -
-            // the streaming row occupies the same spot.
+          } else if (info.inTarget && info.kind !== 'user') {
+            // The old answer retires the moment the rerun starts, so the fresh
+            // "thinking" row streams where the answer was instead of below it.
+            // Waiting for an assistant-step row left the old answer on screen
+            // for the whole generation.
             decision = true
           }
         }
@@ -753,6 +858,93 @@ export default (require) => {
           bar.insertBefore(entry.host, next)
         }
       }
+      syncTurnRail(view)
+    }
+
+    // --- turn rail ------------------------------------------------------------
+
+    /** The turn a rail mark addresses: its label carries the real turn number. */
+    function turnOfRailMark(mark) {
+      const label = mark.getAttribute('aria-label') || mark.getAttribute('title') || ''
+      const match = /(\d+)/.exec(label)
+      return match === null ? null : Number(match[1])
+    }
+
+    /**
+     * Every turn that has a row in the DOM, mapped to whether any of its rows is
+     * visible. A turn with no row at all is absent here: it is not empty, just
+     * not loaded, and the rail may still jump to it.
+     */
+    function turnRowVisibility() {
+      const seen = new Map()
+      let rows
+      try {
+        rows = document.querySelectorAll('[data-chat-flow-key][data-chat-turn]')
+      } catch {
+        return seen
+      }
+      for (const row of rows) {
+        const turn = Number(row.getAttribute('data-chat-turn'))
+        if (!Number.isInteger(turn)) continue
+        const style = row.style
+        const hidden =
+          row.dataset.dsrrHidden === '1' ||
+          row.dataset.dshetHidden === '1' ||
+          row.dataset.dshdtHidden === '1' ||
+          (style !== undefined && style !== null && style.display === 'none') ||
+          (typeof row.getBoundingClientRect === 'function' && row.getBoundingClientRect().height === 0)
+        if (seen.get(turn) !== true) seen.set(turn, hidden !== true)
+      }
+      return seen
+    }
+
+    /**
+     * The official rail keeps one mark per turn of the session - including the
+     * turns this plugin retired, whose rows are hidden. So a rerun left marks
+     * for turns the conversation no longer shows, and their slots left a gap.
+     * Drop the marks of turns with no visible row, re-space the rest inside the
+     * host's own ladder and centre them; the container keeps the host's height,
+     * because that height is what the host's virtualisation measures: shrinking
+     * it unmounts the marks past the new window (a ten-turn transcript showed
+     * six marks).
+     */
+    function syncTurnRail(view) {
+      const rows = turnRowVisibility()
+      const hiddenTurns = []
+      for (const [turn, visible] of rows) if (visible !== true) hiddenTurns.push(turn)
+      let navs
+      try {
+        navs = document.querySelectorAll('nav')
+      } catch {
+        return
+      }
+      for (const nav of navs) {
+        let marks
+        try {
+          marks = [...nav.querySelectorAll('button[data-index]')]
+        } catch {
+          continue
+        }
+        if (marks.length === 0) continue
+        const container = marks[0].parentElement
+        if (container === null || container === undefined) continue
+        const observed = Math.round((Number.parseFloat(container.style.height) - 2) / 10)
+        const total = Math.max(Number.isFinite(observed) && observed > 0 ? observed : 0, marks.length)
+        const inRail = hiddenTurns.filter((turn) => turn <= total)
+        const kept = total - inRail.length
+        const offset = kept > 0 && kept < total ? Math.floor((total - kept) / 2) : 0
+        for (const mark of marks) {
+          const turn = turnOfRailMark(mark)
+          if (turn === null) continue
+          if (hiddenTurns.includes(turn)) {
+            mark.style.display = 'none'
+            continue
+          }
+          mark.style.display = ''
+          const before = hiddenTurns.filter((hidden) => hidden < turn).length
+          mark.style.transform = `translate3d(0px, ${(turn - 1 - before + offset) * 10 + 1}px, 0px)`
+        }
+      }
     }
 
     // --- react entries --------------------------------------------------------
@@ -827,6 +1019,27 @@ export default (require) => {
 
     // The overlay: hides retired rows, follows the background rerun, and
     // shows the confirm step plus any failure the host reported.
+    // The plugin's own page in the manager: the row this bundle inserts
+    // (`cordis.patch.yml`, id `dsh-rerun-turn`) gains a configure arrow that
+    // opens this card. Same shape as the sibling plugins' cards.
+    function AskBeforeRerunOption({ view, t }) {
+      const tr = typeof t === 'function' ? t : (key) => key
+      const [ask, setAsk] = react.useState(getPrefs().ask)
+      react.useEffect(() => subscribePrefs(() => setAsk(getPrefs().ask)), [])
+      if (view === 'summary') return tr(ask ? 'config.summary.ask' : 'config.summary.auto')
+      return jsxs('div', {
+        className: 'dsrr-config',
+        children: [
+          jsx(primitives.Checkbox, {
+            checked: ask,
+            label: tr('config.ask'),
+            onChange: (checked) => setAskBeforeRerun(checked),
+          }),
+          jsx('p', { className: 'dsrr-config-hint', children: tr(ask ? 'config.hint.ask' : 'config.hint.auto') }),
+        ],
+      })
+    }
+
     function OverlayEntry({ useChat, useRerunTurn, controller, t }) {
       const snapshot = typeof useChat === 'function' ? useChat((state) => state) : undefined
       const view = useRerunTurn((state) => state)
@@ -871,63 +1084,100 @@ export default (require) => {
       }, [view.rerunning, controller])
 
       const progress = view.progress
+      const progressKey = progressKeyOf(progress)
+      const progressDismissed = progressKey !== null && view.dismissedKey === progressKey
+      // `error` is only meaningful while the rerun is interrupted or failed.
+      // Older hosts merged progress records, so a finished rerun could still
+      // carry the interruption text; trusting the phase keeps that stale text
+      // off the screen even before the host is upgraded.
+      const progressError =
+        progressDismissed !== true && progress !== null && typeof progress === 'object' &&
+        (progress.phase === 'interrupted' || progress.phase === 'failed') &&
+        typeof progress.error === 'string' && progress.error !== ''
+          ? progress.error
+          : ''
+      const progressPromptError =
+        progressDismissed !== true && progress !== null && typeof progress === 'object' && typeof progress.promptError === 'string' && progress.promptError !== ''
+          ? progress.promptError
+          : ''
       const notice =
         view.notice !== null && view.notice !== undefined
           ? { text: view.notice, error: view.noticeError === true }
           : view.loadError === true
-            ? { text: t('notice.loadError'), error: true }
-            : progress && typeof progress.error === 'string' && progress.error !== ''
-              ? { text: `${t('notice.deferred')} (${progress.error})`, error: true }
-              : progress && typeof progress.promptError === 'string' && progress.promptError !== ''
-                ? { text: progress.promptError, error: true }
+            ? {
+                text:
+                  typeof view.loadErrorDetail === 'string' && view.loadErrorDetail !== ''
+                    ? `${t('notice.loadError')} (${view.loadErrorDetail})`
+                    : t('notice.loadError'),
+                error: true,
+              }
+            : progressError !== ''
+              ? { text: `${t('notice.deferred')} (${progressError})`, error: true }
+              : progressPromptError !== ''
+                ? { text: progressPromptError, error: true }
                 : null
 
       return jsxs('div', {
         className: 'dsrr-stack',
         'data-dsrr-overlay': '1',
         children: [
-          view.confirming === true
-            ? jsxs('div', {
-                className: 'dsrr-confirm',
-                role: 'alertdialog',
-                'aria-label': t('confirm.title'),
-                children: [
-                  jsx('div', { className: 'dsrr-confirm-title', children: t('confirm.title') }),
-                  jsx('div', { children: t('confirm.body') }),
-                  jsxs('div', {
-                    className: 'dsrr-confirm-actions',
-                    children: [
-                      jsx('button', {
-                        type: 'button',
-                        className: 'dsrr-btn',
-                        onClick: () => controller.confirmNo(),
-                        children: t('confirm.no'),
-                      }),
-                      jsx('button', {
-                        type: 'button',
-                        className: 'dsrr-btn dsrr-btn-primary',
-                        onClick: () => controller.confirmYes(),
-                        children: t('confirm.yes'),
-                      }),
-                    ],
-                  }),
-                ],
-              })
-            : null,
+          jsx(primitives.Modal, {
+            open: view.confirming === true,
+            title: t('confirm.title'),
+            closeLabel: t('confirm.no'),
+            onClose: () => controller.confirmNo(),
+            footer: jsxs(Fragment, {
+              children: [
+                jsx(primitives.Button, {
+                  variant: 'ghost',
+                  size: 'md',
+                  onClick: () => controller.confirmNo(),
+                  children: t('confirm.no'),
+                }),
+                jsx(primitives.Button, {
+                  variant: 'primary',
+                  size: 'md',
+                  onClick: () => controller.confirmYes(),
+                  children: t('confirm.yes'),
+                }),
+              ],
+            }),
+            children: jsxs(Fragment, {
+              children: [
+                jsx('p', { className: 'dsrr-dialog-text', children: t('confirm.body') }),
+                jsx('p', { className: 'dsrr-dialog-note', children: t('confirm.note') }),
+              ],
+            }),
+          }),
           view.failure !== null && view.failure !== undefined
             ? jsx('div', {
                 className: 'dsrr-notice dsrr-notice-error',
                 role: 'status',
-                onClick: () => controller.publish({ failure: null }),
-                children: errorText(t, view.failure),
+                onClick: () => controller.publish({ failure: null, failureDetail: null }),
+                children: (view.failure === 'internal' || view.failure === 'generic') && typeof view.failureDetail === 'string' && view.failureDetail !== ''
+                  ? `${errorText(t, view.failure)}（${view.failureDetail.slice(0, 300)}）`
+                  : errorText(t, view.failure),
               })
             : null,
           notice !== null
-            ? jsx('div', {
+            ? jsxs('div', {
                 className: notice.error ? 'dsrr-notice dsrr-notice-error' : 'dsrr-notice',
                 role: 'status',
                 onClick: () => controller.dismissNotice(),
-                children: notice.text,
+                children: [
+                  jsx('span', { className: 'dsrr-notice-text', children: notice.text }),
+                  jsx('button', {
+                    type: 'button',
+                    className: 'dsrr-notice-close',
+                    'aria-label': t('notice.dismiss'),
+                    title: t('notice.dismiss'),
+                    onClick: (event) => {
+                      event.stopPropagation()
+                      controller.dismissNotice()
+                    },
+                    children: '×',
+                  }),
+                ],
               })
             : null,
         ],
@@ -1003,6 +1253,20 @@ export default (require) => {
             inject: (sessionId) => ({ hooks: { rerunTurn: controllerFor(sessionId) }, controller: controllerFor(sessionId) }),
           },
           OverlayEntry,
+        ),
+      )
+
+      // The plugin's own page in the manager. The key is the manager's
+      // `<bundle package>#<row id>` contract (the row this bundle inserts in
+      // cordis.patch.yml), exactly as the sibling plugins declare it.
+      ctx.slots.inject('plugins.row.config', () =>
+        ctx.slots.register(
+          {
+            name: 'plugins.row.config',
+            key: 'dsh-rerun-turn#dsh-rerun-turn',
+            locale: NS,
+          },
+          AskBeforeRerunOption,
         ),
       )
     }

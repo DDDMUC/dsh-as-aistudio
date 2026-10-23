@@ -1,6 +1,6 @@
 // dsh-delete-turn browser half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-delete-turn/src/client.js  (v0.1.11, sha256 7d14658143d66eb2)
+// Source: ../dsh-delete-turn/src/client.js  (v0.1.14, sha256 80a1f339356cc03f)
 // Regenerate with `npm run vendor`; test/vendor-sync.test.js fails when this is stale.
 //
 // The component registers its factory with the host module loader; inside this
@@ -96,6 +96,9 @@ export default (require) => {
       'dialog.desc.step': '这一步的回复与它请求的工具结果将一并从模型上下文中移除，同一回合的其它步骤保留。',
       'dialog.desc.reply': '这条回复连同它的思考、工具调用与注入上下文将从模型上下文中移除，你的提问会保留。',
       'dialog.note': '删除只影响模型后续看到的内容，不会改写历史日志。',
+      'dialog.busyWarning': '当前回复正在生成；删除会先停止它，再继续。',
+      'dialog.extraWarning': '这段范围里还夹着别的内容；确认后会一并移除。',
+      'dialog.confirmExtra': '一并删除',
       'dialog.cancel': '取消',
       'dialog.confirm': '删除',
       'dialog.pending': '删除中…',
@@ -108,7 +111,8 @@ export default (require) => {
       'error.invalid': '请求无效，请刷新后重试。',
       'error.session-not-active': '这个会话当前未激活，请先打开该会话再删除。',
       'error.session-not-found': '找不到该会话的日志。',
-      'error.busy': '该会话正在进行中，请等回复结束后再删除。',
+      'error.busy': '该会话正在进行中，且当前无法自动停止（可能正在压缩），请稍后重试。',
+      'error.stop-timeout': '已请求停止当前生成，但该回合没有及时停下；请稍后再试。',
       'error.already-deleted': '这条内容已经从上下文中删除了。',
       'error.not-deletable': '这个位置不支持删除。',
       'error.range-not-clean': '目标区间包含其它内容，已取消删除。',
@@ -132,6 +136,9 @@ export default (require) => {
       'dialog.desc.step': 'This step and the tool results it requested leave the model context together; other steps in the same turn stay.',
       'dialog.desc.reply': 'This reply leaves the model context together with its reasoning, tool calls and injected context; your prompt stays.',
       'dialog.note': 'Deletion only changes what the model sees next; the append-only log is never rewritten.',
+      'dialog.busyWarning': 'A reply is still generating; deleting will stop it first.',
+      'dialog.extraWarning': 'This range also covers other content; confirming removes it as well.',
+      'dialog.confirmExtra': 'Delete all of it',
       'dialog.cancel': 'Cancel',
       'dialog.confirm': 'Delete',
       'dialog.pending': 'Deleting...',
@@ -144,7 +151,8 @@ export default (require) => {
       'error.invalid': 'Invalid request; refresh and try again.',
       'error.session-not-active': 'This session is not open in DSH; open it first.',
       'error.session-not-found': 'No session log was found for this id.',
-      'error.busy': 'This session is still working; wait for the reply to finish.',
+      'error.busy': 'This session is working and cannot be stopped right now (a compaction may be running); try again in a moment.',
+      'error.stop-timeout': 'The running turn did not stop in time; try again in a moment.',
       'error.already-deleted': 'This content is already removed from the context.',
       'error.not-deletable': 'This position cannot be deleted.',
       'error.range-not-clean': 'The target window contains unrelated content; the delete was cancelled.',
@@ -184,6 +192,7 @@ export default (require) => {
       '[data-dshdt-no-target="1"] .dshdt-action{display:none!important}',
       '.dshdt-dialog-text{margin:0;color:var(--dsw-alias-label-primary,inherit);font-size:14px;line-height:22px}',
       '.dshdt-dialog-note{margin:10px 0 0;color:var(--dsw-alias-label-tertiary,#8a8f98);font-size:13px;line-height:20px}',
+      '.dshdt-dialog-warn{margin:10px 0 0;color:var(--dsw-alias-state-warn-primary,#a15c00);font-size:13px;line-height:20px}',
       '.dshdt-dialog-error{margin:10px 0 0;color:var(--dsw-alias-state-error-primary,#d54941);font-size:13px;line-height:20px}',
       '.dshdt-config{display:flex;flex-direction:column;gap:8px}',
       '.dshdt-config-hint{margin:0;color:var(--dsw-alias-label-tertiary,#8a8f98);font-size:13px;line-height:20px}',
@@ -269,11 +278,17 @@ export default (require) => {
           markerTurns: new Set(),
           surfaceReady: false,
           surfaceThrough: -1,
+          // The host reports a running turn (or a compaction) so the dialog can
+          // say that a delete will stop the generation first.
+          busy: false,
           loaded: false,
           loadError: false,
           dialog: null,
           pending: false,
           failure: null,
+          // How many unrelated nodes the last attempt reported it would also
+          // remove (the forced-confirmation prompt).
+          foreignCount: 0,
           revision: 0,
         })
       }
@@ -343,7 +358,7 @@ export default (require) => {
               if (typeof turn === 'number') markerTurns.add(turn)
             }
             const surfaceThrough = typeof data.lastSeq === 'number' ? data.lastSeq : -1
-            this.publish({ hidden, hiddenVia, surface, turnSeqs, replyTurns, edits, markerTurns, surfaceReady: true, surfaceThrough, loaded: true, loadError: false })
+            this.publish({ hidden, hiddenVia, surface, turnSeqs, replyTurns, edits, markerTurns, busy: data.busy === true, surfaceReady: true, surfaceThrough, loaded: true, loadError: false })
           })
           .catch(() => {
             this.publish({ loadError: true })
@@ -362,11 +377,14 @@ export default (require) => {
 
       close() {
         if (this.view.pending) return
-        this.publish({ dialog: null, failure: null })
+        this.publish({ dialog: null, failure: null, foreignCount: 0 })
       }
 
-      async confirm() {
-        await this.perform(this.view.dialog)
+      // `force` re-submits after the "the window also swallows N unrelated
+      // nodes" report, which is the only refusal the dialog turns into a second
+      // question instead of a dead end.
+      async confirm(options) {
+        await this.perform(this.view.dialog, { force: options && options.force === true })
       }
 
       // The entry every action uses. With "ask" on, it opens the confirmation
@@ -383,9 +401,10 @@ export default (require) => {
         if (result.failure !== null) this.publish({ dialog: target, pending: false, failure: result.failure })
       }
 
-      async perform(requested) {
+      async perform(requested, options) {
         if (requested === null || this.view.pending) return { failure: null }
-        this.publish({ pending: true, failure: null })
+        const force = options !== undefined && options.force === true
+        this.publish({ pending: true, failure: null, foreignCount: 0 })
         try {
           // The live node can move while the dialog sits open: another producer
           // (dsh-edit-turn) rewrites the message in place, and the replacement
@@ -394,17 +413,18 @@ export default (require) => {
           // first attempt reports content that has already left the context.
           await this.load(true)
           let target = this.resolveTarget(requested)
-          let result = await this.deleteOnce(target)
+          let result = await this.deleteOnce(target, force)
           if (!result.ok && result.code === 'already-deleted') {
             await this.load(true)
             const next = this.resolveTarget(target)
             if (next.seq !== target.seq) {
               target = next
-              result = await this.deleteOnce(next)
+              result = await this.deleteOnce(next, force)
             }
           }
           if (!result.ok) {
-            this.publish({ pending: false, failure: result.code })
+            const foreignCount = result.details && typeof result.details.foreign === 'number' ? result.details.foreign : 0
+            this.publish({ pending: false, failure: result.code, foreignCount })
             return { failure: result.code }
           }
           const data = result.data
@@ -432,15 +452,19 @@ export default (require) => {
         return seq === target.seq ? target : { ...target, seq }
       }
 
-      async deleteOnce(target) {
+      async deleteOnce(target, force) {
         const res = await fetch(`${ROUTE_PREFIX}/delete`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ sessionId: this.sessionId, ...target }),
+          body: JSON.stringify({ sessionId: this.sessionId, ...target, ...(force === true ? { force: true } : {}) }),
         })
         const data = await res.json().catch(() => ({}))
         if (res.ok && data.ok) return { ok: true, data }
-        return { ok: false, code: data && data.code ? String(data.code) : 'generic' }
+        return {
+          ok: false,
+          code: data && data.code ? String(data.code) : 'generic',
+          details: data && data.details ? data.details : undefined,
+        }
       }
 
       dispose() {
@@ -875,11 +899,38 @@ export default (require) => {
       return Boolean(closing && closing.finalNode && closing.finalNode.messageId !== undefined)
     }
 
+    // Node kinds that carry visible conversation content, and the turn-level
+    // disclosure rows that must go with them. A failure card ("处理失败"), a
+    // process disclosure ("已思考", "用时 N 秒"), a retry notice or a turn tail is
+    // drawn from the TURN, not from a surface node, so shadowing the nodes a
+    // delete aimed at leaves it behind - a deleted failed turn keeps an orphaned
+    // card. A turn is gone once none of its content rows is visible, and its
+    // disclosure rows leave with it.
+    const CONTENT_KINDS = new Set(['user', 'context', 'steering', 'tool-call', 'assistant-step'])
+    const DISCLOSURE_KINDS = new Set(['turn-error', 'model-retry', 'turn-tail', 'turn-process'])
+
     function applyDom(snapshot, view, controller, t) {
       if (!snapshot || !snapshot.nodes || typeof snapshot.nodes.get !== 'function') return
       const animate = controller.consumeAnimate()
       const rows = document.querySelectorAll('[data-chat-flow-key]')
       let maxSeq = -1
+
+      // Turns that still have a visible content row. Computed from the ledger
+      // (not from DOM heights) so it is stable across the pass.
+      const contentTurns = new Set()
+      for (const row of rows) {
+        const key = row.getAttribute('data-chat-flow-key')
+        if (!key) continue
+        const node = snapshot.nodes.get(key)
+        if (!node || !CONTENT_KINDS.has(node.kind)) continue
+        const turn = row.getAttribute('data-chat-turn')
+        if (turn === null || turn === '') continue
+        if (row.dataset.dshdtHidden === '1' || foreignHideOn(row, 'dshdt')) continue
+        const seqs = expandSeqs(seqsFor(node), view.edits)
+        if (isRowHidden(view.hidden, view.hiddenVia, seqs)) continue
+        contentTurns.add(turn)
+      }
+
       for (const row of rows) {
         if (!(row instanceof HTMLElement)) continue
         const key = row.getAttribute('data-chat-flow-key')
@@ -909,7 +960,10 @@ export default (require) => {
         }
         const seqs = expandSeqs(seqsFor(node), view.edits)
         for (const seq of seqs) if (typeof seq === 'number' && seq > maxSeq) maxSeq = seq
-        const hidden = isRowHidden(view.hidden, view.hiddenVia, seqs)
+        // A disclosure row follows its turn: with no visible content row left,
+        // it is an orphan and leaves too.
+        const orphaned = DISCLOSURE_KINDS.has(node.kind) && turn !== null && turn !== '' && !contentTurns.has(turn)
+        const hidden = orphaned || isRowHidden(view.hidden, view.hiddenVia, seqs)
         setRowHidden(row, hidden, animate)
         const target = hidden ? null : liveTarget(targetFor(node), view.edits)
         const covered = target !== null || slotCoversRow(node)
@@ -943,40 +997,65 @@ export default (require) => {
       updateTurnNavigation()
     }
 
-    // The host's turn-navigation rail lists loaded turns by number. A turn
-    // whose rows are all gone (deleted by us, or collapsed by the host itself)
-    // must not keep a jump mark, or an emptied transcript still shows a rail of
-    // entries pointing at nothing. Turns without any loaded row are left alone:
-    // an unmounted window is not an empty one.
-    function updateTurnNavigation() {
-      const marks = document.querySelectorAll('nav button[data-index]')
-      if (marks.length === 0) return
+    /** The turn a rail mark addresses: its label carries the real turn number. */
+    function turnOfRailMark(mark) {
+      const label = mark.getAttribute('aria-label') || mark.getAttribute('title') || ''
+      const match = /(\d+)/.exec(label)
+      return match === null ? null : Number(match[1])
+    }
+
+    /**
+     * Every turn with a row in the DOM, mapped to whether any row is visible. A
+     * turn with no row at all is absent: not empty, just not loaded.
+     */
+    function turnRowVisibility() {
       const seen = new Map()
       for (const row of document.querySelectorAll('[data-chat-flow-key][data-chat-turn]')) {
-        const turn = row.getAttribute('data-chat-turn')
-        if (turn === null || turn === '') continue
-        // A row another component declared hidden is not visible content either.
-        const visible =
-          row.dataset.dshdtHidden !== '1' && !foreignHideOn(row, 'dshdt') && row.getBoundingClientRect().height > 0
-        if (seen.get(turn) !== true) seen.set(turn, visible)
+        const turn = Number(row.getAttribute('data-chat-turn'))
+        if (!Number.isInteger(turn)) continue
+        const hidden =
+          row.dataset.dshdtHidden === '1' ||
+          foreignHideOn(row, 'dshdt') ||
+          (row.style !== undefined && row.style !== null && row.style.display === 'none') ||
+          (typeof row.getBoundingClientRect === 'function' && row.getBoundingClientRect().height === 0)
+        if (seen.get(turn) !== true) seen.set(turn, hidden !== true)
       }
-      let visibleMarks = 0
-      for (const mark of marks) {
-        const label = mark.getAttribute('aria-label') || ''
-        const turn = (label.match(/\d+/) || [])[0]
-        const state = turn === undefined ? undefined : seen.get(turn)
-        const hasContent = state === undefined ? true : state
-        if (hasContent) {
+      return seen
+    }
+
+    /**
+     * The official rail keeps one mark per turn of the session, including the
+     * turns whose rows are gone, so deleting a turn left a mark pointing at
+     * nothing and an empty slot. Drop the marks of turns with no visible row and
+     * re-space the rest inside the host's own ladder, centred; a turn that is
+     * merely not loaded keeps its mark. The container keeps the host's height:
+     * that height is what the host's virtualisation measures, so shrinking it
+     * unmounts the marks past the new window.
+     */
+    function updateTurnNavigation() {
+      const rows = turnRowVisibility()
+      const hiddenTurns = []
+      for (const [turn, visible] of rows) if (visible !== true) hiddenTurns.push(turn)
+      for (const nav of document.querySelectorAll('nav')) {
+        const marks = [...nav.querySelectorAll('button[data-index]')]
+        if (marks.length === 0) continue
+        const container = marks[0].parentElement
+        if (container === null || container === undefined) continue
+        const observed = Math.round((Number.parseFloat(container.style.height) - 2) / 10)
+        const total = Math.max(Number.isFinite(observed) && observed > 0 ? observed : 0, marks.length)
+        const kept = total - hiddenTurns.filter((turn) => turn <= total).length
+        const offset = kept > 0 && kept < total ? Math.floor((total - kept) / 2) : 0
+        for (const mark of marks) {
+          const turn = turnOfRailMark(mark)
+          if (turn === null) continue
+          if (hiddenTurns.includes(turn)) {
+            mark.dataset.dshdtHidden = '1'
+            continue
+          }
           delete mark.dataset.dshdtHidden
-          visibleMarks += 1
-        } else {
-          mark.dataset.dshdtHidden = '1'
+          const before = hiddenTurns.filter((hidden) => hidden < turn).length
+          mark.style.transform = `translate3d(0px, ${(turn - 1 - before + offset) * 10 + 1}px, 0px)`
         }
-      }
-      const nav = marks[0].closest('nav')
-      if (nav !== null) {
-        if (visibleMarks === 0) nav.dataset.dshdtHidden = '1'
-        else delete nav.dataset.dshdtHidden
       }
     }
 
@@ -1000,6 +1079,10 @@ export default (require) => {
       const target = view.dialog
       const mode = target && typeof target.mode === 'string' ? target.mode : 'message'
       const failure = view.failure
+      // The one refusal that is a question rather than a dead end: the window
+      // also swallows N unrelated nodes. The button becomes an explicit
+      // "delete them too", and confirming re-submits with `force`.
+      const forced = failure === 'range-not-clean'
       return jsx(primitives.Modal, {
         open: target !== null,
         title: t(`dialog.title.${mode}`),
@@ -1019,8 +1102,14 @@ export default (require) => {
               size: 'md',
               className: 'dshdt-danger',
               disabled: view.pending,
-              onClick: () => controller.confirm(),
-              children: view.pending ? t('dialog.pending') : failure ? t('dialog.retry') : t('dialog.confirm'),
+              onClick: () => controller.confirm(forced ? { force: true } : undefined),
+              children: view.pending
+                ? t('dialog.pending')
+                : forced
+                  ? t('dialog.confirmExtra')
+                  : failure
+                    ? t('dialog.retry')
+                    : t('dialog.confirm'),
             }),
           ],
         }),
@@ -1028,7 +1117,14 @@ export default (require) => {
           children: [
             jsx('p', { className: 'dshdt-dialog-text', children: t(`dialog.desc.${mode}`) }),
             jsx('p', { className: 'dshdt-dialog-note', children: t('dialog.note') }),
-            failure === null
+            view.busy ? jsx('p', { className: 'dshdt-dialog-warn', children: t('dialog.busyWarning') }) : null,
+            forced
+              ? jsx('p', {
+                  className: 'dshdt-dialog-warn',
+                  children: t('dialog.extraWarning') + (view.foreignCount > 0 ? ' ×' + String(view.foreignCount) : ''),
+                })
+              : null,
+            failure === null || forced
               ? null
               : jsx('p', { className: 'dshdt-dialog-error', role: 'status', children: t(`error.${failure}`) }),
           ],
