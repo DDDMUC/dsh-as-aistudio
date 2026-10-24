@@ -1,10 +1,10 @@
-// dsh-rerun-turn host half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
+// dsh-rerun-turn host half (dsh-rerun-turn.js), VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
 // Source: ../dsh-rerun-turn/lib/index.js  (v0.2.4, sha256 1d54e8249f6ff9ef)
 // Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.
 //
-// Copied verbatim: src/shell.js imports this file instead of the component
-// package, which is why the studio has no runtime dependency on it.
+// src/shell.js imports the copy named after the component, which is why the
+// studio installs with no runtime dependency on the component package.
 // dsh-rerun-turn - host half.
 //
 // Loopback-only JSON routes:

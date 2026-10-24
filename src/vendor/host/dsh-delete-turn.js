@@ -1,10 +1,10 @@
-// dsh-delete-turn host half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
+// dsh-delete-turn host half (dsh-delete-turn.js), VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-delete-turn/src/index.js  (v0.1.14, sha256 a73d104017f03d0d)
+// Source: ../dsh-delete-turn/src/index.js  (v0.1.14, sha256 75377700ba2a6436)
 // Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.
 //
-// Copied verbatim: src/shell.js imports this file instead of the component
-// package, which is why the studio has no runtime dependency on it.
+// src/shell.js imports the copy named after the component, which is why the
+// studio installs with no runtime dependency on the component package.
 // dsh-delete-turn - host half.
 //
 // Two loopback-only JSON routes:
@@ -46,7 +46,7 @@ import {
   openTurn,
   planRange,
   turnableSeqs,
-} from './logic.js'
+} from './dsh-delete-turn.logic.js'
 
 export const name = PLUGIN_ID
 

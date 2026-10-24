@@ -46,6 +46,98 @@ function isOnlyComments(prefix) {
     .trim() === ''
 }
 
+/** The two platform packages the components import, and the module each becomes. */
+const PLATFORM = [
+  { spec: '@deepseek-ai/dsh-tools', alias: 'dshTools' },
+  { spec: '@deepseek-ai/dsh-session', alias: 'dshSession' },
+]
+
+/**
+ * One component's host half, made self-contained.
+ *
+ * Copied verbatim except for two mechanical rewrites, both required for the copy
+ * to stand on its own inside this package:
+ *
+ *   1. a platform import becomes an import of `./_platform.js`, which resolves
+ *      the package from the RUNNING harness. A copy of `dsh-session` inside this
+ *      package would be a second module instance, and its `appendPluginRecord`
+ *      cannot touch a Session the host created (its brand check throws);
+ *   2. a relative import (`./logic.js`, `./patch.js`) is copied beside it under a
+ *      component-qualified name, so two components that both ship a `logic.js`
+ *      cannot collide.
+ *
+ * The two import forms the components use are rewritten explicitly, and any
+ * other form is refused rather than guessed at:
+ *
+ *     import { defineTool } from '@deepseek-ai/dsh-tools'
+ *       ->  import { dshTools } from './_platform.js'
+ *           const { defineTool } = dshTools
+ *     import * as sessionApi from '@deepseek-ai/dsh-session'
+ *       ->  import { dshSession as sessionApi } from './_platform.js'
+ *
+ * @param component - the component table entry.
+ * @param hostPath - absolute path of the component's host half.
+ * @returns [{ name, text }] - the entry file first, then what it imports.
+ */
+function vendorHostHalf(component, hostPath) {
+  const dir = dirname(hostPath)
+  const extra = []
+
+  const rewrite = (source, file) => {
+    const destructures = []
+    let out = source.replace(/^\/\/# sourceMappingURL=.*$/gm, '')
+    for (const { spec, alias } of PLATFORM) {
+      const quoted = spec.replace(/[/\\.]/g, (char) => '\\' + char)
+      const namespace = new RegExp("^\\s*import \\* as (\\w+) from '" + quoted + "'", 'm')
+      const named = new RegExp("^\\s*import \\{([^}]+)\\} from '" + quoted + "'", 'm')
+      let match = namespace.exec(out)
+      if (match !== null) {
+        out = out.replace(match[0], "import { " + alias + ' as ' + match[1] + " } from './_platform.js'")
+      }
+      match = named.exec(out)
+      if (match !== null) {
+        out = out.replace(match[0], "import { " + alias + " } from './_platform.js'")
+        destructures.push('const {' + match[1] + '} = ' + alias)
+      }
+      if (new RegExp("from '" + quoted + "'").test(out)) {
+        console.error(component.id + ': ' + file + ' imports ' + spec + ' in a form this vendoring does not rewrite; refusing to guess')
+        process.exit(3)
+      }
+    }
+    // Relative modules: copied beside the entry, renamed per component.
+    out = out.replace(/from '(\.\/[^']+\.js)'/g, (whole, rel) => {
+      if (rel === './_platform.js') return whole
+      const abs = join(dir, rel)
+      if (!existsSync(abs)) {
+        console.error(component.id + ': ' + file + ' imports ' + rel + ', which does not exist')
+        process.exit(3)
+      }
+      const flat = component.id + '.' + rel.slice(2)
+      if (!extra.some((entry) => entry.name === flat)) {
+        extra.push({ name: flat, text: rewrite(readFileSync(abs, 'utf8'), rel) })
+      }
+      return "from './" + flat + "'"
+    })
+    if (destructures.length > 0) {
+      // Hoisted bindings read from the resolved namespace, placed after the
+      // last import so the file keeps one import block.
+      const lines = out.split('\n')
+      // The end of the import block, not the start of the last import: a
+      // multi-line `import { ... } from '...'` ends on its `} from '...'` line.
+      let lastImport = -1
+      for (let index = 0; index < lines.length; index += 1) {
+        if (/^import\b/.test(lines[index]) || /^\} from ['"]/.test(lines[index])) lastImport = index
+      }
+      lines.splice(lastImport + 1, 0, '', ...destructures, '')
+      out = lines.join('\n')
+    }
+    return out
+  }
+
+  const entry = rewrite(readFileSync(hostPath, 'utf8'), component.hostFrom)
+  return [{ name: component.id + '.js', text: entry.trimEnd() + '\n' }, ...extra.map((file) => ({ name: file.name, text: file.text.trimEnd() + '\n' }))]
+}
+
 const checkOnly = process.argv.includes('--check')
 const generated = []
 let stale = 0
@@ -113,25 +205,26 @@ for (const component of COMPONENTS) {
     console.error('missing component host half: ' + hostPath)
     process.exit(2)
   }
-  const hostSource = readFileSync(hostPath, 'utf8').replace(/^\/\/# sourceMappingURL=.*$/gm, '').trimEnd() + '\n'
-  const hostSha = createHash('sha256').update(hostSource).digest('hex').slice(0, 16)
-  const hostHeader = [
-    '// ' + component.id + ' host half, VENDORED by tools/vendor.mjs - DO NOT EDIT.',
-    '//',
-    '// Source: ../' + component.id + '/' + component.hostFrom + '  (v' + version + ', sha256 ' + hostSha + ')',
-    '// Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.',
-    '//',
-    '// Copied verbatim: src/shell.js imports this file instead of the component',
-    '// package, which is why the studio has no runtime dependency on it.',
-    '',
-  ].join('\n')
-  generated.push({
-    id: component.id + ' (host)',
-    target: join(root, 'src', 'vendor', 'host', component.id + '.js'),
-    out: hostHeader + hostSource,
-    version,
-    sha: hostSha,
-  })
+  for (const file of vendorHostHalf(component, hostPath)) {
+    const hostSha = createHash('sha256').update(file.text).digest('hex').slice(0, 16)
+    const hostHeader = [
+      '// ' + component.id + ' host half (' + file.name + '), VENDORED by tools/vendor.mjs - DO NOT EDIT.',
+      '//',
+      '// Source: ../' + component.id + '/' + component.hostFrom.replace(/index\.js$/, file.name === component.id + '.js' ? 'index.js' : file.name.slice(component.id.length + 1)) + '  (v' + version + ', sha256 ' + hostSha + ')',
+      '// Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.',
+      '//',
+      '// src/shell.js imports the copy named after the component, which is why the',
+      '// studio installs with no runtime dependency on the component package.',
+      '',
+    ].join('\n')
+    generated.push({
+      id: component.id + ' (host' + (file.name === component.id + '.js' ? '' : ': ' + file.name) + ')',
+      target: join(root, 'src', 'vendor', 'host', file.name),
+      out: hostHeader + file.text,
+      version,
+      sha: hostSha,
+    })
+  }
 }
 
 mkdirSync(join(root, 'src', 'vendor', 'host'), { recursive: true })

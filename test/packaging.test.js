@@ -62,7 +62,7 @@ function isShipped(rel) {
 }
 
 test('every shipped path exists and is published', () => {
-  for (const entry of ['src/index.js', 'src/client.js', 'src/components.js', 'cordis.patch.yml', 'README.md', 'LICENSE', 'docs/INTEROP.md']) {
+  for (const entry of ['src/index.js', 'src/client.js', 'src/components.js', 'cordis.patch.yml', 'README.md', 'LICENSE']) {
     readFileSync(join(root, entry), 'utf8')
     assert.ok(isShipped(entry), entry + ' is read at runtime but not published')
   }
@@ -72,6 +72,11 @@ test('every shipped path exists and is published', () => {
   // copy. Shipping them again doubled the tarball (659 kB -> 158 kB without).
   for (const id of ['dsh-edit-turn', 'dsh-rerun-turn', 'dsh-delete-turn', 'dsh-markdown-bubble']) {
     assert.equal(isShipped('src/vendor/' + id + '.js'), false, 'src/vendor must not ship: the bundle already carries ' + id)
+  }
+  // Development-only inputs stay out of the package: the browser half is already
+  // built into src/client.js, and tools/ + the docs are for the repository.
+  for (const entry of ['src/studio.js', 'tools/vendor.mjs', 'docs/INTEROP.md']) {
+    assert.equal(isShipped(entry), false, entry + ' is a development input, not a runtime file')
   }
 })
 
@@ -87,6 +92,38 @@ test('the components are vendored, not runtime dependencies', () => {
     assert.ok(isShipped('src/vendor/host/' + component.id + '.js'), 'the vendored host half of ' + component.id + ' must ship')
   }
   assert.deepEqual(manifest.dependencies, {}, 'the studio installs alone')
+})
+
+test('a vendored host half finds the platform packages the harness provides', () => {
+  // The copies import './_platform.js' instead of the platform packages, because a
+  // second copy of dsh-session has its own registry and cannot touch a Session the
+  // host created. The resolver tries this file's ancestors and then the running
+  // entry point (process.argv[1], the dsh binary).
+  const platform = readFileSync(join(root, 'src', 'vendor', 'host', '_platform.js'), 'utf8')
+  assert.match(platform, /process\.argv\[1\]/, 'the running entry point is one of the roots')
+  assert.match(platform, /export const dshTools/, 'dsh-tools is exported resolved')
+  assert.match(platform, /export const dshSession/, 'dsh-session is exported resolved')
+  // Each vendored host half must import that resolver and nothing bare.
+  for (const component of COMPONENTS) {
+    const source = readFileSync(join(root, 'src', 'vendor', 'host', component.id + '.js'), 'utf8')
+    const bare = [...source.matchAll(/from '(@deepseek-ai\/[^']+)'/g)].map((match) => match[1])
+    assert.deepEqual(bare, [], component.id + ' still imports a platform package directly')
+  }
+})
+
+test('a host half that imports a sibling module gets that module vendored too', () => {
+  // dsh-edit-turn imports ./patch.js and dsh-delete-turn imports ./logic.js. Both
+  // are copied beside the entry under a component-qualified name, so the copy is
+  // self-contained and two components cannot collide.
+  const expectations = [
+    ['dsh-edit-turn', './dsh-edit-turn.patch.js'],
+    ['dsh-delete-turn', './dsh-delete-turn.logic.js'],
+  ]
+  for (const [id, spec] of expectations) {
+    const source = readFileSync(join(root, 'src', 'vendor', 'host', id + '.js'), 'utf8')
+    assert.ok(source.includes("from '" + spec + "'"), id + ' must import its vendored sibling ' + spec)
+    readFileSync(join(root, 'src', 'vendor', 'host', spec.replace('./', '')), 'utf8')
+  }
 })
 
 test('nothing shipped reaches for a component package at runtime', () => {

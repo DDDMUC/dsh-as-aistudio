@@ -1,10 +1,10 @@
-// dsh-edit-turn host half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
+// dsh-edit-turn host half (dsh-edit-turn.js), VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-edit-turn/lib/index.js  (v0.5.3, sha256 85e4882121f54c1c)
+// Source: ../dsh-edit-turn/lib/index.js  (v0.5.3, sha256 bc36c567fe062c31)
 // Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.
 //
-// Copied verbatim: src/shell.js imports this file instead of the component
-// package, which is why the studio has no runtime dependency on it.
+// src/shell.js imports the copy named after the component, which is why the
+// studio installs with no runtime dependency on the component package.
 // dsh-edit-turn - host half.
 //
 // Two loopback-only JSON routes:
@@ -57,8 +57,8 @@
 import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
-import { defineTool } from '@deepseek-ai/dsh-tools'
-import * as sessionApi from '@deepseek-ai/dsh-session'
+import { dshTools } from './_platform.js'
+import { dshSession as sessionApi } from './_platform.js'
 import {
   PATCH_TYPE,
   buildPatchData,
@@ -68,7 +68,10 @@ import {
   patchProjection,
   patchesOf,
   projectedBlocks,
-} from './patch.js'
+} from './dsh-edit-turn.patch.js'
+
+const { defineTool } = dshTools
+
 
 const nodeRequire = createRequire(import.meta.url)
 const schemaPackage = (() => {
