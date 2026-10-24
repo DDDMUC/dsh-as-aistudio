@@ -9079,7 +9079,7 @@ window.__ModuleLoader__.load({
      * The studio tab: one row per component, plus the interop allocation.
      * @param props - slot props: t (locale-bound) and currentLocale.
      */
-    function StudioPanel({ view: slotView, t, currentLocale }) {
+    function StudioPanel({ view: slotView, t, currentLocale, bindComponentLocale }) {
       // `plugins.row.config` asks twice: once for the row's one-liner and once
       // for the page. The one-liner must not fetch - it renders on every plugin
       // row paint - so it is the static description of what the four components
@@ -9172,7 +9172,12 @@ window.__ModuleLoader__.load({
               ...cards.map((pair) =>
                 h('div', { className: 'dsas-settingCard', key: pair.entry.id, 'data-component': pair.entry.id }, [
                   h('p', { className: 'dsas-settingName', key: 'name' }, pair.entry.title[chinese ? 'zh' : 'en']),
-                  h(pair.Card, { key: 'card', view: 'page', t }),
+                  h(pair.Card, {
+                    key: 'card',
+                    view: 'page',
+                    // The card's own words come from the card's own namespace.
+                    t: typeof bindComponentLocale === 'function' ? bindComponentLocale(pair.entry.id) : t,
+                  }),
                 ]),
               ),
             ]),
@@ -9242,6 +9247,24 @@ window.__ModuleLoader__.load({
       ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-as-aistudio: dictionaries')
 
       const t = ctx.locale.bind(NS)
+      /**
+       * The translator for a COMPONENT's own namespace.
+       *
+       * A component's settings card is written against its own dictionary
+       * (`config.style`, `config.ask`, ...), which its own apply() registers under
+       * its package name. Rendering that card with this package's `t` would spell
+       * the keys out - the card is not ours, so neither are its words.
+       *
+       * @param ns - the component's locale namespace (its package name).
+       * @returns a translator bound to it, or this package's own as a fallback.
+       */
+      const bindComponentLocale = (ns) => {
+        try {
+          return ctx.locale.bind(ns)
+        } catch {
+          return t
+        }
+      }
       const currentLocale = () => {
         try {
           const snapshot = ctx.locale.getLocale()
@@ -9264,7 +9287,7 @@ window.__ModuleLoader__.load({
             name: 'plugins.row.config',
             key: 'dsh-as-aistudio#dsh-as-aistudio',
             locale: NS,
-            inject: () => ({ currentLocale }),
+            inject: () => ({ currentLocale, bindComponentLocale }),
           },
           StudioPanel,
         ),

@@ -107,13 +107,15 @@ async function runBundle(options = {}) {
       slots: {
         inject(name, factory) { factory() },
         register(options) {
-          registered.push({ name: options.name, id: options.id, order: options.order, key: options.key })
+          registered.push({ name: options.name, id: options.id, order: options.order, key: options.key, inject: options.inject })
           return { dispose() {} }
         },
       },
       locale: {
         register: () => () => {},
-        bind: () => (key) => key,
+        // Namespace-aware on purpose: a card is written against its OWN
+        // dictionary, so the translator a component gets must be its own.
+        bind: (ns) => (key) => (ns === undefined ? key : ns + ':' + key),
         getLocale: () => ({ active: { id: 'zh-CN' } }),
       },
       // The platform keeps the disposer for teardown; calling it here would undo
@@ -191,6 +193,28 @@ test('applying the bundle claims the section-2 slot allocation', async () => {
   assert.ok(registered.some((row) => row.name === 'conversation.chat.node'), 'markdown-bubble claims a render seat')
   // The studio's own surface is still there.
   assert.ok(registered.some((row) => row.name === 'plugins.row.config' && row.key === 'dsh-as-aistudio#dsh-as-aistudio'))
+})
+
+test('every card is rendered with its own namespace, not the studio\'s', async () => {
+  // The three cards are written against their own dictionaries (`config.style`,
+  // `config.ask`, ...) which each component registers under its package name.
+  // Handing them this package's translator spelled the keys out on screen, so the
+  // panel takes a binder and asks it per component.
+  const { registered } = await runBundle({ status: allLive() })
+  const row = registered.find((entry) => entry.name === 'plugins.row.config')
+  assert.ok(row, 'the row config is registered')
+  const props = row.inject()
+  assert.equal(typeof props.bindComponentLocale, 'function', 'the panel is handed a binder')
+  for (const id of ['dsh-edit-turn', 'dsh-rerun-turn', 'dsh-delete-turn']) {
+    assert.equal(
+      props.bindComponentLocale(id)('config.ask'),
+      id + ':config.ask',
+      id + ' must resolve through its own namespace',
+    )
+  }
+  // And the studio's own copy still comes from the studio's namespace.
+  const source = readFileSync(join(root, 'src', 'studio.js'), 'utf8')
+  assert.match(source, /bindComponentLocale\(pair\.entry\.id\)/, 'each card is bound to its component')
 })
 
 test('no vendored component is reached through a subpath require', async () => {
