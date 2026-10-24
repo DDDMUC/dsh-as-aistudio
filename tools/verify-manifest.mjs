@@ -17,10 +17,17 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
 let failed = 0
 
-// 1. every dependency range must resolve to a published version
-const deps = Object.entries(manifest.dependencies || {})
+// 1. every VENDORING input must resolve to a published version.
+//
+// The studio has no runtime dependencies: the four components are vendored
+// (browser half and host half, tools/vendor.mjs), so they are devDependencies.
+// They still have to exist on the registry, because that is where the vendoring
+// sources come from - and the failure this gate was written for (a range that
+// resolves to nothing) would show up as a vendor run that cannot fetch a
+// component at all.
+const deps = Object.entries(manifest.devDependencies || {})
 if (deps.length === 0) {
-  console.error('no dependencies declared; that is not the shape of this package')
+  console.error('no devDependencies declared; the vendoring sources are missing')
   failed += 1
 }
 for (const [name, range] of deps) {
@@ -74,4 +81,4 @@ if (failed > 0) {
   console.error(failed + ' manifest problem(s); do not publish')
   process.exit(1)
 }
-console.log('manifest ok: ' + deps.length + ' dependency ranges resolve, version ' + distinct[0] + ' consistent')
+console.log('manifest ok: ' + deps.length + ' vendoring ranges resolve, no runtime dependencies, version ' + distinct[0] + ' consistent')

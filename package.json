@@ -1,7 +1,7 @@
 {
   "name": "dsh-as-aistudio",
   "version": "0.2.14",
-  "description": "Google-AI-Studio-style turn controls for DeepSeek Harness, in one install: edit a prompt and re-run it, re-run a reply in place, delete a turn from the model context, and render sent prompts as Markdown. Self-contained: the plugin list shows this one row; the four components are dependencies mounted by it. Each still installs alone and works alone.",
+  "description": "Google-AI-Studio-style turn controls for DeepSeek Harness, in one install: edit a prompt and re-run it, re-run a reply in place, delete a turn from the model context, and render sent prompts as Markdown. Self-contained: the plugin list shows this one row, and the four components are vendored inside it - installing the studio installs nothing else.",
   "type": "module",
   "main": "src/index.js",
   "exports": {
@@ -19,6 +19,7 @@
     "src/components.js",
     "src/studio.js",
     "src/client.js",
+    "src/vendor/host",
     "tools",
     "cordis.patch.yml",
     "docs/INTEROP.md",
@@ -55,12 +56,7 @@
     "verify:build": "node tools/build.mjs --check",
     "verify:manifest": "node tools/verify-manifest.mjs"
   },
-  "dependencies": {
-    "dsh-delete-turn": "^0.1.14",
-    "dsh-edit-turn": "^0.5.3",
-    "dsh-markdown-bubble": "^0.1.5",
-    "dsh-rerun-turn": "^0.2.4"
-  },
+  "dependencies": {},
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
@@ -76,7 +72,7 @@
       ]
     },
     "engines": {
-      "dsh": ">=0.1.6-alpha.2"
+      "dsh": ">=0.2.1-rc.2"
     },
     "compatibility": {
       "dshReleases": {
@@ -84,5 +80,11 @@
         "0.2.0-rc.2": "compatible"
       }
     }
+  },
+  "devDependencies": {
+    "dsh-delete-turn": "^0.1.14",
+    "dsh-edit-turn": "^0.5.3",
+    "dsh-markdown-bubble": "^0.1.5",
+    "dsh-rerun-turn": "^0.2.4"
   }
 }

@@ -10,12 +10,8 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { Config, apply, inject, name } from '../src/shell.js'
-import { STUDIO_ID } from '../src/components.js'
-
-/** An ESM module specifier that needs no file on disk and no dependency. */
-function fixture(source) {
-  return 'data:text/javascript,' + source
-}
+import { COMPONENTS, STUDIO_ID } from '../src/components.js'
+import { pluginOf } from '../src/index.js'
 
 /** A context stub recording what the shell mounted. */
 function contextStub() {
@@ -50,27 +46,30 @@ test('the shell config is a Standard Schema that passes the row through', () => 
 // The three shapes the four components actually export. dsh-edit-turn and
 // dsh-delete-turn have a default export; dsh-rerun-turn and dsh-markdown-bubble
 // export only named members, so the module namespace itself is the plugin and
-// its apply() is what gets mounted.
-test('a default-exported function is mounted', async () => {
-  const stub = contextStub()
-  await apply(stub.ctx, { plugin: fixture('export default function editTurn(){}') })
-  assert.equal(stub.mounted.length, 1)
-  assert.equal(typeof stub.mounted[0], 'function')
-  assert.equal(stub.mounted[0].name, 'editTurn')
+// its apply() is what gets mounted. Judged by pluginOf, the same function the
+// shell runs on whatever the vendored file exports.
+test('the three plugin shapes are recognised, and nothing else is', () => {
+  const fn = function editTurn() {}
+  assert.equal(pluginOf({ default: fn }), fn, 'a default-exported function')
+  const named = { apply() {} }
+  assert.equal(pluginOf(named), named, 'a namespace with its own apply')
+  const object = { apply() {} }
+  assert.equal(pluginOf({ default: object }), object, 'a default-exported plugin object')
+  assert.equal(pluginOf({ answer: 42 }), null, 'anything else has no usable shape')
+  assert.equal(pluginOf(null), null)
 })
 
-test('a module with only a named apply is mounted as the namespace', async () => {
+test('a component row mounts the vendored host half of that component', async () => {
+  // The point of the vendoring: the row names the COMPONENT, and what gets
+  // mounted is the copy beside this package - no component package installed.
+  // dsh-markdown-bubble's host half is the one that imports nothing but node
+  // builtins, so it is the one that can be imported here; the other three import
+  // the platform's own packages, which exist only inside a running DSH. That
+  // their vendored copies are current is what test/sync.test.js guards.
   const stub = contextStub()
-  await apply(stub.ctx, { plugin: fixture('export function apply(){}') })
-  assert.equal(stub.mounted.length, 1)
-  assert.equal(typeof stub.mounted[0].apply, 'function')
-})
-
-test('a default-exported plugin object is mounted', async () => {
-  const stub = contextStub()
-  await apply(stub.ctx, { plugin: fixture('export default { apply(){} }') })
-  assert.equal(stub.mounted.length, 1)
-  assert.equal(typeof stub.mounted[0].apply, 'function')
+  await apply(stub.ctx, { plugin: 'dsh-markdown-bubble' })
+  assert.equal(stub.mounted.length, 1, 'exactly one plugin is mounted')
+  assert.equal(stub.mounted[0].name, 'dsh-markdown-bubble', 'the vendored host half is what got mounted')
 })
 
 test('a row that names no plugin fails loudly instead of mounting nothing', async () => {
@@ -85,17 +84,10 @@ test('a row that names no plugin fails loudly instead of mounting nothing', asyn
   }
 })
 
-test('a component package that cannot be imported names itself in the failure', async () => {
+test('a row naming a package that is not one of ours is refused by name', async () => {
   await assert.rejects(
     () => apply(contextStub().ctx, { plugin: 'dsh-a-package-that-does-not-exist' }),
-    /dsh-a-package-that-does-not-exist.*could not be imported/,
-  )
-})
-
-test('a module with no usable plugin shape is refused by name', async () => {
-  await assert.rejects(
-    () => apply(contextStub().ctx, { plugin: fixture('export const answer = 42') }),
-    /has no usable plugin shape/,
+    /dsh-a-package-that-does-not-exist.*is not one of this studio's components/,
   )
 })
 
@@ -104,5 +96,5 @@ test('a component that fails to start makes the row fail, not a bare no-op', asy
   // Swallowing the rejection here would report a component that never started.
   const stub = contextStub()
   stub.ctx.plugin = () => Promise.reject(new Error('a tool is already registered'))
-  await assert.rejects(() => apply(stub.ctx, { plugin: fixture('export default function c(){}') }), /a tool is already registered/)
+  await assert.rejects(() => apply(stub.ctx, { plugin: 'dsh-markdown-bubble' }), /a tool is already registered/)
 })

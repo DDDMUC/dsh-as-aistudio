@@ -29,7 +29,7 @@ tools/tail2.txt
 3. **宿主半侧不许回流。** 四个组件已由四条行挂载，宿主再 `ctx.plugin` 一次就是同进程挂两遍，
    路由必冲突。`/status` 的 hostMounted 只从 `ctx.loader.entries()` 的行 fiber 状态读（state===2）。
 
-四个组件是 **dependencies**（不是 optionalDependencies）：它们不再是 profile bundle，插件列表里没有自己的行，
+四个组件是**内置的**（browser half 与 host half 都由 `tools/vendor.mjs` 抄进 `src/vendor/`）：本包没有任何运行时依赖，安装时不会再装别的包；它们也不是 profile bundle，插件列表里没有自己的行，
 缺席就意味着一条组件行导入失败、对应的功能真空。
 
 改完哪个文件要重建什么：

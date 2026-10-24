@@ -20,7 +20,7 @@ AI Studio 的好用之处不在模型，在于一轮对话中的每一步都能�
 
 ### 特性
 
-- **一行搞定** —— 插件列表里只有 AI Studio 一行。四个组件是本包的 dependencies，由本包的四个补丁行 `dsh-as-aistudio/edit` 等挂载（详情页因此能列出这 4 个组件），不再各自占一行（和 @linxin666/dsh-web-all 同一个模式）。
+- **一行搞定** —— 插件列表里只有 AI Studio 一行。四个组件的**界面与后台都内置在本包里**，由本包的四个补丁行 `dsh-as-aistudio/edit` 等挂载（详情页因此能列出这 4 个组件），不再各自占一行。**装本包不会再装任何别的东西。**
 - **组件仍是独立包** —— 每个都有自己的仓库与 cordis.patch.yml，单独安装照样工作；本包不复制任何组件逻辑：宿主半侧（路由、回滚、重放）就是组件自己，浏览器 factory 由 tools/vendor.mjs 从组件源码逐字剥离生成。
 - **副本不会漂移** —— npm run vendor 重新生成内联包，npm run build 重新生成大 bundle，verify:vendor / verify:build 是只读校验；测试里 vendor-sync / build-sync 会在副本过期时失败。
 - **一个挂了不影响其余** —— 四个 vendored factory 各自带 guard 挂载，一个抛错不会带走另外三个。
@@ -33,7 +33,7 @@ AI Studio 的好用之处不在模型，在于一轮对话中的每一步都能�
 dsh plugin --profile web add dsh-as-aistudio
 ```
 
-桌面端把 --profile web 换成 --profile desktop。四个组件会作为 dependencies 一起装上，不需要逐个装。
+桌面端把 --profile web 换成 --profile desktop。四个组件已经内置在本包里，不需要再装任何东西。
 
 ### 使用
 
@@ -54,7 +54,7 @@ dsh plugin --profile web add dsh-as-aistudio
 ### 已知限制
 
 - 四个组件的 browser factory 是生成副本。改了组件必须 npm run vendor && npm run build 再发本包；verify:vendor / verify:build 会拦住过期副本。
-- 组件缺席（有人手动删了依赖）时，它的 browser half 不会挂载，面板显示「已安装，宿主未挂载」或「未安装」。
+- 组件被关掉（插件页里把 `dsh-as-aistudio/<组件>` 那行停用）时，它的界面与后台都不挂载，面板显示「已安装，宿主未挂载」。
 - 宿主版本常量只在进程启动时读一次：改了本包要重启宿主 + 硬刷新。
 
 ### 兼容性
@@ -77,7 +77,7 @@ What makes AI Studio pleasant is not the model: it is that every step of a turn 
 
 ### Features
 
-- **One row** — the plugin list shows only AI Studio. The four components are dependencies mounted by this package's four patch rows (`dsh-as-aistudio/edit` and friends, which is why the detail page can list all four) and no longer occupy rows of their own (the @linxin666/dsh-web-all pattern).
+- **One row** — the plugin list shows only AI Studio. Both halves of the four components travel inside this package and are mounted by its four patch rows (`dsh-as-aistudio/edit` and friends, which is why the detail page can list all four). Installing the studio installs nothing else.
 - **Components stay independent packages** — each keeps its own repo and its own cordis.patch.yml and works alone. This package copies no component logic: the host halves ARE the components, and the browser factories are lifted verbatim from their sources by tools/vendor.mjs.
 - **The vendored copy cannot drift** — npm run vendor regenerates it, npm run build regenerates the bundle, and verify:vendor / verify:build are read-only gates; the test suite fails on a stale copy.
 - **One failure does not take the rest** — each vendored factory mounts behind its own guard.
@@ -90,7 +90,7 @@ What makes AI Studio pleasant is not the model: it is that every step of a turn 
 dsh plugin --profile web add dsh-as-aistudio
 ```
 
-Use --profile desktop on the desktop app. The four components arrive as dependencies; there is nothing else to install.
+Use --profile desktop on the desktop app. The four components are already inside this package; there is nothing else to install.
 
 ### Usage
 

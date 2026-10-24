@@ -6,7 +6,7 @@
 // file - and carries the real component package in `config.plugin`. The shell
 // is what turns that name into a mount:
 //
-//     const namespace = await import(config.plugin)
+//     const namespace = await import('./vendor/host/' + id + '.js')
 //     await ctx.plugin(namespace.default ?? namespace.plugin ?? namespace)
 //
 // Why the row is a subpath of this package and not the component's own name:
@@ -28,7 +28,13 @@
 //
 // The row config is read once per activation. Editing it in the plugin manager
 // restarts the entry, which runs this apply again with the new value.
-import { STUDIO_ID } from './components.js'
+//
+// The component's HOST half is vendored into this package (tools/vendor.mjs),
+// exactly like its browser half: `config.plugin` names which component the row
+// is, and the vendored file beside this one is what gets mounted. That is why
+// installing the studio installs nothing else - and why a component's fix
+// reaches the studio only through a re-vendor and a studio release.
+import { COMPONENTS, STUDIO_ID } from './components.js'
 import { pluginOf } from './index.js'
 
 /** Loader display name of this shell (all four rows share it). */
@@ -62,6 +68,14 @@ export const Config = {
       return { value }
     },
   },
+}
+
+/** The component id a row's `plugin` names, or null when it names none of ours. */
+function componentIdOf(spec) {
+  for (const component of COMPONENTS) {
+    if (component.package === spec) return component.id
+  }
+  return null
 }
 
 /** The package name a row config names, or null when it names none. */
@@ -103,11 +117,22 @@ export async function apply(ctx, config) {
       STUDIO_ID + ': this component row names no plugin; set config.plugin to the component package (row config: ' + describeConfig(config) + ')',
     )
   }
+  const id = componentIdOf(spec)
+  if (id === null) {
+    throw new Error(
+      STUDIO_ID +
+        ': component ' +
+        JSON.stringify(spec) +
+        ' is not one of this studio\'s components (' +
+        COMPONENTS.map((component) => component.package).join(', ') +
+        ')',
+    )
+  }
   let namespace
   try {
-    // The component is a dependency of this package, so the bare specifier
-    // resolves from the profile that installed the studio.
-    namespace = await import(spec)
+    // The host half is vendored beside this file (tools/vendor.mjs), so the
+    // component package does not have to be installed at all.
+    namespace = await import('./vendor/host/' + id + '.js')
   } catch (error) {
     throw new Error(
       STUDIO_ID + ': component ' + JSON.stringify(spec) + ' could not be imported: ' + messageOf(error),

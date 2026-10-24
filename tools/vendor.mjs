@@ -19,7 +19,7 @@
 // shape stops the build instead of producing a silent no-op.
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -32,10 +32,10 @@ const workspace = workspaceFlag === -1 ? join(root, '..') : process.argv[workspa
 
 /** Every component this package composes. The order is the mount order. */
 const COMPONENTS = [
-  { id: 'dsh-edit-turn', from: 'lib/client.js' },
-  { id: 'dsh-rerun-turn', from: 'lib/client.js' },
-  { id: 'dsh-delete-turn', from: 'src/client.js' },
-  { id: 'dsh-markdown-bubble', from: 'src/client.js' },
+  { id: 'dsh-edit-turn', from: 'lib/client.js', hostFrom: 'lib/index.js' },
+  { id: 'dsh-rerun-turn', from: 'lib/client.js', hostFrom: 'lib/index.js' },
+  { id: 'dsh-delete-turn', from: 'src/client.js', hostFrom: 'src/index.js' },
+  { id: 'dsh-markdown-bubble', from: 'src/client.js', hostFrom: 'src/index.js' },
 ]
 
 /** Everything before the loader call must be comments, or the shape is not ours. */
@@ -103,9 +103,38 @@ for (const component of COMPONENTS) {
   const out = header + body
 
   generated.push({ id: component.id, target: join(root, 'src', 'vendor', component.id + '.js'), out, version, sha })
+
+  // The host half travels too: it is a plain ES module whose only imports are
+  // node builtins and the platform's own packages, so one file is the whole
+  // thing. Vendoring it is what lets the studio install with no runtime
+  // dependency on the component packages at all.
+  const hostPath = join(workspace, component.id, component.hostFrom)
+  if (!existsSync(hostPath)) {
+    console.error('missing component host half: ' + hostPath)
+    process.exit(2)
+  }
+  const hostSource = readFileSync(hostPath, 'utf8').replace(/^\/\/# sourceMappingURL=.*$/gm, '').trimEnd() + '\n'
+  const hostSha = createHash('sha256').update(hostSource).digest('hex').slice(0, 16)
+  const hostHeader = [
+    '// ' + component.id + ' host half, VENDORED by tools/vendor.mjs - DO NOT EDIT.',
+    '//',
+    '// Source: ../' + component.id + '/' + component.hostFrom + '  (v' + version + ', sha256 ' + hostSha + ')',
+    '// Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.',
+    '//',
+    '// Copied verbatim: src/shell.js imports this file instead of the component',
+    '// package, which is why the studio has no runtime dependency on it.',
+    '',
+  ].join('\n')
+  generated.push({
+    id: component.id + ' (host)',
+    target: join(root, 'src', 'vendor', 'host', component.id + '.js'),
+    out: hostHeader + hostSource,
+    version,
+    sha: hostSha,
+  })
 }
 
-mkdirSync(join(root, 'src', 'vendor'), { recursive: true })
+mkdirSync(join(root, 'src', 'vendor', 'host'), { recursive: true })
 for (const file of generated) {
   const current = existsSync(file.target) ? readFileSync(file.target, 'utf8') : null
   if (current === file.out) continue
@@ -115,11 +144,11 @@ for (const file of generated) {
     continue
   }
   writeFileSync(file.target, file.out)
-  console.log('wrote  src/vendor/' + file.id + '.js  <- v' + file.version + ' sha256 ' + file.sha)
+  console.log('wrote  ' + relative(root, file.target) + '  <- v' + file.version + ' sha256 ' + file.sha)
 }
 
 if (checkOnly && stale > 0) {
-  console.error(stale + ' vendored bundle(s) are stale; run `npm run vendor`')
+  console.error(stale + ' vendored file(s) are stale; run `npm run vendor`')
   process.exit(1)
 }
-if (!checkOnly) console.log('vendored ' + generated.length + ' browser halves')
+if (!checkOnly) console.log('vendored ' + generated.length + ' halves (' + COMPONENTS.length + ' browser + ' + COMPONENTS.length + ' host)')

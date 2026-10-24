@@ -1,0 +1,2810 @@
+// dsh-edit-turn host half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
+//
+// Source: ../dsh-edit-turn/lib/index.js  (v0.5.3, sha256 85e4882121f54c1c)
+// Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.
+//
+// Copied verbatim: src/shell.js imports this file instead of the component
+// package, which is why the studio has no runtime dependency on it.
+// dsh-edit-turn - host half.
+//
+// Two loopback-only JSON routes:
+//
+//   GET  /dsh-edit-turn/state?sessionId=<id>
+//   POST /dsh-edit-turn/apply   { sessionId, seq|messageId|turn, text }
+//
+// An edit is two official operations, in order:
+//
+//   1. ROLLBACK - append ONE surface event whose `surfaceOp` is
+//      `{ op: 'replace', startSeq, endSeq }` over the inclusive surface window
+//      "the addressed user message .. the last surface node". The official fold
+//      swaps that whole window for the replacing event, so every event recorded
+//      after the edit point leaves the derived model context while the
+//      append-only log keeps every original byte ("Committed events are never
+//      rewritten"). The window always ends at the last surface node, so an
+//      assistant message (which carries its own tool_use blocks) and the
+//      tool/result it produced are always shadowed together: no call/result
+//      pair can be left dangling.
+//
+//
+// A revised PROMPT carries the message itself: the carrier's content is the
+// user's block list after the edit, rebuilt block by block. A block the user
+// did not touch is copied out of the original message verbatim - same object,
+// same fields, same attachment reference - a block the user added is admitted
+// through the platform's attachment store (`ctx.get('attachments')`, the seam
+// dsh-acp uses) and a block the user removed is simply not written. The revised
+// text lands where the original's first text block was, so the layout survives
+// the edit. Nothing in that path names a block shape: the only test in the
+// module is "does this block carry text", which is the editor's own field, so a
+// block type the platform adds later needs no change here.
+//
+// The silent replacement carrier is an EMPTY `developer/message` (0.2.12;
+// before that an empty `system/message`, which no reader accepts - see the
+// README). Empty content projects to no model message, so the rollback adds
+// nothing the model can see and the derived context after an edit is exactly
+// what it would be had the conversation really stopped at the edit point.
+// `sourceEventSeqs` must list the complete shadowed node set, which
+// is why an `assistant/message` carrier is impossible (it forbids
+// `sourceEventSeqs` outright).
+//
+// The module resolves `@deepseek-ai/schemastery` defensively. `dsh-tools` is a
+// host-provided peer (the loader resolves it for every plugin), but the schema
+// package is a regular dependency: when it cannot be resolved - a pruned
+// package cache, an installation that skipped dependencies - a static import
+// takes the whole plugin down and the feature simply disappears from the UI
+// with nothing but a line on the host's stdout to explain it. A guarded require
+// degrades to "no config form, defaults apply" instead, which costs a settings
+// surface rather than the feature. Every field is optional in `apply` anyway.
+import { randomUUID } from 'node:crypto'
+import { readFile } from 'node:fs/promises'
+import { createRequire } from 'node:module'
+import { defineTool } from '@deepseek-ai/dsh-tools'
+import * as sessionApi from '@deepseek-ai/dsh-session'
+import {
+  PATCH_TYPE,
+  buildPatchData,
+  editableBlocks,
+  kindOfBlock,
+  patchList,
+  patchProjection,
+  patchesOf,
+  projectedBlocks,
+} from './patch.js'
+
+const nodeRequire = createRequire(import.meta.url)
+const schemaPackage = (() => {
+  try {
+    return nodeRequire('@deepseek-ai/schemastery')
+  } catch {
+    return null
+  }
+})()
+const z = schemaPackage === null ? null : (schemaPackage.default ?? schemaPackage)
+
+/** Plugin id shared by the host and browser halves. */
+export const PLUGIN_ID = 'dsh-edit-turn'
+
+/** Cordis plugin name. */
+export const name = PLUGIN_ID
+
+/** Keep in sync with package.json and lib/client.js. */
+export const PLUGIN_VERSION = '0.5.3'
+
+// A ring of the last few requests, answering "did the browser half even ask, and
+// what did it get?" without needing its console. Read-only diagnostics: the
+// browser half's own state is otherwise invisible from the host side.
+const REQUEST_LOG_LIMIT = 40
+const requestLog = []
+
+/** Record one request for the diagnostic route. */
+export function noteRequest(entry) {
+  requestLog.push({ at: Date.now(), ...entry })
+  if (requestLog.length > REQUEST_LOG_LIMIT) requestLog.shift()
+}
+
+/** The recorded requests, oldest first. */
+export function recentRequests() {
+  return requestLog.slice()
+}
+
+const ROUTE_PREFIX = '/dsh-edit-turn'
+// A session id is an OPAQUE string to DSH: the host's own schema is
+// `z.string().min(1)`, and a named session created in the GUI (`bili-whale`,
+// stored as ~/.dsh/storages/<profile>/sessions/bili-whale.json) is exactly as
+// real as a UUID one. A UUID-only test rejected those with a 400, so the panel
+// answered "状态加载失败" for a session that plainly exists. The character class
+// still refuses everything that could leave a path or a URL: `/`, `\`, `..`
+// (the first character must be alphanumeric, so a leading dot is already out),
+// whitespace and control characters.
+const SESSION_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/
+const MAX_TEXT = 200_000
+const FLUSH_DEADLINE_MS = 5_000
+
+// A revised block list travels as base64 inside the JSON body, so the body limit
+// IS the upload limit. The platform's own per-image ceiling defaults to 20 MiB
+// (dsh-attachment-local), which base64 carries in ~27 MiB of text; the store
+// enforces its own limit independently, this one only bounds the socket read.
+const MAX_BODY_BYTES = 64 * 1024 * 1024
+const MAX_UPLOAD_BYTES = 20 * 1024 * 1024
+// A preview is a courtesy: above this the chip keeps its label and asks for
+// nothing. Never worth streaming a whole file to draw a thumbnail.
+const MAX_PREVIEW_BYTES = 32 * 1024 * 1024
+// One message cannot carry more blocks than this. The cap exists so a malformed
+// or hostile body cannot make the host loop over an unbounded list.
+const MAX_PARTS = 64
+
+/**
+ * Service names the durable attachment store is reachable under.
+ *
+ * `attachments` is the platform's own registration (the `AttachmentStore`
+ * base class in @deepseek-ai/dsh-attachment, and every `ctx.get('attachments')`
+ * consumer such as dsh-acp); the other two are the package names, accepted so a
+ * rename cannot silently cost the feature. Absence is a supported state, never
+ * an error: the edit degrades to the text-only rewrite it was before blocks.
+ */
+const ATTACHMENT_SERVICES = ['attachments', 'attachment', 'attachment-local']
+
+/**
+ * Model-visible text of the replacement carrier.
+ *
+ * A `user/message` carrier always projects into the model context, so the
+ * default states the one fact the revised context cannot express on its own:
+ * earlier turns were deliberately dropped. Keep it short and factual.
+ */
+const DEFAULT_MARKER = '[dsh-edit-turn] The user revised an earlier message. Every turn after that message was rolled back; the revised message follows. Send your reply to the revised message.'
+
+/**
+ * Deployment policy for the rollback.
+ *
+ * `undefined` when the schema package could not be resolved - DSH then hands
+ * `apply` no config at all, and every field below is read with the same default
+ * there, so the plugin behaves identically minus the settings form.
+ */
+export const Config =
+  z === null
+    ? undefined
+    : z.object({
+        markerText: z.string().default(DEFAULT_MARKER),
+        /**
+         * Whether the client asks for a second confirmation before applying. Off
+         * by default: the editor is already an explicit action the user opened, and
+         * the panel states what saving does. Set it to `true` to require the extra
+         * step.
+         */
+        confirm: z.boolean().default(false),
+        /**
+         * How a reply edit lands. `auto` uses the in-place plugin-record
+         * projection when the host exposes it and falls back to the historical
+         * replay splice otherwise; `patch` refuses to run without the
+         * projection; `replay` always uses the old path. Prompt edits always use
+         * the official surface replacement.
+         *
+         * There is deliberately no `replace` value: appending a fresh
+         * `assistant/message` with a replace op is refused by the session's own
+         * surface validation (see the note in the README).
+         */
+        replyMode: z.string().default('auto'),
+        /**
+         * Which editor presentation the browser half draws. `frame` outlines the
+         * whole message row (reference-UI style); `bubble` is exactly the
+         * message bubble; `center` is a large centred panel. The setting exists
+         * because the best shape is a matter of taste and was hard to pick
+         * without trying them side by side.
+         */
+        editorStyle: z.union([z.const('frame'), z.const('bubble'), z.const('center')]).default('frame'),
+      })
+
+// ---------------------------------------------------------------------------
+// pure session-log logic (no DSH SDK imports; unit-testable under node --test)
+// ---------------------------------------------------------------------------
+
+/** The four event types that may carry `surfaceOp` (official surface contract). */
+const SURFACE_TYPES = new Set([
+  'system/message',
+  'user/message',
+  'assistant/message',
+  'tool/result',
+])
+
+/**
+ * Whether one event participates in the model-visible surface.
+ * @param event - raw session event.
+ * @returns true for a message-producing event type.
+ */
+export function isSurfaceEvent(event) {
+  const type = event && event.type
+  return typeof type === 'string' && SURFACE_TYPES.has(type)
+}
+
+/**
+ * Replay the surface operations of a complete log.
+ *
+ * Mirrors the official fold: `append` pushes the event onto the tail; a
+ * `replace` swaps the inclusive window between its two surface nodes for the
+ * replacing event. Replacements whose anchors are no longer present are skipped
+ * defensively - a corrupt log must not throw inside an HTTP handler.
+ *
+ * @param events - complete contiguous raw event log in seq order.
+ * @returns current surface seqs in model order plus every landed replacement.
+ */
+export function foldSurface(events) {
+  const nodes = []
+  const replacements = []
+  for (const event of events) {
+    const op = event.surfaceOp
+    if (op === undefined) continue
+    if (op === 'append') {
+      nodes.push(event.seq)
+      continue
+    }
+    if (op === null || typeof op !== 'object' || op.op !== 'replace') continue
+    const startIdx = nodes.indexOf(op.startSeq)
+    const endIdx = nodes.indexOf(op.endSeq)
+    if (startIdx === -1 || endIdx === -1 || startIdx > endIdx) continue
+    const shadowed = nodes.slice(startIdx, endIdx + 1)
+    nodes.splice(startIdx, endIdx - startIdx + 1, event.seq)
+    replacements.push({ seq: event.seq, startSeq: op.startSeq, endSeq: op.endSeq, shadowed })
+  }
+  return { nodes, replacements }
+}
+
+/**
+ * Map every event seq to the turn that encloses it.
+ *
+ * Turn brackets are the durable source for user messages (their payload has no
+ * turn field); assistant and tool events carry their own turn and override the
+ * bracket reading.
+ *
+ * @param events - complete contiguous raw event log.
+ * @returns seq -> turn number (undefined outside any turn).
+ */
+export function turnIndex(events) {
+  const turnOf = new Map()
+  let current
+  for (const event of events) {
+    if (event.type === 'turn/start') {
+      current = event.data && event.data.turn
+      turnOf.set(event.seq, current)
+      continue
+    }
+    if (event.type === 'turn/end') {
+      turnOf.set(event.seq, current)
+      current = undefined
+      continue
+    }
+    const data = event.data
+    const explicit =
+      (event.type === 'assistant/message' || event.type === 'tool/result' || event.type === 'tool/call') &&
+      data &&
+      typeof data.turn === 'number'
+        ? data.turn
+        : undefined
+    turnOf.set(event.seq, explicit !== undefined ? explicit : current)
+  }
+  return turnOf
+}
+
+/**
+ * One turn bracket: its number, log range, first prompt and reply count.
+ *
+ * A turn NUMBER is not unique in a log - a replay reuses numbers on fresh
+ * brackets - so planning must locate the bracket that CONTAINS an event rather
+ * than the first bracket carrying its number (the same rule dsh-rerun-turn
+ * learned in 0.1.23; this is the same walk).
+ *
+ * @param events - complete contiguous raw event log.
+ * @returns one entry per `turn/start`, in log order.
+ */
+export function turnSpans(events) {
+  const spans = []
+  let open = null
+  for (const event of events) {
+    if (event.type === 'turn/start') {
+      open = {
+        turn: event.data && event.data.turn,
+        startSeq: event.seq,
+        endSeq: null,
+        promptSeq: null,
+        replies: 0,
+      }
+      spans.push(open)
+      continue
+    }
+    if (open === null) continue
+    if (event.type === 'turn/end') {
+      open.endSeq = event.seq
+      open = null
+      continue
+    }
+    if (event.type === 'user/message' && open.promptSeq === null) open.promptSeq = event.seq
+    if (event.type === 'assistant/message') open.replies += 1
+  }
+  return spans
+}
+
+/** The turn still awaiting its `turn/end`, or null when every turn closed. */
+export function openTurn(events) {
+  let open = null
+  for (const event of events) {
+    if (event.type === 'turn/start') open = event.data && event.data.turn
+    else if (event.type === 'turn/end' && (open === null || event.data.turn === open)) open = null
+  }
+  return open
+}
+
+/** Whether an operation is in flight that will still write the surface. */
+export function isBusy(events) {
+  if (openTurn(events) !== null) return true
+  let compaction = false
+  for (const event of events) {
+    if (event.type === 'compaction/start') compaction = true
+    else if (event.type === 'compaction/end') compaction = false
+  }
+  return compaction
+}
+
+/**
+ * Durable message identity of one surface event.
+ * @param event - raw session event.
+ * @returns the message id, or undefined for an event without one.
+ */
+export function messageIdOf(event) {
+  const data = event.data
+  if (!data || typeof data !== 'object') return undefined
+  if (event.type === 'user/message') return typeof data.id === 'string' ? data.id : undefined
+  if (event.type === 'assistant/message' || event.type === 'tool/result' || event.type === 'system/message') {
+    const message = data.message
+    return message && typeof message.id === 'string' ? message.id : undefined
+  }
+  return undefined
+}
+
+/**
+ * Whether one event is a human-authored prompt.
+ *
+ * Injected context, this plugin's own placeholder and compaction checkpoints
+ * are all `user/message` events too; only `source.kind === 'user'` is a prompt
+ * the user actually typed, so only those are editable.
+ *
+ * @param event - raw session event.
+ * @returns true for a human prompt.
+ */
+export function isEditCarrier(source) {
+  if (!source || typeof source !== 'object') return false
+  // Current shape. `editedBy` is what identifies a carrier now; the prompt carrier
+  // deliberately keeps `kind: 'user'` (see buildCarrier) so the platform still reads
+  // it as the human prompt, and the silent reply carrier keeps a producer-owned kind.
+  if (source.editedBy === PLUGIN_ID) return true
+  // Historical shapes, kept so ledgers and editability stay correct over logs
+  // written by earlier releases: the producer-owned kind without `editedBy`, and
+  // the session-format v3 `{ kind: 'plugin', plugin }`.
+  if (source.kind === `plugin:${PLUGIN_ID}`) return true
+  return source.kind === 'plugin' && source.plugin === PLUGIN_ID
+}
+
+export function isHumanPrompt(event) {
+  if (!event || event.type !== 'user/message') return false
+  const data = event.data
+  if (!data || !data.source) return false
+  // The platform's own test, and the one every consumer applies (`turn-outline`,
+  // the Trajectory view, `ui-chat`, the inbox steering filter, `lastPromptAt`): a
+  // human prompt is a `user/message` whose source kind is `'user'`. A message this
+  // plugin rewrote stands in a human's place and keeps that kind, so it stays
+  // editable (edit it again). Matching a plugin-owned kind instead is what made
+  // the rewrite invisible to the turn outline - the round lost its prompt.
+  if (data.source.kind === 'user') return true
+  // Carriers written before that fix carry a producer-owned kind. Same message -
+  // a `user/message` this plugin rewrote - so it must stay editable, or upgrading
+  // would silently make every earlier edit un-editable.
+  return isEditCarrier(data.source)
+}
+
+/**
+ * Whether an event is a reply the model produced.
+ *
+ * Editing one of these is a different operation from editing a prompt: the
+ * official append contract refuses to let an `assistant/message` carry
+ * `sourceEventSeqs` ("assistant/message embeds its source stream"), so a reply
+ * can never be the replacement carrier of a rollback. The rollback is therefore
+ * followed by appending the corrected text as a new assistant message, and the
+ * model goes on seeing it as its own answer.
+ *
+ * @param event - raw session event.
+ * @returns true for an assistant reply.
+ */
+export function isAssistantReply(event) {
+  return Boolean(event) && event.type === 'assistant/message'
+}
+
+/**
+ * Whether one content block carries the editable text.
+ *
+ * This is the module's ONLY block-shape test, and it is deliberately about the
+ * field the editor owns rather than about a block class. Every other block - a
+ * picture, a file, and whatever type a later platform adds - is carried through
+ * an edit untouched unless the user removed it, so no code below ever has to
+ * learn a new name.
+ *
+ * @param block - one content block.
+ * @returns true when the block holds text the editor prefills.
+ */
+export function isTextBlock(block) {
+  return Boolean(block) && typeof block === 'object' && block.type === 'text' && typeof block.text === 'string'
+}
+
+/**
+ * The content blocks of a message payload, in message order.
+ *
+ * `user/message` carries its message fields on `data`; the other three surface
+ * types nest them under `data.message`, so both shapes read the same way now
+ * that the model's replies are editable too.
+ *
+ * @param event - raw session event.
+ * @returns the block array, or an empty one when the message carries none.
+ */
+export function readMessageBlocks(event) {
+  const data = (event && event.data) || {}
+  const message = data.message && typeof data.message === 'object' ? data.message : data
+  return Array.isArray(message.content) ? message.content : []
+}
+
+/**
+ * Read the plain text of a message payload, plus how many non-text parts it
+ * carries. The count is what tells a reader that a text-only carrier would drop
+ * something, and it stays exactly what it always was.
+ * @param event - raw session event.
+ * @returns `{ text, attachments }`.
+ */
+export function readMessageText(event) {
+  let text = ''
+  let attachments = 0
+  for (const block of readMessageBlocks(event)) {
+    if (!block || typeof block !== 'object') continue
+    if (isTextBlock(block)) text += (text === '' ? '' : '\n') + block.text
+    else attachments += 1
+  }
+  return { text, attachments }
+}
+
+/**
+ * The non-text blocks of a message, described for the editor's chips.
+ *
+ * Read by FIELD PRESENCE, never by type. A block that carries a durable
+ * `attachment` reference is described from that reference (name, media type,
+ * byte length, pixel size) whatever the platform calls the block; a block
+ * without one is described by its own type name alone, which is what a chip can
+ * honestly show. This list is for DRAWING and for offering a delete - it never
+ * decides what an edit writes, and a block the user keeps is copied verbatim
+ * whether or not this function could describe it.
+ *
+ * @param blocks - the message content, in message order.
+ * @param preview - whether the deployment can hand these bytes back for a thumbnail.
+ * @returns one entry per non-text block, in message order.
+ */
+export function blockSummaries(blocks, preview = false) {
+  const out = []
+  for (let index = 0; index < blocks.length; index += 1) {
+    const block = blocks[index]
+    if (!block || typeof block !== 'object' || isTextBlock(block)) continue
+    const raw = block.attachment
+    const attachment = raw && typeof raw === 'object' ? raw : null
+    const summary = {
+      index,
+      type: typeof block.type === 'string' && block.type !== '' ? block.type : 'block',
+      preview: false,
+    }
+    if (attachment !== null) {
+      if (typeof attachment.name === 'string' && attachment.name !== '') summary.name = attachment.name
+      if (typeof attachment.mediaType === 'string' && attachment.mediaType !== '') summary.mediaType = attachment.mediaType
+      if (typeof attachment.bytes === 'number') summary.bytes = attachment.bytes
+      if (typeof attachment.width === 'number') summary.width = attachment.width
+      if (typeof attachment.height === 'number') summary.height = attachment.height
+      summary.preview = preview && typeof attachment.attachmentId === 'string' && attachment.attachmentId !== ''
+    }
+    out.push(summary)
+  }
+  return out
+}
+
+/**
+ * Whether two JSON values are the same value.
+ *
+ * Used to answer "did this edit change anything at all": the rebuilt block list
+ * is compared against the original one, field by field. Key ORDER is not part
+ * of a JSON value - a session reader is free to hand the same object back with
+ * its keys in another order - so this walks the keys instead of comparing
+ * stringified text.
+ *
+ * @param a - first JSON value.
+ * @param b - second JSON value.
+ * @returns true when the two are indistinguishable JSON.
+ */
+export function sameJson(a, b) {
+  if (a === b) return true
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false
+    for (let index = 0; index < a.length; index += 1) {
+      if (!sameJson(a[index], b[index])) return false
+    }
+    return true
+  }
+  if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') return false
+  const keys = Object.keys(a)
+  if (keys.length !== Object.keys(b).length) return false
+  for (const key of keys) {
+    if (!Object.prototype.hasOwnProperty.call(b, key)) return false
+    if (!sameJson(a[key], b[key])) return false
+  }
+  return true
+}
+
+/**
+ * Normalise one submitted block list.
+ *
+ * The wire vocabulary is exactly two entries:
+ *
+ *   `{ keep: <index> }` - the original block at that index, untouched;
+ *   `{ add: { data, mediaType?, name? } }` - bytes the user just picked.
+ *
+ * Text is never listed: the revised text rides in its own field and the host
+ * puts it back where the original's first text block was. A `keep` that names
+ * a text block is therefore not an error - it is the text, and the text is
+ * already accounted for.
+ *
+ * @param raw - the submitted `parts` array.
+ * @param blockCount - how many blocks the original message carries.
+ * @returns `[{ keep } | { add }]` in submitted order.
+ * @throws {HttpError} 400 `invalid` for anything this vocabulary does not name.
+ */
+export function normalizeParts(raw, blockCount) {
+  if (!Array.isArray(raw)) throw new HttpError(400, 'invalid', 'parts must be an array')
+  if (raw.length > MAX_PARTS) throw new HttpError(400, 'invalid', `a message cannot carry more than ${MAX_PARTS} blocks`)
+  const parts = []
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new HttpError(400, 'invalid', 'every part must be an object')
+    }
+    if (entry.keep !== undefined) {
+      const index = entry.keep
+      if (!Number.isInteger(index) || index < 0 || index >= blockCount) {
+        throw new HttpError(400, 'invalid', 'a kept block index is out of range')
+      }
+      if (parts.some((part) => part.keep === index)) throw new HttpError(400, 'invalid', 'a block was kept twice')
+      parts.push({ keep: index })
+      continue
+    }
+    const upload = entry.add
+    if (upload && typeof upload === 'object' && typeof upload.data === 'string') {
+      parts.push({
+        add: {
+          data: upload.data,
+          ...(typeof upload.mediaType === 'string' && upload.mediaType !== '' ? { mediaType: upload.mediaType } : {}),
+          ...(typeof upload.name === 'string' && upload.name !== '' ? { name: upload.name } : {}),
+        },
+      })
+      continue
+    }
+    throw new HttpError(400, 'invalid', 'every part is either a kept block or an upload')
+  }
+  return parts
+}
+
+/**
+ * The ordered slots a submitted block list describes, plus where the text goes.
+ *
+ * Layout is the original message's, never a re-invention: the revised text is
+ * placed where the original's FIRST text block stood (the editor holds every
+ * text block at once, so the others merge into it), and the kept blocks keep
+ * their relative order around it. A message with no text block at all - a
+ * picture-only prompt - gets its text appended, which is the only position that
+ * does not move something the user did not touch.
+ *
+ * @param originalBlocks - the message content before the edit.
+ * @param parts - normalised parts (see {@link normalizeParts}).
+ * @returns `{ slots, textAt, added }`; `textAt` indexes `slots`.
+ */
+export function planBlockLayout(originalBlocks, parts) {
+  const slots = []
+  let added = 0
+  for (const part of parts) {
+    if (part.keep !== undefined) {
+      // The text blocks are the editor's own content, carried by `text`.
+      if (isTextBlock(originalBlocks[part.keep])) continue
+      slots.push({ kind: 'original', index: part.keep })
+      continue
+    }
+    slots.push({ kind: 'add', upload: part.add })
+    added += 1
+  }
+  let firstText = -1
+  for (let index = 0; index < originalBlocks.length; index += 1) {
+    if (isTextBlock(originalBlocks[index])) {
+      firstText = index
+      break
+    }
+  }
+  let textAt = slots.length
+  if (firstText >= 0) {
+    // The text stands before the first kept block that came after it in the
+    // original message. When no kept block did - everything after it was
+    // removed, or it was the last block of all - it keeps its own place at the
+    // head of what is left, ahead of the blocks that used to stand before it.
+    let anchored = false
+    for (let index = 0; index < slots.length; index += 1) {
+      const slot = slots[index]
+      if (slot.kind === 'original' && slot.index > firstText) {
+        textAt = index
+        anchored = true
+        break
+      }
+    }
+    if (!anchored) {
+      let before = 0
+      for (const slot of slots) {
+        if (slot.kind === 'original' && slot.index < firstText) before += 1
+      }
+      textAt = before
+    }
+  }
+  return { slots, textAt, added }
+}
+
+/**
+ * Build the carrier content from a layout.
+ *
+ * A kept block is copied out of the original VERBATIM - a structured clone of
+ * the very object the message carries, so an attachment reference, a name, a
+ * dimension and every field a later platform adds cross the edit untouched and
+ * byte-identical. Nothing here inspects what the block is.
+ *
+ * @param originalBlocks - the message content before the edit.
+ * @param layout - the layout from {@link planBlockLayout}.
+ * @param admitted - blocks for the layout's `add` slots, in slot order.
+ * @param text - the revised text.
+ * @returns the block array the carrier is written with.
+ */
+export function assembleBlocks(originalBlocks, layout, admitted, text) {
+  const content = []
+  let next = 0
+  for (let index = 0; index <= layout.slots.length; index += 1) {
+    if (index === layout.textAt) content.push({ type: 'text', text })
+    const slot = layout.slots[index]
+    if (slot === undefined) continue
+    if (slot.kind === 'original') content.push(copyBlock(originalBlocks[slot.index]))
+    else content.push(admitted[next++])
+  }
+  return content
+}
+
+/**
+ * A verbatim copy of one block.
+ *
+ * `structuredClone` is what makes "untouched" literally true rather than
+ * nearly true: the carrier is serialized into the session log, so an identical
+ * copy and the same reference produce identical bytes - the clone only removes
+ * the chance that a later writer mutates the original through it.
+ *
+ * @param block - one content block.
+ * @returns an independent copy of the same JSON value.
+ */
+function copyBlock(block) {
+  try {
+    return structuredClone(block)
+  } catch {
+    // Not clonable (an exotic in-memory block): the block itself is still the
+    // verbatim value, which is what this function promises.
+    return block
+  }
+}
+
+/**
+ * Rebuild this plugin's rollback ledger from the log alone.
+ *
+ * Every rollback is one replacement event whose message source carries this
+ * plugin's marker (`{ editedBy: 'dsh-edit-turn' }`; see {@link isEditCarrier}).
+ * A replacement landed by any other producer - compaction, for instance - is
+ * ignored.
+ *
+ * @param events - complete contiguous raw event log.
+ * @returns `{ hidden, edits }`: one hidden entry per shadowed seq, and one
+ *   record per landed rollback.
+ */
+export function rollbackLedger(events) {
+  const folded = foldSurface(events)
+  const bySeq = new Map(events.map((event) => [event.seq, event]))
+  const turnOf = turnIndex(events)
+  const hidden = []
+  const edits = []
+  for (const replacement of folded.replacements) {
+    const event = bySeq.get(replacement.seq)
+    const data = event && event.data
+    const source = data && (data.source || (data.message && data.message.source))
+    if (!isEditCarrier(source)) continue
+    for (const seq of replacement.shadowed) {
+      const turn = turnOf.get(seq)
+      hidden.push({ seq, turn: typeof turn === 'number' ? turn : null, replacement: replacement.seq })
+    }
+    edits.push({
+      replacementSeq: replacement.seq,
+      startSeq: replacement.startSeq,
+      endSeq: replacement.endSeq,
+      shadowed: replacement.shadowed,
+    })
+  }
+  return { hidden, edits }
+}
+
+/** The turn number the format expects next: the last one opened, plus one. */
+export function nextTurnOf(events) {
+  let last = 0
+  for (const event of events) {
+    const turn = event.data && event.data.turn
+    if (typeof turn === 'number' && turn > last) last = turn
+  }
+  return last + 1
+}
+
+/** Highest turn number recorded in the log, or undefined for an empty log. */
+export function lastTurnOf(events) {
+  let last
+  for (const event of events) {
+    const turn = event.data && event.data.turn
+    if (typeof turn === 'number' && (last === undefined || turn > last)) last = turn
+  }
+  return last
+}
+
+/** Planner rejection with a machine code the HTTP layer forwards verbatim. */
+export class EditPlanError extends Error {
+  constructor(code, message) {
+    super(message)
+    this.name = 'EditPlanError'
+    this.code = code
+  }
+}
+
+/**
+ * Resolve one editing target inside a log.
+ * @param events - complete contiguous raw event log.
+ * @param request - `{ seq?, messageId?, turn? }`.
+ * @returns the target event.
+ * @throws {EditPlanError} with `not-editable` when no unique target exists.
+ */
+function resolveTarget(events, request) {
+  let targetSeq = typeof request.seq === 'number' ? request.seq : undefined
+  if (targetSeq === undefined && typeof request.messageId === 'string' && request.messageId !== '') {
+    for (const event of events) {
+      if (messageIdOf(event) === request.messageId) {
+        targetSeq = event.seq
+        break
+      }
+    }
+  }
+  if (targetSeq === undefined && typeof request.turn === 'number') {
+    for (const event of events) {
+      if (!isHumanPrompt(event)) continue
+      if (turnIndex(events).get(event.seq) !== request.turn) continue
+      targetSeq = event.seq
+      break
+    }
+  }
+  if (targetSeq === undefined) throw new EditPlanError('not-editable', 'no editing target was found')
+  const target = events.find((event) => event.seq === targetSeq)
+  if (!target) throw new EditPlanError('not-editable', 'the target event does not exist')
+  return target
+}
+
+/**
+ * Turn one UI target into the canonical rollback window plus, for a reply, the
+ * replay range that puts the later turns back after the correction.
+ *
+ * A revised PROMPT is replaced in place: its window is the message alone, so
+ * the reply under it and everything after stay exactly where they were.
+ *
+ * A revised REPLY cannot be swapped in place - the format refuses
+ * `sourceEventSeqs` on an `assistant/message`, so a new reply can only be
+ * APPENDED. The window therefore runs from the addressed reply to the last
+ * surface node, and the correction is appended in a fresh turn. Everything the
+ * window took is replayed back behind the correction by
+ * {@link buildReplayWrites}: the same infix splice dsh-rerun-turn performs, with
+ * the user's text instead of a regenerated answer.
+ *
+ * @param events - complete contiguous raw event log.
+ * @param surfaceNodes - current surface seqs in model order.
+ * @param request - `{ seq?, messageId?, turn? }` (`turn` addresses a prompt only).
+ * @returns `{ targetSeq, messageId, startSeq, endSeq, shadowed, mode, turn, step, provider, model, original, attachments, replayFrom, logTo, turnStart, turnEnd }`.
+ * @throws {EditPlanError} with a stable code when the target cannot be planned.
+ */
+export function planRollback(events, surfaceNodes, request, options = {}) {
+  const nodeIndex = new Map(surfaceNodes.map((seq, index) => [seq, index]))
+  const turnOf = turnIndex(events)
+  const target = resolveTarget(events, request, turnOf)
+  if (!nodeIndex.has(target.seq)) {
+    throw new EditPlanError('already-rolled-back', 'this message is no longer on the current surface')
+  }
+  // Surface node 0 is the system prompt head: the official append contract only
+  // lets a system/message rewrite exactly that node, and no UI row targets it.
+  if (target.seq === surfaceNodes[0]) {
+    throw new EditPlanError('not-editable', 'the system prompt head cannot be edited')
+  }
+  // Two editable kinds. A prompt is rewritten in place and the conversation
+  // continues; a reply is either patched in place through the message projection
+  // or, on a host without it, replaced by an appended correction and a replay.
+  const mode = isHumanPrompt(target) ? 'prompt' : isAssistantReply(target) ? 'reply' : null
+  if (mode === null) {
+    throw new EditPlanError('not-editable', 'only your own messages and the model replies can be edited')
+  }
+  const turn = turnOf.get(target.seq)
+  const data = target.data && typeof target.data === 'object' ? target.data : {}
+  const message = data.message && typeof data.message === 'object' ? data.message : data
+  const source = message.source && typeof message.source === 'object' ? message.source : null
+  const step = typeof data.step === 'number' ? data.step : 1
+  const contentBlocks = readMessageBlocks(target)
+
+  // The in-place path: one block of the reply, rewritten by a plugin record and
+  // its projection. Nothing leaves the surface, so there is no window and no
+  // replay; the tool calls and the other blocks stay exactly as recorded.
+  if (mode === 'reply' && options.patch === true) {
+    const patches = options.patches instanceof Map ? options.patches : new Map()
+    const blocks = projectedBlocks(message, target.seq, patches)
+    if (blocks.length === 0) {
+      throw new EditPlanError('not-editable', 'this reply has no editable block')
+    }
+    const wanted = typeof request.blockIndex === 'number'
+      ? blocks.find((block) => block.index === request.blockIndex)
+      : blocks.find((block) => block.kind === 'text') ?? blocks[0]
+    if (wanted === undefined) throw new EditPlanError('not-editable', 'the requested block does not exist')
+    if (typeof request.kind === 'string' && request.kind !== wanted.kind) {
+      throw new EditPlanError('not-editable', 'the requested block changed kind')
+    }
+    return {
+      targetSeq: target.seq,
+      messageId: messageIdOf(target),
+      mode: 'reply',
+      patch: true,
+      startSeq: null,
+      endSeq: null,
+      shadowed: [],
+      blockIndex: wanted.index,
+      kind: wanted.kind,
+      original: wanted.text,
+      // `blocks` here are the EDITOR's blocks (index/kind/text/original), not
+      // the raw content array; patch mode never rebuilds a message carrier.
+      blocks,
+      turn: typeof turn === 'number' ? turn : null,
+      step,
+      provider: source && typeof source.provider === 'string' ? source.provider : null,
+      model: source && typeof source.model === 'string' ? source.model : null,
+      attachments: contentBlocks.filter((block) => kindOfBlock(block) === null).length,
+    }
+  }
+  const startIdx = nodeIndex.get(target.seq)
+  // Two different windows, because the two edits mean different things.
+  //
+  // A revised PROMPT is replaced in place: only the message itself leaves the
+  // surface, so the reply under it and everything after stay exactly where they
+  // were - edit the wording, keep the conversation.
+  //
+  // A revised REPLY cannot be a replacement carrier (the format refuses
+  // `sourceEventSeqs` on an assistant message), so the correction is appended
+  // at the tail and everything from the addressed reply to the end must leave
+  // the surface first. `buildReplayWrites` then puts every later turn back,
+  // event by event, with fresh turn numbers and message ids - the model reads
+  // prefix + corrected reply + the same later turns, in order.
+  const shadowed = mode === 'prompt' ? [target.seq] : surfaceNodes.slice(startIdx)
+  if (shadowed.length === 0 || shadowed[0] !== target.seq) {
+    throw new EditPlanError('not-editable', 'the target does not open a rollback window')
+  }
+  // The replay range: the log range the shadow covers, and the bracket where
+  // the later turns start. A reply in the last turn has neither, and the edit
+  // degenerates to the old tail-less rollback (there is nothing to replay).
+  let replayFrom = null
+  let logTo = null
+  let turnStart = null
+  let turnEnd = null
+  if (mode === 'reply') {
+    const spans = turnSpans(events)
+    // A closed bracket that CONTAINS the reply. The fallback (the last bracket
+    // that starts before it) only matters for a malformed log with a bracket
+    // that never closed; a valid log always takes the containment branch.
+    const owning = spans.find(
+      (entry) => entry.endSeq !== null && entry.startSeq <= target.seq && target.seq <= entry.endSeq,
+    ) ?? spans.filter((entry) => entry.startSeq <= target.seq).at(-1)
+    if (owning !== undefined) {
+      turnStart = owning.startSeq
+      turnEnd = owning.endSeq
+    }
+    const lastShadowed = shadowed[shadowed.length - 1]
+    const bySeq = new Map(events.map((event) => [event.seq, event]))
+    logTo = lastShadowed
+    for (let seq = lastShadowed + 1; ; seq += 1) {
+      const event = bySeq.get(seq)
+      if (event === undefined) break
+      // The window already ends on the last surface node: only log-only events
+      // (step/turn closing records) can follow it.
+      if (isSurfaceEvent(event)) break
+      logTo = seq
+      if (event.type === 'turn/end') break
+    }
+    const owningIndex = owning === undefined ? -1 : spans.indexOf(owning)
+    const nextSpan = owningIndex >= 0 ? spans[owningIndex + 1] : undefined
+    if (nextSpan !== undefined && nextSpan.startSeq <= logTo) replayFrom = nextSpan.startSeq
+  }
+  const { text, attachments } = readMessageText(target)
+  // The blocks themselves travel with the plan: the carrier is rebuilt from
+  // them, so no caller has to re-read the message to know what it carries.
+  const blocks = contentBlocks
+  return {
+    targetSeq: target.seq,
+    messageId: messageIdOf(target),
+    startSeq: shadowed[0],
+    endSeq: shadowed[shadowed.length - 1],
+    shadowed,
+    mode,
+    patch: false,
+    turn: typeof turn === 'number' ? turn : null,
+    // The appended correction is keyed by turn:step in the client's reducer, so a
+    // missing step would make two corrections collide on "undefined:undefined".
+    step,
+    provider: source && typeof source.provider === 'string' ? source.provider : null,
+    model: source && typeof source.model === 'string' ? source.model : null,
+    original: text,
+    attachments,
+    blocks,
+    // Reply-only replay range. `replayFrom` is the next turn's bracket (null when
+    // the edited reply is in the last turn); `logTo` is the end of the last turn
+    // the window shadowed. Both are computed from the ORIGINAL log and stay valid
+    // while the correction is appended after it.
+    replayFrom,
+    logTo,
+    turnStart,
+    turnEnd,
+  }
+}
+
+// --- reply replay -----------------------------------------------------------
+//
+// A reply edit lands exactly like a rerun's infix splice: the shadow takes the
+// old answer and every later turn off the surface, the correction is appended in
+// a fresh turn, and this walk puts the later turns back as fresh copies. The
+// algorithm is the one dsh-rerun-turn ships (`buildReplayWrites` there); keep the
+// two in step - `test/replay-parity.test.js` compares their output on one log
+// when the sibling repository is checked out.
+
+/** Marker written into every replayed event's source. */
+export const REPLAY_MARKER = PLUGIN_ID
+
+/** Text that carries nothing a model could read (spaces, zero-width glue). */
+const INVISIBLE_TEXT_RE = /^[\s\u200b-\u200f\u2060\ufeff]*$/
+
+/**
+ * Whether content blocks carry anything readable.
+ * @param content - the `content` array of a message.
+ * @returns true when at least one block is not invisible text.
+ */
+export function hasReadableContent(content) {
+  if (!Array.isArray(content)) return false
+  for (const block of content) {
+    if (!block || typeof block !== 'object') continue
+    if (block.type !== 'text') return true
+    if (typeof block.text !== 'string' || !INVISIBLE_TEXT_RE.test(block.text)) return true
+  }
+  return false
+}
+
+/**
+ * Whether an event is a plugin's silent surface carrier rather than conversation.
+ *
+ * `dsh-delete-turn` writes one for a deletion and `dsh-rerun-turn` for a rerun's
+ * shadow - a `user/message` whose source kind is `plugin:<id>` and whose content
+ * is empty or invisible. A replay must retire it without a copy: it projects to
+ * no model message, so copying it would resurrect an empty user node.
+ *
+ * A rewritten prompt is NOT this shape: `dsh-edit-turn` keeps `kind: 'user'` and
+ * carries the user's wording, so it stays a real prompt and is copied.
+ *
+ * @param event - raw session event.
+ * @returns true for a text-free plugin replacement.
+ */
+export function isSilentPluginCarrier(event) {
+  if (!event || event.type !== 'user/message') return false
+  const data = event.data || {}
+  const source = data.source
+  if (!source || typeof source.kind !== 'string' || !source.kind.startsWith('plugin:')) return false
+  return !hasReadableContent(data.content)
+}
+
+/** Stamp one copied event's source with this plugin's replay markers. */
+function replaySource(source, replayId, originalSeq) {
+  return {
+    ...(source && typeof source === 'object' ? source : {}),
+    replayBy: REPLAY_MARKER,
+    replayId,
+    originalSeq,
+  }
+}
+
+/**
+ * Build the replay writes for a reply edit's shadowed tail.
+ *
+ * Every shadowed event after the edited reply is copied verbatim except for:
+ * fresh turn numbers (the log requires them contiguous), fresh message ids,
+ * remapped `sourceEventSeqs` on tool results, dropped usage numbers and embedded
+ * streams, and the replay marker in each message source. System, developer and
+ * every log-only record are skipped: they describe the original run, not the
+ * conversation.
+ *
+ * Tool calls are copied only as complete pairs. A call whose result never landed
+ * (an interrupted turn) is dropped along with its advertisement in the copied
+ * assistant content, because the format refuses a turn that closes with an
+ * unresolved call. The inverse repair shape - a `TOOL_NOT_STARTED` result with no
+ * call event - is copied as-is and keeps its absent `sourceEventSeqs`: the
+ * validator accepts that repair only without one.
+ *
+ * @param events - complete contiguous raw event log (the pre-edit snapshot).
+ * @param plan - the planned window (`shadowed`, `replayFrom`, `logTo`).
+ * @param baseTurn - the first fresh turn number the replay may use.
+ * @param replayId - the operation identity recorded on every copy.
+ * @param startSeq - the seq the first write will land at (writes are appended
+ *   back to back, so each predicted seq is `startSeq` + its offset).
+ * @param promptCopied - parity with dsh-rerun-turn's builder: when true, the
+ *   plan's `promptSeq` is replayed too. A reply edit never shadows the prompt,
+ *   so its own plans leave this false.
+ * @returns an ordered `{ type, data, surfaceOp?, sourceEventSeqs? }` write list.
+ */
+export function buildReplayWrites(events, plan, baseTurn, replayId, startSeq, promptCopied = false) {
+  const shadowedSet = new Set(plan.shadowed)
+  const bySeq = new Map(events.map((event) => [event.seq, event]))
+  const turnOf = turnIndex(events)
+  const shadowedTurns = new Set()
+  for (const seq of plan.shadowed) {
+    const turn = turnOf.get(seq)
+    if (typeof turn === 'number') shadowedTurns.add(turn)
+  }
+  const included = (event) => {
+    if (isSurfaceEvent(event)) return shadowedSet.has(event.seq)
+    if (
+      event.type === 'turn/start' ||
+      event.type === 'turn/end' ||
+      event.type === 'step/start' ||
+      event.type === 'step/end' ||
+      event.type === 'tool/call'
+    ) {
+      return typeof event.data.turn === 'number' && shadowedTurns.has(event.data.turn)
+    }
+    return false
+  }
+  const range = []
+  // `replayFrom` is this plugin's plan field; `logFrom` is the name the sibling
+  // builder uses, accepted here so the parity test can feed one plan object.
+  const walkFrom = typeof plan.replayFrom === 'number' ? plan.replayFrom : plan.logFrom
+  for (let seq = walkFrom; seq <= plan.logTo; seq += 1) {
+    const event = bySeq.get(seq)
+    if (event === undefined) continue
+    if (included(event)) range.push(event)
+  }
+  // Tool pairing facts for the whole range, so assistant content can be
+  // corrected before anything is written.
+  const calledIds = new Set()
+  const resultIds = new Set()
+  const repairIds = new Set()
+  for (const event of range) {
+    if (event.type === 'tool/call') calledIds.add(event.data.callId)
+    else if (event.type === 'tool/result') {
+      resultIds.add(event.data.message && event.data.message.source ? event.data.message.source.callId : event.data.callId)
+      const error = event.data.error
+      if (error && error.name === 'ToolNotStartedError' && error.code === 'TOOL_NOT_STARTED' && event.sourceEventSeqs === undefined) {
+        repairIds.add(event.data.message && event.data.message.source ? event.data.message.source.callId : event.data.callId)
+      }
+    }
+  }
+  const healthyIds = new Set()
+  for (const id of calledIds) if (resultIds.has(id)) healthyIds.add(id)
+  for (const id of repairIds) if (!calledIds.has(id)) healthyIds.add(id)
+  const pairedResultIds = new Set()
+  for (const id of calledIds) if (resultIds.has(id)) pairedResultIds.add(id)
+  for (const id of repairIds) if (!calledIds.has(id)) pairedResultIds.add(id)
+
+  const writes = []
+  let predicted = startSeq
+  let nextTurn = baseTurn
+  const turnMap = new Map()
+  const assistantSeqById = new Map()
+  let lastAssistantSeq = null
+  const seqOf = () => {
+    const seq = predicted
+    predicted += 1
+    return seq
+  }
+  for (const event of range) {
+    const data = event.data || {}
+    if (event.type === 'turn/start') {
+      turnMap.set(data.turn, nextTurn)
+      writes.push({ type: 'turn/start', data: { turn: nextTurn } })
+      seqOf()
+      continue
+    }
+    if (event.type === 'turn/end') {
+      writes.push({ type: 'turn/end', data: { turn: turnMap.get(data.turn), reason: data.reason } })
+      seqOf()
+      nextTurn += 1
+      continue
+    }
+    if (event.type === 'step/start' || event.type === 'step/end') {
+      writes.push({ type: event.type, data: { turn: turnMap.get(data.turn), step: data.step } })
+      seqOf()
+      continue
+    }
+    if (event.type === 'user/message') {
+      if (event.seq === plan.promptSeq && promptCopied !== true) continue
+      // A silent carrier standing where a prompt was is bookkeeping, not
+      // conversation: retire it without a copy, exactly as rerun does.
+      if (isSilentPluginCarrier(event)) continue
+      writes.push({
+        type: 'user/message',
+        surfaceOp: 'append',
+        data: {
+          id: randomUUID(),
+          role: 'user',
+          content: data.content,
+          source: replaySource(data.source, replayId, event.seq),
+        },
+      })
+      seqOf()
+      continue
+    }
+    if (event.type === 'assistant/message') {
+      const message = data.message || {}
+      const source = { ...(message.source || {}) }
+      delete source.replayState
+      const content = Array.isArray(message.content)
+        ? message.content.filter((block) => !(block && block.type === 'tool-call' && !healthyIds.has(block.id)))
+        : []
+      writes.push({
+        type: 'assistant/message',
+        surfaceOp: 'append',
+        data: {
+          turn: turnMap.get(data.turn),
+          step: data.step,
+          message: {
+            id: randomUUID(),
+            role: 'assistant',
+            content,
+            source: replaySource(source, replayId, event.seq),
+          },
+          stream: [],
+          ...(data.interrupted === true ? { interrupted: true } : {}),
+        },
+      })
+      assistantSeqById.set(event.seq, predicted)
+      lastAssistantSeq = predicted
+      seqOf()
+      continue
+    }
+    if (event.type === 'tool/call') {
+      if (!pairedResultIds.has(data.callId)) continue
+      writes.push({
+        type: 'tool/call',
+        data: { turn: turnMap.get(data.turn), step: data.step, callId: data.callId, name: data.name, arguments: data.arguments },
+      })
+      seqOf()
+      continue
+    }
+    if (event.type === 'tool/result') {
+      const callId = data.message && data.message.source ? data.message.source.callId : data.callId
+      if (!pairedResultIds.has(callId)) continue
+      const message = data.message
+      const source = replaySource(message && message.source, replayId, event.seq)
+      // The TOOL_NOT_STARTED repair is accepted only without sourceEventSeqs;
+      // ordinary results remap theirs onto the copied assistant message.
+      let sourceEventSeqs
+      if (!repairIds.has(callId)) {
+        const remapped = Array.isArray(event.sourceEventSeqs)
+          ? event.sourceEventSeqs.map((seq) => assistantSeqById.get(seq)).filter((seq) => typeof seq === 'number')
+          : []
+        if (remapped.length > 0) sourceEventSeqs = remapped
+        else if (typeof lastAssistantSeq === 'number') sourceEventSeqs = [lastAssistantSeq]
+      }
+      const originalMessage = message || {}
+      const rest = { ...originalMessage }
+      delete rest.id
+      delete rest.content
+      delete rest.source
+      // The interrupted-repair carrier must keep its contract-shaped id
+      // (`interrupted-tool-result-<callId>-<n>`): the validator refuses a repair
+      // whose id does not match, and a random id breaks it. The suffix is the
+      // copy's own predicted seq, so the identity stays self-describing.
+      const messageId = repairIds.has(callId) ? `interrupted-tool-result-${callId}-${predicted}` : randomUUID()
+      writes.push({
+        type: 'tool/result',
+        surfaceOp: 'append',
+        ...(sourceEventSeqs === undefined ? {} : { sourceEventSeqs }),
+        data: {
+          turn: turnMap.get(data.turn),
+          step: data.step,
+          message: {
+            ...rest,
+            id: messageId,
+            content: originalMessage.content ?? [],
+            source,
+          },
+          ...(data.error === undefined ? {} : { error: data.error }),
+          ...(data.meta === undefined ? {} : { meta: data.meta }),
+        },
+      })
+      seqOf()
+      continue
+    }
+    // system/message, developer/message and every log-only record are skipped.
+  }
+  return writes
+}
+
+/**
+ * Every human prompt that can currently be edited.
+ *
+ * A prompt that already left the surface (an earlier rollback shadowed it, or a
+ * compaction consumed it) keeps its transcript row on purpose, so it must not
+ * be offered again.
+ *
+ * @param events - complete contiguous raw event log.
+ * @param surfaceNodes - current surface seqs in model order.
+ * @param options - `{ preview }`: whether the deployment can hand attachment
+ *   bytes back, which decides if a chip may offer a thumbnail.
+ * @returns one entry per editable prompt, in conversation order.
+ */
+export function editableTurns(events, surfaceNodes, options = {}) {
+  const eventBySeq = new Map(events.map((event) => [event.seq, event]))
+  const turnOf = turnIndex(events)
+  const head = surfaceNodes[0]
+  const out = []
+  // Surface order, not log order: a prompt rewritten in place travels as a
+  // replace-carrier, which is APPENDED at the end of the log while standing at
+  // the surface position of the wording it replaced. Walking `events` would
+  // report the revision as the newest message in the conversation.
+  for (const seq of surfaceNodes) {
+    const event = eventBySeq.get(seq)
+    if (!event || !isHumanPrompt(event)) continue
+    if (seq === head) continue
+    const { text, attachments } = readMessageText(event)
+    // A replacement carrier is appended after its original turn's bracket has
+    // closed, so turnIndex cannot name its turn. It still stands at that
+    // prompt's position in the conversation: inherit the turn from the event
+    // it replaced, or the editor's turn list loses the row (turn: null).
+    let turn = turnOf.get(seq)
+    if (typeof turn !== 'number' && Array.isArray(event.sourceEventSeqs)) {
+      for (const source of event.sourceEventSeqs) {
+        const inherited = turnOf.get(source)
+        if (typeof inherited === 'number') {
+          turn = inherited
+          break
+        }
+      }
+    }
+    out.push({
+      seq,
+      turn: typeof turn === 'number' ? turn : null,
+      messageId: messageIdOf(event) ?? null,
+      text,
+      attachments,
+      // What the editor draws beside the text: one chip per non-text block,
+      // described by field presence only (see blockSummaries).
+      blocks: blockSummaries(readMessageBlocks(event), options.preview === true),
+    })
+  }
+  return out
+}
+
+/**
+ * Every model reply that can currently be rewritten.
+ *
+ * In patch mode (the in-place projection path) a reply is offered when it has
+ * any editable block - output text or a reasoning/thinking block - and the
+ * blocks travel with the entry so the editor can pick one. In the legacy replay
+ * mode only text is editable, and a reply without text is skipped.
+ *
+ * @param events - complete contiguous raw event log.
+ * @param surfaceNodes - current surface seqs in model order.
+ * @param options - `{ patches, patch }`: landed patch overlays and whether the
+ *   deployment can write a patch record.
+ * @returns one entry per editable reply, in conversation order.
+ */
+export function editableReplies(events, surfaceNodes, options = {}) {
+  const nodeIndex = new Map(surfaceNodes.map((seq, index) => [seq, index]))
+  const turnOf = turnIndex(events)
+  const head = surfaceNodes[0]
+  const patches = options.patches instanceof Map ? options.patches : new Map()
+  const patch = options.patch === true
+  const out = []
+  for (const event of events) {
+    if (!isAssistantReply(event)) continue
+    if (!nodeIndex.has(event.seq)) continue
+    if (event.seq === head) continue
+    const data = event.data && typeof event.data === 'object' ? event.data : {}
+    const message = data.message && typeof data.message === 'object' ? data.message : data
+    const blocks = projectedBlocks(message, event.seq, patches)
+    if (blocks.length === 0) continue
+    const text = blocks.filter((block) => block.kind === 'text').map((block) => block.text).join('\n')
+    if (!patch && text.trim() === '') continue
+    if (patch && blocks.every((block) => block.text.trim() === '')) continue
+    const turn = turnOf.get(event.seq)
+    // One turn runs many steps, and every step's assistant message carries its
+    // own reasoning. The answer's row is the one with the action strip, so its
+    // block list is widened to the whole turn: every reasoning and every answer
+    // text of that turn is offered, each annotated with the seq it lives in.
+    let listed = blocks.map((block) => ({ ...block, seq: event.seq }))
+    const carriesAnswer = blocks.some((block) => block.kind === 'text' && block.text.trim() !== '')
+    if (patch && carriesAnswer && typeof turn === 'number') {
+      const acrossTurn = []
+      for (const other of events) {
+        if (!isAssistantReply(other) || turnOf.get(other.seq) !== turn) continue
+        if (!nodeIndex.has(other.seq)) continue
+        const otherData = other.data && typeof other.data === 'object' ? other.data : {}
+        const otherMessage = otherData.message && typeof otherData.message === 'object' ? otherData.message : otherData
+        for (const block of projectedBlocks(otherMessage, other.seq, patches)) {
+          acrossTurn.push({ ...block, seq: other.seq })
+        }
+      }
+      if (acrossTurn.length > listed.length) listed = acrossTurn
+    }
+    out.push({
+      seq: event.seq,
+      turn: typeof turn === 'number' ? turn : null,
+      messageId: messageIdOf(event) ?? null,
+      text,
+      // For a reply these are the blocks a text-only rewrite would drop:
+      // tool calls and any other non-editable content.
+      attachments: readMessageBlocks(event).filter((block) => patch ? kindOfBlock(block) === null : !isTextBlock(block)).length,
+      patched: blocks.some((block) => block.patched),
+      // Present only where the editor can target one: the replay path can only
+      // replace the whole reply, so it has no block picker.
+      ...(patch ? { blocks: listed } : {}),
+    })
+  }
+  return out
+}
+
+// ---------------------------------------------------------------------------
+// host service plumbing
+// ---------------------------------------------------------------------------
+
+class HttpError extends Error {
+  constructor(status, code, message) {
+    super(message)
+    this.name = 'HttpError'
+    this.status = status
+    this.code = code
+  }
+}
+
+// A session id travels in two spellings: the raw uuid and `session-<uuid>`.
+// The store, the persistence directories and the workspace rows disagree about
+// which one they hold, so every lookup tries both.
+function idVariants(sessionId) {
+  const out = new Set([sessionId])
+  if (sessionId.startsWith('session-')) out.add(sessionId.slice('session-'.length))
+  else out.add(`session-${sessionId}`)
+  return [...out]
+}
+
+function findLiveSession(ctx, sessionId) {
+  const sessions = ctx.get('sessions')
+  if (!sessions || typeof sessions.get !== 'function') return undefined
+  for (const variant of idVariants(sessionId)) {
+    const found = sessions.get(variant)
+    if (found) return found
+  }
+  return undefined
+}
+
+// Resolve the live Session that owns the append. An already-open session is
+// used directly; a cold one is resumed through the official controller, which
+// is exactly what the web UI does when the user opens it.
+/**
+ * The live agent whose loop owns this session's turn counter, when one exists.
+ * @param ctx - plugin context.
+ * @param sessionId - session to resolve.
+ * @returns the agent, or undefined (cold session, or no controller mounted).
+ */
+async function resolveLoopAgent(ctx, sessionId) {
+  const controller = ctx.get('sessionController')
+  if (!controller || typeof controller.resolveAgent !== 'function') return undefined
+  try {
+    const result = await controller.resolveAgent(sessionId)
+    return result && result.agent ? result.agent : undefined
+  } catch {
+    return undefined
+  }
+}
+
+async function resolveSession(ctx, sessionId) {
+  const live = findLiveSession(ctx, sessionId)
+  if (live) return live
+  const controller = ctx.get('sessionController')
+  if (controller && typeof controller.resolveAgent === 'function') {
+    try {
+      const result = await controller.resolveAgent(sessionId)
+      if (result && result.agent && result.agent.session) return result.agent.session
+    } catch {
+      // fall through to the explicit failure below
+    }
+  }
+  return undefined
+}
+
+/**
+ * Make the live agent loop agree with a turn this plugin opened in the log.
+ *
+ * The loop keeps its own counter in an idle-phase field (`phase.lastTurn`): it
+ * is seeded when the loop is constructed from the projection and advanced only
+ * by turns the loop itself opens. A reply edit has to open a turn - the read
+ * path admits an `assistant/message` only inside an open turn and step - so
+ * afterwards that field still names the turn this plugin consumed, and the
+ * loop's next run would open the same number. That collides: both turn/start
+ * events claim one number and the log fails its next load
+ * (`turn/start does not open the expected turn`), which is the corruption this
+ * plugin already shipped once and repaired.
+ *
+ * The shape guard is deliberate and the failure is soft: if the loop is not
+ * idle, or its shape is not what this expects, nothing is touched and the
+ * caller records why. The sibling plugin dsh-rerun-turn solves the same
+ * problem the same way (`syncLoopTurn`); there is no official seam for it.
+ *
+ * @param agent - the live loop agent, when one exists.
+ * @param maxTurn - the highest turn now in the log.
+ * @returns `'synced' | 'already-current' | 'unavailable'`.
+ */
+export function syncLoopTurn(agent, maxTurn) {
+  try {
+    const phase = agent && agent.phase
+    if (!phase || typeof phase !== 'object' || phase.kind !== 'idle' || typeof phase.lastTurn !== 'number') {
+      return 'unavailable'
+    }
+    if (maxTurn > phase.lastTurn) {
+      phase.lastTurn = maxTurn
+      return 'synced'
+    }
+    return 'already-current'
+  } catch {
+    return 'unavailable'
+  }
+}
+
+function eventsFromLive(session) {
+  if (session && typeof session.snapshotEvents === 'function') {
+    try {
+      const events = session.snapshotEvents()
+      if (Array.isArray(events)) return events
+    } catch {
+      // fall through to the query service
+    }
+  }
+  return undefined
+}
+
+// Live-preferred read through the public query service; the live session's own
+// snapshot is the fallback when the service is absent.
+async function readEvents(ctx, sessionId) {
+  const query = ctx.get('sessionQuery')
+  if (query && typeof query.readSession === 'function') {
+    try {
+      const snapshot = await query.readSession(sessionId)
+      if (snapshot && Array.isArray(snapshot.events)) return snapshot.events
+    } catch {
+      // fall through to the live snapshot
+    }
+  }
+  const events = eventsFromLive(findLiveSession(ctx, sessionId))
+  return events ?? null
+}
+
+function surfaceOf(ctx, sessionId, events) {
+  const live = findLiveSession(ctx, sessionId)
+  const nodes = live && live.surface && Array.isArray(live.surface.nodes) ? live.surface.nodes : undefined
+  return nodes ?? foldSurface(events).nodes
+}
+
+// The append is committed in memory the moment `session.append` returns; the
+// persistence writer buffers asynchronously. Await the official durability
+// checkpoint so a reload or a DSH restart still sees the rollback.
+async function flushSession(ctx, session) {
+  const errors = []
+  const sessions = ctx.get('sessions')
+  if (sessions && typeof sessions.flush === 'function') {
+    try {
+      await Promise.race([sessions.flush(session), new Promise((resolve) => setTimeout(resolve, FLUSH_DEADLINE_MS))])
+      return { flushed: true }
+    } catch (error) {
+      errors.push(String((error && error.message) || error))
+    }
+  } else {
+    errors.push('sessions.flush unavailable')
+  }
+  const persistence = ctx.get('sessionPersistence')
+  if (persistence && typeof persistence.flush === 'function') {
+    try {
+      await Promise.race([persistence.flush(), new Promise((resolve) => setTimeout(resolve, FLUSH_DEADLINE_MS))])
+      return { flushed: true }
+    } catch (error) {
+      errors.push(String((error && error.message) || error))
+    }
+  } else {
+    errors.push('sessionPersistence.flush unavailable')
+  }
+  return { flushed: false, flushError: errors.join(' | ') }
+}
+
+// --- attachment admission ----------------------------------------------------
+//
+// The platform's durable store is the only path by which bytes become a
+// reference a session may cite (@deepseek-ai/dsh-attachment's `AttachmentStore`;
+// the local backend is @deepseek-ai/dsh-attachment-local). It is resolved at
+// REQUEST time, never assumed: a deployment that mounts none must keep working
+// exactly as this plugin did before blocks travelled at all - text only, with
+// the editor saying so - and one that mounts a store later starts working with
+// no restart.
+
+/**
+ * The durable attachment store this deployment mounts, when it has one.
+ *
+ * Candidate names are probed the way the platform's own consumers reach it
+ * (`ctx.get('attachments')`, e.g. dsh-acp). An object is only accepted when it
+ * can actually admit something: a service that merely shares the name must not
+ * make the editor promise to keep a block the host cannot store.
+ *
+ * @param ctx - plugin context.
+ * @returns the store, or null when the deployment mounts none.
+ */
+export function resolveAttachmentStore(ctx) {
+  if (!ctx || typeof ctx.get !== 'function') return null
+  for (const name of ATTACHMENT_SERVICES) {
+    let store
+    try {
+      store = ctx.get(name)
+    } catch {
+      store = null
+    }
+    if (!store || typeof store !== 'object') continue
+    if (typeof store.saveImage === 'function' || typeof store.saveFile === 'function') return store
+  }
+  return null
+}
+
+/**
+ * Whether this deployment can hand attachment bytes back for a chip thumbnail.
+ * @param store - the resolved store, or null.
+ * @returns true when a read path exists.
+ */
+export function canPreviewAttachments(store) {
+  return Boolean(store) && (typeof store.readImage === 'function' || typeof store.fileHostPath === 'function')
+}
+
+/**
+ * Decode one upload exactly the way the platform's wire admission does.
+ *
+ * Canonical base64 only (the platform's `admission.js` test): a payload whose
+ * re-encoding differs is refused rather than silently decoded into different
+ * bytes than the browser meant to send.
+ *
+ * @param data - base64 text.
+ * @returns the decoded bytes.
+ * @throws {HttpError} 400 `invalid` for anything but bounded canonical base64.
+ */
+function decodeUpload(data) {
+  if (typeof data !== 'string' || data === '') throw new HttpError(400, 'invalid', 'an upload carried no data')
+  if (data.length > MAX_UPLOAD_BYTES * 2) throw new HttpError(400, 'invalid', 'an upload is too large')
+  const decoded = Buffer.from(data, 'base64')
+  if (decoded.toString('base64') !== data) throw new HttpError(400, 'invalid', 'an upload is not canonical base64')
+  if (decoded.byteLength > MAX_UPLOAD_BYTES) throw new HttpError(400, 'invalid', 'an upload is too large')
+  return new Uint8Array(decoded)
+}
+
+/**
+ * Admit one uploaded payload and hand back the block that cites it.
+ *
+ * The STORE decides the shape, not this plugin: bytes it accepts as an image
+ * become the platform's image block, anything else is stored verbatim as a file
+ * block. That is the platform's own vocabulary (`AttachmentStore.saveImage` /
+ * `saveFile`, and `admitPromptContent` builds the same two shapes), and it is
+ * the only place a block type is named in the whole edit path - a block the
+ * user did not touch never passes through here at all.
+ *
+ * @param store - the resolved attachment store.
+ * @param upload - `{ data, mediaType?, name? }`.
+ * @returns the content block citing the durable reference.
+ * @throws {HttpError} 400 `attachment-refused` when the store refuses it.
+ */
+export async function admitUpload(store, upload) {
+  const data = decodeUpload(upload.data)
+  const name = typeof upload.name === 'string' && upload.name !== '' ? upload.name : undefined
+  const mediaType = typeof upload.mediaType === 'string' && upload.mediaType !== '' ? upload.mediaType : undefined
+  // The store's own advertised media types decide whether it can take this as
+  // an image; without that list, the declared type family is the only signal.
+  const imageTypes = store.imageLimits && Array.isArray(store.imageLimits.mediaTypes) ? store.imageLimits.mediaTypes : null
+  const asImage = mediaType !== undefined && typeof store.saveImage === 'function' &&
+    (imageTypes === null ? mediaType.startsWith('image/') : imageTypes.includes(mediaType))
+  try {
+    if (asImage) {
+      const ref = await store.saveImage(name === undefined ? { data, mediaType } : { data, mediaType, name })
+      return { type: 'image', attachment: ref }
+    }
+    if (typeof store.saveFile !== 'function') {
+      throw new HttpError(400, 'attachment-refused', 'this deployment can only store images')
+    }
+    const ref = await store.saveFile(name === undefined ? { data } : { data, name })
+    return { type: 'file', attachment: ref }
+  } catch (error) {
+    if (error instanceof HttpError) throw error
+    // The store's own refusal (too many images, wrong bytes, an unwritable
+    // root) is reported as-is and NOTHING is written: admission runs before the
+    // first append, so a refused upload can never leave a half-built carrier.
+    const detail = String((error && error.message) || error)
+    throw new HttpError(400, 'attachment-refused', detail)
+  }
+}
+
+/**
+ * The bytes of one block's attachment, for a chip's thumbnail.
+ *
+ * A display-only read, deliberately kept out of the edit path. It answers from
+ * whatever read seam the mounted store offers - an image reader, or the host
+ * path of a verbatim file - and gives up quietly when neither exists, because a
+ * chip without a picture is still a usable chip. The block is located by the
+ * seq of the message and its index inside that message's content, and the only
+ * authorization is that the session's own log really does cite it: the same bar
+ * the platform's attachment RPC applies before handing bytes over.
+ *
+ * @param ctx - plugin context.
+ * @param sessionId - the session whose log owns the block.
+ * @param seq - seq of the message event.
+ * @param index - the block's index in that message's content.
+ * @returns `{ data, mediaType }`, or null when there is nothing to serve.
+ */
+export async function attachmentBytes(ctx, sessionId, seq, index) {
+  const events = await readEvents(ctx, sessionId)
+  if (!events) return null
+  const event = events.find((item) => item && item.seq === seq)
+  if (!event) return null
+  const block = readMessageBlocks(event)[index]
+  if (!block || typeof block !== 'object') return null
+  const ref = block.attachment
+  if (!ref || typeof ref !== 'object' || typeof ref.attachmentId !== 'string' || ref.attachmentId === '') return null
+  if (typeof ref.bytes === 'number' && ref.bytes > MAX_PREVIEW_BYTES) return null
+  const store = resolveAttachmentStore(ctx)
+  if (store === null) return null
+  if (typeof store.readImage === 'function') {
+    try {
+      const stored = await store.readImage(ref)
+      if (stored && stored.data) {
+        const mediaType = stored.ref && typeof stored.ref.mediaType === 'string' ? stored.ref.mediaType : ref.mediaType
+        return { data: Buffer.from(stored.data), mediaType: typeof mediaType === 'string' ? mediaType : undefined }
+      }
+    } catch {
+      // Not an image reference; a stored file is read below.
+    }
+  }
+  if (typeof store.fileHostPath === 'function') {
+    try {
+      const path = store.fileHostPath(ref)
+      if (typeof path === 'string' && path !== '') return { data: await readFile(path), mediaType: undefined }
+    } catch {
+      // The reference resolves to nothing this deployment can serve.
+    }
+  }
+  return null
+}
+
+// --- operations --------------------------------------------------------------
+
+async function stateOf(ctx, sessionId, config) {
+  const events = await readEvents(ctx, sessionId)
+  if (!events) {
+    // A named session with nothing in it yet is an EMPTY session, not a failed
+    // one: the editor opens with nothing to edit, and the next refresh picks the
+    // log up once it exists. Answering 404 here is what the panel printed as
+    // "状态加载失败，稍后重试。". The capability probe still runs, because "what
+    // can this deployment do" does not depend on the log.
+    noteRequest({ kind: 'state', sessionId, ok: true, code: 'session-empty' })
+    const store = resolveAttachmentStore(ctx)
+    return {
+      hidden: [],
+      edits: 0,
+      revisions: [],
+      surface: [],
+      turns: [],
+      replies: [],
+      patches: [],
+      mode: config.patch === true ? 'patch' : 'replay',
+      live: false,
+      busy: false,
+      lastSeq: -1,
+      capabilities: { attachments: store !== null, preview: canPreviewAttachments(store) },
+      config: {
+        confirm: config.confirm,
+        replyMode: config.replyMode,
+        patch: config.patch === true,
+        editorStyle: config.editorStyle,
+      },
+      version: PLUGIN_VERSION,
+    }
+  }
+  const folded = foldSurface(events)
+  const ledger = rollbackLedger(events)
+  const patches = patchesOf(events)
+  // A patch whose target has been retired (a later rerun shadowed it) is inert:
+  // the projection skips it and no row can show it. Reporting it in /state made
+  // the browser draw a patch that could never land, and made "which patches are
+  // live" ambiguous. Keep the internal map for the replies; publish the active
+  // subset only.
+  const surfaceSet = new Set(folded.nodes)
+  const activePatches = new Map([...patches].filter(([seq]) => surfaceSet.has(seq)))
+  const live = findLiveSession(ctx, sessionId)
+  // Probed per request: the editor offers what THIS deployment can do right
+  // now, so a store that is unmounted (or not yet mounted) cannot leave the
+  // editor promising to keep blocks the host would have to drop.
+  const store = resolveAttachmentStore(ctx)
+  const turns = editableTurns(events, folded.nodes, { preview: canPreviewAttachments(store) })
+  const replies = editableReplies(events, folded.nodes, { patches, patch: config.patch === true })
+  noteRequest({
+    kind: 'state',
+    sessionId,
+    ok: true,
+    events: events.length,
+    turns: turns.length,
+    replies: replies.length,
+    hidden: ledger.hidden.length,
+    live: Boolean(live),
+  })
+  return {
+    hidden: ledger.hidden,
+    edits: ledger.edits.length,
+    // The window record behind every hidden entry, with the same field names the
+    // apply response uses (`replacementSeq`, `shadowed`, plus the window bounds).
+    // Published so a sibling plugin can follow a rewritten message to its live
+    // node without re-deriving the ledger from the log itself.
+    revisions: ledger.edits,
+    surface: folded.nodes,
+    turns,
+    replies,
+    // The landed in-place patches, latest per block. The browser half uses them
+    // to draw the projected text in place of the recorded one; the model already
+    // sees them through the host projection.
+    patches: patchList(activePatches),
+    mode: config.patch === true ? 'patch' : 'replay',
+    live: Boolean(live),
+    busy: isBusy(events),
+    lastSeq: events.length > 0 ? events[events.length - 1].seq : -1,
+    // What this deployment can do with a block list. `attachments` is the
+    // admission path (a chip the editor may keep) and `preview` is the read
+    // path (a chip that may draw its own thumbnail); both are answered from a
+    // live service probe, so the editor never promises what the host cannot do.
+    capabilities: { attachments: store !== null, preview: canPreviewAttachments(store) },
+    config: {
+      confirm: config.confirm,
+      replyMode: config.replyMode,
+      patch: config.patch === true,
+      editorStyle: config.editorStyle,
+    },
+    version: PLUGIN_VERSION,
+  }
+}
+
+/**
+ * Build the event that carries one rollback replacement.
+ *
+ * @param plan - the planned window.
+ * @param lastTurn - highest turn number in the log, for a coherent bracket.
+ * @param config - resolved deployment policy.
+ * @param content - the block list the revised prompt carries. Omitted, the
+ *   carrier falls back to the marker text alone, which is what every caller
+ *   that predates block-preserving edits (and the silent developer carrier)
+ *   still asks for.
+ * @returns `{ type, data }` for `session.append`.
+ */
+export function buildCarrier(plan, lastTurn, config, content) {
+  const silent = config.carrier !== 'user/message'
+  if (silent) {
+    // The silent carrier is an empty message that projects to no model message.
+    // It has to be a `developer/message`: the format admits only system-prompt
+    // sources on `system/message`, so an empty plugin-owned system node (what
+    // this used to append) made every session that contained one unreadable -
+    // `SessionFormatError` on load, after a perfectly accepted append. An empty
+    // developer message is legal, dormant, and a replacement never gets a row
+    // of its own (rows are built for append events only), so it is invisible in
+    // the transcript too.
+    return {
+      type: 'developer/message',
+      data: {
+        turn: typeof lastTurn === 'number' ? lastTurn : 0,
+        step: 1,
+        message: {
+          id: randomUUID(),
+          role: 'developer',
+          content: [],
+          source: { kind: `plugin:${PLUGIN_ID}`, editedBy: PLUGIN_ID },
+        },
+      },
+    }
+  }
+  return {
+    type: 'user/message',
+    data: {
+      id: randomUUID(),
+      role: 'user',
+      content: Array.isArray(content) && content.length > 0 ? content : [{ type: 'text', text: config.markerText }],
+      // `kind: 'user'`, NOT a plugin-owned kind. This carrier stands in a human's
+      // place - it IS the wording the user is asking with now - and the platform
+      // owns that judgement: a human prompt is exactly a `user/message` whose
+      // `source.kind` is `'user'`. Writing anything else here made the turn's
+      // prompt unrecognisable to every consumer that tests it -
+      // `dsh-session-turn-outline` (the turn rail and the Trajectory view),
+      // `dsh-client-ui-trajectory`, `dsh-client-ui-chat`, the inbox steering
+      // filter, and `lastPromptAt` on the session list - so an edited turn
+      // showed no prompt at all and `turnOutline` reported `prompt: ""`. The
+      // format's producer-owned kind (`plugin:<id>`) is for messages a plugin
+      // authors in its own voice; a prompt it merely rewrote is not one.
+      // `editedBy` below carries the provenance that `kind` used to.
+      source: { kind: 'user', editedBy: PLUGIN_ID },
+    },
+  }
+}
+
+/**
+ * The new assistant message that carries an edited reply.
+ *
+ * A reply cannot be swapped in place - the validator refuses `sourceEventSeqs`
+ * on an `assistant/message` - so the correction is appended as a fresh reply.
+ * `turn`/`step` are always set because the client keys a reply node by
+ * `turn:step`; leaving them out would make two corrections collide.
+ *
+ * `source.kind` stays `model` so the entry renders and projects exactly like an
+ * ordinary reply, while `editedBy` records honestly that the text was written by
+ * the plugin and not produced by the model.
+ *
+ * @param plan - the planned window, for the original's provider/model.
+ * @param text - the replacement text.
+ * @param turn - the turn the correction lands in (the freshly opened one).
+ * @param step - the step the correction lands in.
+ * @returns `{ type, data }` for `session.append`, to be marked `surfaceOp: 'append'`.
+ */
+export function buildCorrection(plan, text, turn, step) {
+  const source = { kind: 'model', editedBy: PLUGIN_ID }
+  if (typeof plan.provider === 'string' && plan.provider !== '') source.provider = plan.provider
+  if (typeof plan.model === 'string' && plan.model !== '') source.model = plan.model
+  return {
+    type: 'assistant/message',
+    data: {
+      turn: typeof turn === 'number' ? turn : 0,
+      step: typeof step === 'number' ? step : 1,
+      message: {
+        id: randomUUID(),
+        role: 'assistant',
+        content: [{ type: 'text', text }],
+        source,
+      },
+      stream: [],
+    },
+  }
+}
+
+/**
+ * The all-blocks save: one plugin record carrying a target per edited block,
+ * possibly across several messages of the same turn. Each target is planned
+ * exactly like a single-block save, and unchanged blocks are simply left out.
+ *
+ * @param ctx - cordis context.
+ * @param sessionId - the addressed session.
+ * @param body - `{ targets: [{ seq, blockIndex, kind, text }] }`.
+ * @param config - plugin config.
+ * @returns the same shape `/apply` returns for a reply patch.
+ */
+async function applyTargetsEdit(ctx, sessionId, body, config) {
+  const targets = Array.isArray(body.targets) ? body.targets : []
+  if (targets.length === 0 || targets.length > MAX_PARTS) {
+    throw new HttpError(400, 'invalid', 'targets must be a nonempty, bounded array')
+  }
+  for (const target of targets) {
+    if (target === null || typeof target !== 'object') throw new HttpError(400, 'invalid', 'each target must be an object')
+    if (typeof target.text !== 'string' || target.text.trim() === '') throw new HttpError(400, 'invalid', 'an edited block cannot be empty')
+    if (target.text.length > MAX_TEXT) throw new HttpError(400, 'invalid', 'the revised block is too long')
+  }
+  const session = await resolveSession(ctx, sessionId)
+  if (!session || typeof session.append !== 'function') {
+    throw new HttpError(409, 'session-not-active', 'the session is not open in DSH')
+  }
+  const events = await readEvents(ctx, sessionId)
+  if (!events) throw new HttpError(404, 'session-not-found', 'no session log for this id')
+  // No busy gate here: this path only appends the in-place patch record, which
+  // leaves every surface node where it is. A running turn keeps writing its own
+  // events; the record lands between them and the fold ignores it.
+  const surfaceNodes = surfaceOf(ctx, sessionId, events)
+  const patches = patchesOf(events)
+  const plans = []
+  for (const target of targets) {
+    let plan
+    try {
+      plan = planRollback(events, surfaceNodes, { seq: target.seq, blockIndex: target.blockIndex, kind: target.kind }, { patches, patch: config.patch === true })
+    } catch (error) {
+      if (error instanceof EditPlanError) {
+        const status = error.code === 'not-editable' ? 400 : 409
+        throw new HttpError(status, error.code, error.message)
+      }
+      throw error
+    }
+    if (plan.patch !== true) throw new HttpError(400, 'not-editable', 'all-blocks editing needs the in-place reply path')
+    if (target.text !== plan.original) plans.push({ plan, text: target.text })
+  }
+  if (plans.length === 0) {
+    return { kind: 'reply', applied: false, unchanged: true, patch: true, shadowed: [], targets: [] }
+  }
+  if (typeof sessionApi.appendPluginRecord !== 'function') {
+    throw new HttpError(409, 'unsupported', 'this harness does not expose plugin records; reply edits need the replay path')
+  }
+  let recordSeq
+  try {
+    recordSeq = sessionApi.appendPluginRecord(
+      session,
+      PATCH_TYPE,
+      buildPatchData(plans.map(({ plan, text }) => ({ seq: plan.targetSeq, blockIndex: plan.blockIndex, kind: plan.kind, text }))),
+    )
+  } catch (error) {
+    const message = String((error && error.message) || error)
+    if (isProjectionUnavailable(message)) {
+      throw new HttpError(409, 'projection-missing', 'the edit-turn projection is not registered for this session; restart DSH so the owning plugin registers it, then retry')
+    }
+    throw new HttpError(409, 'stale', `the session refused the patch record: ${message}`)
+  }
+  const flush = await flushSession(ctx, session)
+  return {
+    kind: 'reply',
+    applied: true,
+    mode: 'patch',
+    patch: true,
+    recordSeq,
+    targets: plans.map(({ plan, text }) => ({ seq: plan.targetSeq, blockIndex: plan.blockIndex, kind: plan.kind, text, original: plan.original })),
+    shadowed: [],
+    ...flush,
+  }
+}
+
+async function applyEdit(ctx, sessionId, body, config) {
+  if (Array.isArray(body.targets) && body.targets.length > 0) return applyTargetsEdit(ctx, sessionId, body, config)
+  const text = typeof body.text === 'string' ? body.text : ''
+  if (text.trim() === '') throw new HttpError(400, 'invalid', 'the revised message cannot be empty')
+  if (text.length > MAX_TEXT) throw new HttpError(400, 'invalid', 'the revised message is too long')
+
+  const session = await resolveSession(ctx, sessionId)
+  if (!session || typeof session.append !== 'function') {
+    throw new HttpError(409, 'session-not-active', 'the session is not open in DSH')
+  }
+  const events = await readEvents(ctx, sessionId)
+  if (!events) throw new HttpError(404, 'session-not-found', 'no session log for this id')
+  const busy = isBusy(events)
+
+  const surfaceNodes = surfaceOf(ctx, sessionId, events)
+  const patches = patchesOf(events)
+  const patchMode = config.patch === true
+  const request = {
+    // A block from another step of the same turn names its own seq; that is
+    // the message the projection has to patch.
+    seq: typeof body.targetSeq === 'number' ? body.targetSeq : typeof body.seq === 'number' ? body.seq : undefined,
+    messageId: typeof body.messageId === 'string' ? body.messageId : undefined,
+    turn: typeof body.turn === 'number' ? body.turn : undefined,
+    blockIndex: typeof body.blockIndex === 'number' ? body.blockIndex : undefined,
+    kind: typeof body.kind === 'string' ? body.kind : undefined,
+  }
+  let plan
+  try {
+    plan = planRollback(events, surfaceNodes, request, { patches, patch: patchMode })
+  } catch (error) {
+    if (error instanceof EditPlanError) {
+      const status = error.code === 'not-editable' ? 400 : 409
+      throw new HttpError(status, error.code, error.message)
+    }
+    throw error
+  }
+
+  // A running turn is a hard stop for every path that moves the surface: the
+  // prompt rewrite shadows a message the turn may still be reading, and the
+  // replay splice shadows a window and regenerates the tail. The in-place record
+  // below moves nothing, so it is allowed to land while the agent is still
+  // writing - the model reads it on its next fold.
+  if (busy && plan.patch !== true) throw new HttpError(409, 'busy', 'the session is still working')
+
+  // The in-place reply path: one small plugin record, interpreted by this
+  // plugin's projection. Nothing leaves the surface, so there is no window to
+  // check, no turn to open and no tail to replay. The record is append-only and
+  // the original event keeps its bytes; the model sees the patched block on the
+  // next fold.
+  if (plan.patch === true) {
+    if (typeof sessionApi.appendPluginRecord !== 'function') {
+      throw new HttpError(409, 'unsupported', 'this harness does not expose plugin records; reply edits need the replay path')
+    }
+    if (text === plan.original) {
+      return {
+        kind: 'reply',
+        applied: false,
+        unchanged: true,
+        patch: true,
+        shadowed: [],
+        blockIndex: plan.blockIndex,
+        kindOfBlock: plan.kind,
+        original: plan.original,
+      }
+    }
+    let recordSeq
+    try {
+      recordSeq = sessionApi.appendPluginRecord(
+        session,
+        PATCH_TYPE,
+        buildPatchData([{ seq: plan.targetSeq, blockIndex: plan.blockIndex, kind: plan.kind, text }]),
+      )
+    } catch (error) {
+      const message = String((error && error.message) || error)
+      // The projection is not registered for this session (a live reload that
+      // dropped it). The same edit can land through the replay path, which
+      // needs no projection - so fall through instead of failing the save.
+      if (isProjectionUnavailable(message)) {
+        // The fallback replays the tail, which a running turn forbids.
+        if (busy) throw new HttpError(409, 'busy', 'the session is still working')
+        plan = planRollback(events, surfaceNodes, request, { patches, patch: false })
+      } else {
+        throw new HttpError(409, 'stale', `the session refused the patch record: ${message}`)
+      }
+    }
+    if (plan.patch === true) {
+    const flush = await flushSession(ctx, session)
+    return {
+      kind: 'reply',
+      applied: true,
+      mode: 'patch',
+      patch: true,
+      recordSeq,
+      target: {
+        seq: plan.targetSeq,
+        blockIndex: plan.blockIndex,
+        kind: plan.kind,
+        text,
+        original: plan.original,
+      },
+      shadowed: [],
+      ...flush,
+    }
+    }
+  }
+
+  // The live surface is the append authority; a node that vanished between the
+  // read and this check means another writer landed first.
+  for (const seq of plan.shadowed) {
+    if (!surfaceNodes.includes(seq)) throw new HttpError(409, 'stale', 'the session changed, retry')
+  }
+
+  // The submitted block list, when the browser half sent one: which of the
+  // message's blocks the user kept, in order, plus anything they just picked.
+  // A caller that sends `text` only is a client from before blocks travelled -
+  // a supported caller, not a broken one: it gets exactly the text-only carrier
+  // this plugin has always written, and the answer says what that cost.
+  let parts = plan.mode === 'prompt' && Array.isArray(body.parts) ? normalizeParts(body.parts, plan.blocks.length) : null
+  let layout = parts === null ? null : planBlockLayout(plan.blocks, parts)
+  // What this deployment can admit, probed NOW rather than remembered: with no
+  // store mounted, nothing can be uploaded and no block may be promised, so the
+  // edit degrades to the text-only carrier - the exact behaviour every release
+  // before this one had - and the answer reports the blocks it had to leave
+  // behind instead of writing a reference nothing can resolve.
+  const store = plan.mode === 'prompt' ? resolveAttachmentStore(ctx) : null
+  if (layout !== null && store === null) {
+    parts = null
+    layout = null
+  }
+
+  // Nothing to write when the revision changes nothing.
+  //
+  // The editor opens prefilled with exactly this text - it comes from
+  // `readMessageText`, the same parse behind `/state`'s `turns[].text` and
+  // `replies[].text` - so "open the editor and save without typing" arrives here
+  // as an exact string match. It must not write: every write is a replacement
+  // event (and, for a reply, a synthetic turn plus a fresh answer), so an
+  // unchanged save used to add a revision with no revision behind it and a whole
+  // turn to the rail while the conversation had not moved at all.
+  //
+  // Since blocks travel, the same question is asked of the whole message: the
+  // carrier is rebuilt from the submitted list and compared against the original
+  // block for block (see sameJson), so a save that keeps every block where it was
+  // writes nothing either. A caller that sends text only keeps the original,
+  // narrower test - its carrier IS text-only by construction, and comparing that
+  // against a message with a picture in it would turn "I changed nothing" into a
+  // write that drops the picture.
+  //
+  // Compared verbatim, deliberately, which is the same caliber the editor was
+  // filled with: a trailing space is a real difference and keeps the old
+  // behaviour, and nothing here trims (the only trim in this function is the
+  // emptiness check above, which is about validity, not equality).
+  //
+  // The answer is a FLAG, not a refusal: the editor's "re-run" button saves
+  // first and re-runs regardless, and its whole point is that the user wants the
+  // turn regenerated even when the wording is what it already was. So the caller
+  // decides what happens next, and this returns before anything is appended.
+  const keepsEveryBlock = parts !== null && layout !== null && layout.added === 0 &&
+    sameJson(assembleBlocks(plan.blocks, layout, [], text), plan.blocks)
+  if (text === plan.original && (parts === null || keepsEveryBlock)) {
+    return {
+      kind: plan.mode,
+      applied: false,
+      unchanged: true,
+      // Nothing left the surface, so nothing is shadowed: the caller must not
+      // hide a row on account of this answer.
+      shadowed: [],
+      original: plan.original,
+      // Nothing was written, so nothing was left behind either - and the
+      // message's blocks are the ones it already had.
+      dropped: false,
+      blocks: blockSummaries(plan.blocks, canPreviewAttachments(store)),
+    }
+  }
+
+  // Admission happens here, BEFORE the first append and outside the try blocks
+  // below: a refused upload must not be able to leave a rollback (or a synthetic
+  // turn) behind in the log. The blocks come back in slot order, which is the
+  // order the layout put them in.
+  const admitted = []
+  if (layout !== null) {
+    for (const slot of layout.slots) {
+      if (slot.kind === 'add') admitted.push(await admitUpload(store, slot.upload))
+    }
+  }
+  const content = layout === null ? [{ type: 'text', text }] : assembleBlocks(plan.blocks, layout, admitted, text)
+  // Whether this save left non-text blocks behind, told to the caller instead of
+  // being discovered later: true for a reply (its tool calls and reasoning
+  // cannot survive a replacement) and true for a message rewritten without its
+  // blocks. False whenever the carrier really did carry them.
+  const dropped = layout === null && plan.blocks.some((block) => !isTextBlock(block))
+
+  // A revised prompt has to (a) replace the old wording in the model context and
+  // (b) NOT be answered. The platform answers any user message it finds on the
+  // surface, so the revision cannot be *appended* - appending one made the loop
+  // answer it, and the next save added another copy (three "你好" bubbles). It
+  // travels as the rollback's replacement instead: a replace-type carrier, which
+  // removes the old prompt and stands in its place, in one event.
+  // A reply edit needs somewhere to land: `assistant/message` (and any message
+  // with a step coordinate) is only readable inside an OPEN turn and step, and
+  // opening one in the log is what advances the runtime's own turn counter too
+  // (it projects `lastTurn` from every turn/start it observes). A prompt edit
+  // does not: `user/message` carries the revision and needs no turn.
+  const editTurn = plan.mode === 'reply' ? nextTurnOf(events) : lastTurnOf(events)
+  // One identity for the whole reply splice: every copy the replay appends
+  // carries it, so a later reader (or a sibling plugin) can tell a replayed turn
+  // from the one it retired without re-deriving anything.
+  const replayId = plan.mode === 'reply' ? randomUUID() : null
+  // Resolved BEFORE the appends so the loop counter can be re-pointed in the
+  // same tick as the writes, not after an await that lets the loop start.
+  const loopAgent = plan.mode === 'reply' ? await resolveLoopAgent(ctx, sessionId) : undefined
+  const carrier = buildCarrier(plan, editTurn, plan.mode === 'prompt' ? { ...config, carrier: 'user/message', markerText: text } : config, content)
+  if (plan.mode === 'reply') {
+    try {
+      session.append('turn/start', { turn: editTurn })
+      session.append('step/start', { turn: editTurn, step: 1 })
+    } catch (error) {
+      return {
+        kind: 'reply',
+        applied: false,
+        applyError: `could not open a turn for the correction: ${String((error && error.message) || error)}`,
+        shadowed: plan.shadowed,
+        dropped,
+      }
+    }
+  }
+  let replacement
+  try {
+    // A replacement carrier has to be a surface event with non-empty
+    // `sourceEventSeqs` coverage of the whole shadowed window. An assistant
+    // message forbids `sourceEventSeqs` outright, so the carrier is either an
+    // empty `developer/message` (default: dormant, invisible to the model, and
+    // never given a row of its own because rows are built for appends) or a
+    // short `user/message` marker.
+    replacement = session.append(carrier.type, carrier.data, {
+      surfaceOp: { op: 'replace', startSeq: plan.startSeq, endSeq: plan.endSeq },
+      sourceEventSeqs: plan.shadowed,
+    })
+  } catch (error) {
+    throw new HttpError(409, 'stale', `the surface refused the rollback: ${String((error && error.message) || error)}`)
+  }
+
+  // A prompt edit saved here: the carrier that replaced the window IS the
+  // revised prompt, so the model reads it as the user's wording from here on.
+  // Nothing is prompted and nothing else needs writing.
+  if (plan.mode === 'prompt') {
+    const flush = await flushSession(ctx, session)
+    return {
+      kind: 'prompt',
+      replacementSeq: replacement.seq,
+      applied: true,
+      shadowed: plan.shadowed,
+      dropped,
+      // What the carrier now carries, described exactly the way /state describes
+      // it. The browser half adopts this for the row it re-draws before its own
+      // refresh lands - without it a second save could not know which blocks are
+      // still there and would rewrite the message text-only.
+      blocks: blockSummaries(content, canPreviewAttachments(store)),
+      ...flush,
+    }
+  }
+
+  // Step two of a reply edit: the correction itself, inside the turn just
+  // opened. An `assistant/message` may never carry `sourceEventSeqs`, so it can
+  // never be a replacement carrier (checked against the real validator, not
+  // assumed); it is appended in the same shape the agent loop records a reply,
+  // and the model goes on seeing the edited text as its own answer.
+  const correction = buildCorrection(plan, text, editTurn, 1)
+  let appended
+  try {
+    appended = session.append(correction.type, correction.data, { surfaceOp: 'append' })
+    // Close the step and the turn behind the corrected reply: the host anchors
+    // a turn's tail (duration, action strip) at its last `turn/end`, and the
+    // format only reads a step message inside an open turn and step.
+    session.append('step/end', { turn: editTurn, step: 1 })
+    session.append('turn/end', { turn: editTurn, reason: { kind: 'completed' } })
+  } catch (error) {
+    const failedFlush = await flushSession(ctx, session)
+    return {
+      kind: 'reply',
+      replacementSeq: replacement.seq,
+      applied: false,
+      applyError: `the corrected reply was refused: ${String((error && error.message) || error)}`,
+      shadowed: plan.shadowed,
+      dropped,
+      ...failedFlush,
+    }
+  }
+
+  // Step three: put every later turn back behind the correction, as fresh
+  // copies. This is the same infix splice dsh-rerun-turn performs after a
+  // regenerated answer - shadow the tail, write the new reply, replay what
+  // followed - with the user's text taking the place of the model call.
+  let replay = null
+  if (typeof plan.replayFrom === 'number' && typeof plan.logTo === 'number') {
+    const writes = buildReplayWrites(events, plan, editTurn + 1, replayId, session.seq)
+    let replayed = 0
+    let replayError = null
+    try {
+      for (const write of writes) {
+        const options = {}
+        if (write.surfaceOp !== undefined) options.surfaceOp = write.surfaceOp
+        if (write.sourceEventSeqs !== undefined) options.sourceEventSeqs = write.sourceEventSeqs
+        session.append(write.type, write.data, options)
+        replayed += 1
+      }
+    } catch (error) {
+      replayError = String((error && error.message) || error)
+    }
+    const playedMax = writes.reduce((max, write) => {
+      const turn = write.data && typeof write.data.turn === 'number' ? write.data.turn : 0
+      return turn > max ? turn : max
+    }, 0)
+    replay = {
+      id: replayId,
+      replayed,
+      total: writes.length,
+      turns: writes.reduce((count, write) => count + (write.type === 'turn/start' ? 1 : 0), 0),
+      ...(replayError === null ? {} : { error: replayError }),
+    }
+    // The replayed turns are closed in the log but were never opened by the
+    // live loop: re-point its idle counter at the highest one, synchronously.
+    const loopTurn = syncLoopTurn(loopAgent, playedMax > editTurn ? playedMax : editTurn)
+    if (loopTurn === 'unavailable') {
+      noteRequest({ kind: 'reply', sessionId, ok: replayError === null, loopTurn, turn: editTurn, replayId, replayed })
+    }
+    const corrected = await flushSession(ctx, session)
+    return {
+      kind: 'reply',
+      replacementSeq: replacement.seq,
+      appendedSeq: appended.seq,
+      applied: true,
+      loopTurn,
+      replay,
+      shadowed: plan.shadowed,
+      dropped,
+      ...corrected,
+    }
+  }
+
+  // No later turn to replay: the correction is the last answer in the log.
+  // The synthetic turn still moved the loop's counter; sync it the same way.
+  const loopTurn = syncLoopTurn(loopAgent, editTurn)
+  if (loopTurn === 'unavailable') {
+    noteRequest({ kind: 'reply', sessionId, ok: true, loopTurn, turn: editTurn, replayId })
+  }
+  const corrected = await flushSession(ctx, session)
+  return {
+    kind: 'reply',
+    replacementSeq: replacement.seq,
+    appendedSeq: appended.seq,
+    applied: true,
+    loopTurn,
+    replay: null,
+    shadowed: plan.shadowed,
+    dropped,
+    ...corrected,
+  }
+}
+
+// --- tool --------------------------------------------------------------------
+
+/**
+ * Session id the calling agent runs in, when the tool context exposes one.
+ * @param exec - tool execution context.
+ * @returns the session id, or undefined when the caller has no agent.
+ */
+function sessionIdFromExec(exec) {
+  const agent = exec && exec.agent
+  const session = agent && agent.session
+  if (session && typeof session.id === 'string' && session.id !== '') return session.id
+  if (agent && typeof agent.sessionId === 'string' && agent.sessionId !== '') return agent.sessionId
+  if (exec && typeof exec.sessionId === 'string' && exec.sessionId !== '') return exec.sessionId
+  return undefined
+}
+
+function registerTool(ctx, config) {
+  const tools = ctx.get('tools')
+  if (!tools || typeof tools.register !== 'function') return
+  tools.register(
+    defineTool({
+      name: 'edit_turn_targets',
+      description:
+        'List the user turns and model replies of a DeepSeek Harness session that the edit-turn plugin can rewrite, with each message\'s current text and, for a reply, every editable block (output text and reasoning). A prompt is replaced where it stands; a reply block is patched in place when the host supports projections, otherwise the reply correction is appended and the later turns are replayed behind it. Read-only: it changes nothing.',
+      parameters: {
+        sessionId: {
+          type: 'string',
+          description: 'Session id to inspect. Defaults to the session this agent is running in.',
+        },
+        limit: { type: 'number', description: 'Maximum number of turns to return (default 20).' },
+      },
+      output: {
+        schema: { type: 'string' },
+        render: (_args, value) => [{ type: 'text', text: value }],
+      },
+      async execute(args, exec) {
+        const sessionId = typeof args.sessionId === 'string' && args.sessionId !== '' ? args.sessionId : sessionIdFromExec(exec)
+        if (sessionId === undefined) {
+          throw new Error('no sessionId was supplied and the calling agent has no session')
+        }
+        const events = await readEvents(ctx, sessionId)
+        if (!events) throw new Error(`no session log for ${sessionId}`)
+        const nodes = surfaceOf(ctx, sessionId, events)
+        const patches = patchesOf(events)
+        const turns = editableTurns(events, nodes)
+        const replies = editableReplies(events, nodes, { patches, patch: config && config.patch === true })
+        const limit = typeof args.limit === 'number' && args.limit > 0 ? Math.floor(args.limit) : 20
+        const shown = turns.slice(-limit)
+        const shownReplies = replies.slice(-limit)
+        const lines = [
+          `session ${sessionId}: ${turns.length} editable turn(s), ${replies.length} editable reply/replies, ${isBusy(events) ? 'BUSY' : 'idle'}`,
+        ]
+        for (const turn of shown) {
+          const preview = turn.text.length > 160 ? `${turn.text.slice(0, 160)}...` : turn.text
+          lines.push(`- turn ${turn.turn} (seq ${turn.seq}, ${turn.attachments} attachment(s)): ${preview}`)
+        }
+        if (turns.length > shown.length) lines.push(`(${turns.length - shown.length} earlier turn(s) omitted)`)
+        for (const reply of shownReplies) {
+          const preview = reply.text.length > 160 ? `${reply.text.slice(0, 160)}...` : reply.text
+          const blocks = Array.isArray(reply.blocks)
+            ? ` [${reply.blocks.map((block) => `${block.index}:${block.kind}${block.patched ? '*' : ''}`).join(', ')}]`
+            : ''
+          lines.push(`- reply (seq ${reply.seq}, ${reply.attachments} non-text part(s))${blocks}: ${preview}`)
+        }
+        if (replies.length > shownReplies.length) lines.push(`(${replies.length - shownReplies.length} earlier reply/replies omitted)`)
+        lines.push('editing a turn replaces its wording in place (no model call); editing a reply block patches it in place when the host supports plugin-record projections, otherwise it replaces the reply and replays the tail. Re-running a turn is dsh-rerun-turn\'s button.')
+        return lines.join('\n')
+      },
+    }),
+  )
+}
+
+// --- http --------------------------------------------------------------------
+
+function isLoopbackAddress(address) {
+  if (typeof address !== 'string' || address.length === 0) return false
+  return address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1' || address.startsWith('127.')
+}
+
+function isLocalHostHeader(host) {
+  if (typeof host !== 'string' || host.length === 0) return false
+  const trimmed = host.trim().toLowerCase()
+  // A bracketed IPv6 literal keeps its colons, so the port can only be split
+  // off after the closing bracket, and nothing but an optional port may follow.
+  if (trimmed.startsWith('[')) {
+    const end = trimmed.indexOf(']')
+    if (end === -1) return false
+    const rest = trimmed.slice(end + 1)
+    if (rest !== '' && !/^:[0-9]+$/.test(rest)) return false
+    return trimmed.slice(1, end) === '::1'
+  }
+  const match = /^([^:]*)(?::([0-9]+))?$/.exec(trimmed)
+  if (match === null) return false
+  // Exact matches only: a name like `127.0.0.1.evil.test` must not pass.
+  return match[1] === 'localhost' || match[1] === '127.0.0.1' || match[1] === '::1'
+}
+
+function sendJson(res, status, body) {
+  const payload = JSON.stringify(body)
+  res.writeHead(status, {
+    'content-type': 'application/json; charset=utf-8',
+    'content-length': Buffer.byteLength(payload),
+  })
+  res.end(payload)
+}
+
+// The body limit is the upload limit: a revised message with blocks arrives as
+// base64 inside this JSON, so /apply asks for a larger ceiling than the tiny
+// default. The read is refused rather than truncated, and the socket keeps
+// draining so the refusal can still be answered.
+function readBody(req, limit = 1e6) {
+  return new Promise((resolve, reject) => {
+    let data = ''
+    let refused = false
+    req.on('data', (chunk) => {
+      if (refused) return
+      data += chunk
+      if (data.length > limit) {
+        refused = true
+        data = ''
+        reject(new HttpError(413, 'invalid', 'the request body is too large'))
+      }
+    })
+    req.on('end', () => {
+      if (!refused) resolve(data)
+    })
+    req.on('error', (error) => {
+      if (!refused) reject(error)
+    })
+    req.on('aborted', () => {
+      if (!refused) reject(new Error('aborted'))
+    })
+  })
+}
+
+// Rewriting the derived context is destructive for the model, so every route
+// demands a loopback socket, a loopback Host header, and a same-origin check
+// when the browser sends Origin.
+function guard(req, res) {
+  if (!isLoopbackAddress(req.socket && req.socket.remoteAddress)) {
+    sendJson(res, 403, { ok: false, code: 'forbidden', error: 'loopback only' })
+    return false
+  }
+  const host = req.headers.host
+  if (!isLocalHostHeader(host)) {
+    sendJson(res, 403, { ok: false, code: 'forbidden', error: 'unexpected host' })
+    return false
+  }
+  const origin = req.headers.origin
+  if (typeof origin === 'string' && origin.length > 0) {
+    let originHost = null
+    try {
+      originHost = new URL(origin).host
+    } catch {
+      originHost = null
+    }
+    if (originHost !== host) {
+      sendJson(res, 403, { ok: false, code: 'forbidden', error: 'cross-origin request' })
+      return false
+    }
+  }
+  return true
+}
+
+function sessionIdFromQuery(url) {
+  try {
+    return (new URL(url, 'http://localhost').searchParams.get('sessionId') || '').trim()
+  } catch {
+    return ''
+  }
+}
+
+function requireSessionId(value) {
+  if (!value) throw new HttpError(400, 'invalid', 'sessionId required')
+  if (!SESSION_ID_RE.test(value)) throw new HttpError(400, 'invalid', 'invalid session id')
+  return value
+}
+
+/**
+ * Whether the host refused a plugin record because its projection is no longer
+ * registered for this session (a live reload that dropped it, or a session
+ * loaded before the owning plugin). Such a save can still go through the replay
+ * path, so it is not fatal.
+ *
+ * @param message - the host's error text.
+ * @returns true when the record's projection is gone.
+ */
+export function isProjectionUnavailable(message) {
+  return typeof message === 'string' && /projection .*was removed or replaced/i.test(message)
+}
+
+function failure(res, error) {
+  const message = String((error && error.message) || error)
+  // The host refuses to derive a session whose projection left the registry
+  // (`SurfaceManager._assertProjections`). It is a known, self-explaining state
+  // - the plugin was reloaded while that session was open - not an internal
+  // fault, so it answers 409 with the host's own words and does not dump a stack
+  // into the log on every request.
+  if (isProjectionUnavailable(message)) {
+    sendJson(res, 409, { ok: false, code: 'projection-missing', error: message })
+    return
+  }
+  const status = error instanceof HttpError ? error.status : 500
+  const code = error instanceof HttpError ? error.code : 'internal'
+  // An unexpected throw is the only case the client cannot explain; leave the
+  // stack in the host log so a report can name the cause.
+  if (!(error instanceof HttpError)) console.error('[dsh-edit-turn] internal error', error)
+  sendJson(res, status, { ok: false, code, error: message })
+}
+
+/**
+ * The one projection object this PROCESS uses, kept across plugin reloads.
+ *
+ * The host registry compares projection IDENTITY, not type:
+ * `SurfaceManager._assertProjections()` (dsh-session/lib/index.js) throws
+ * `session message projection "<type>" was removed or replaced` when a
+ * projection a LIVE session already folded with is no longer in the registry
+ * array, and `registerMessageProjection`'s own docstring states the rule:
+ * "Disposing the contribution makes sessions that used it refuse further
+ * derivation."
+ *
+ * A reload disposes the previous fiber, which splices the old object out of the
+ * registry. Building a fresh object then leaves every open session that carries
+ * a patch event unable to derive anything: the surface read throws, so this
+ * plugin's own save/state paths answer 500, and so does any sibling that reads
+ * `session.surface.nodes` (verified live - dsh-delete-turn's /state answered 500
+ * for such a session after a reload). Reusing one object from a process-global
+ * hands the registry the SAME definition back, so a reloaded plugin keeps the
+ * open sessions foldable.
+ *
+ * The object is a pure, stateless interpreter, which is what makes the reuse
+ * safe. One consequence is deliberate: after a code change the projection keeps
+ * running the PREVIOUS definition for sessions that are already open, until the
+ * session is reopened or DSH restarts. That is the better half of the trade -
+ * the alternative is a session that cannot be read at all.
+ *
+ * @returns the process-wide projection definition.
+ */
+function sharedPatchProjection() {
+  const KEY = '__DSH_EDIT_TURN_PATCH_PROJECTION__'
+  try {
+    const stashed = globalThis[KEY]
+    if (
+      stashed !== undefined &&
+      stashed !== null &&
+      typeof stashed.project === 'function' &&
+      stashed.type === PATCH_TYPE
+    ) {
+      return stashed
+    }
+    const fresh = patchProjection()
+    globalThis[KEY] = fresh
+    return fresh
+  } catch {
+    // A frozen or absent globalThis is not worth failing the load over.
+    return patchProjection()
+  }
+}
+
+// --- plugin ------------------------------------------------------------------
+
+export function apply(ctx, config) {
+  const resolved = {
+    markerText:
+      config && typeof config.markerText === 'string' && config.markerText.trim() !== ''
+        ? config.markerText
+        : DEFAULT_MARKER,
+    carrier: config && config.carrier === 'user/message' ? 'user/message' : 'system/message',
+    confirm: config && typeof config.confirm === 'boolean' ? config.confirm : false,
+    replyMode: config && (config.replyMode === 'replay' || config.replyMode === 'patch') ? config.replyMode : 'auto',
+    editorStyle: config && (config.editorStyle === 'bubble' || config.editorStyle === 'center')
+      ? config.editorStyle
+      : 'frame',
+  }
+
+  // The in-place reply path needs two host seams: a plugin record with the
+  // `ignorable` envelope, and a message projection registry. Both are probed at
+  // load; when either is missing the reply path keeps the official replay
+  // splice, and `replyMode: 'patch'` turns that silence into a load error.
+  const sessionsService = ctx.get('sessions')
+  let patch = false
+  if (
+    resolved.replyMode !== 'replay' &&
+    typeof sessionApi.appendPluginRecord === 'function' &&
+    sessionsService &&
+    typeof sessionsService.registerMessageProjection === 'function'
+  ) {
+    try {
+      // A live reload (HMR, a re-applied bundle) leaves the previous
+      // registration in place: the registry rejects a second definition of the
+      // same type. Reuse ours instead of failing back to replay - the
+      // projection is a stateless pure function, so the old instance is exactly
+      // as good as a fresh one.
+      const registry = sessionsService.messageProjections
+      const existing = Array.isArray(registry)
+        ? registry.find((entry) => entry && entry.type === PATCH_TYPE)
+        : undefined
+      if (existing === undefined) sessionsService.registerMessageProjection(sharedPatchProjection())
+      patch = true
+    } catch (error) {
+      if (resolved.replyMode === 'patch') throw error
+    }
+  }
+  resolved.patch = patch
+
+  const registerRoutes = (webServer, fiber) => {
+    fiber.effect(() =>
+      webServer.register({
+        kind: 'exact',
+        path: `${ROUTE_PREFIX}/state`,
+        handler: async (req, res) => {
+          if (!guard(req, res)) return
+          if (req.method !== 'GET') {
+            sendJson(res, 405, { ok: false, code: 'method', error: 'GET only' })
+            return
+          }
+          try {
+            const sessionId = requireSessionId(sessionIdFromQuery(req.url))
+            sendJson(res, 200, { ok: true, ...(await stateOf(ctx, sessionId, resolved)) })
+          } catch (error) {
+            failure(res, error)
+          }
+        },
+      }),
+    )
+
+    // The bytes behind one block, for the editor's chips. Read-only, loopback
+    // and same-origin like everything else here, and answered only for a block
+    // the session's own log cites.
+    fiber.effect(() =>
+      webServer.register({
+        kind: 'exact',
+        path: `${ROUTE_PREFIX}/attachment`,
+        handler: async (req, res) => {
+          if (!guard(req, res)) return
+          if (req.method !== 'GET') {
+            sendJson(res, 405, { ok: false, code: 'method', error: 'GET only' })
+            return
+          }
+          try {
+            const url = new URL(req.url, 'http://localhost')
+            const sessionId = requireSessionId((url.searchParams.get('sessionId') || '').trim())
+            const seq = Number(url.searchParams.get('seq'))
+            const index = Number(url.searchParams.get('index'))
+            if (!Number.isInteger(seq) || seq < 0 || !Number.isInteger(index) || index < 0) {
+              throw new HttpError(400, 'invalid', 'seq and index must be whole numbers')
+            }
+            const found = await attachmentBytes(ctx, sessionId, seq, index)
+            if (found === null) {
+              // Deliberately without a code: the editor translates codes into
+              // sentences, and "this chip has no picture" is not one the user
+              // needs to read - the chip simply draws its label.
+              sendJson(res, 404, { ok: false, error: 'no attachment bytes for this block' })
+              return
+            }
+            res.writeHead(200, {
+              'content-type': typeof found.mediaType === 'string' && found.mediaType !== '' ? found.mediaType : 'application/octet-stream',
+              'content-length': found.data.byteLength,
+              // The stored object is immutable and content-addressed.
+              'cache-control': 'private, max-age=600',
+            })
+            res.end(found.data)
+          } catch (error) {
+            failure(res, error)
+          }
+        },
+      }),
+    )
+
+    // Read-only diagnostics. The browser half's own state cannot be observed
+    // from here, so the next best thing is an honest record of what its requests
+    // asked for and what they got back.
+    fiber.effect(() =>
+      webServer.register({
+        kind: 'exact',
+        path: `${ROUTE_PREFIX}/debug`,
+        handler: (req, res) => {
+          if (!guard(req, res)) return
+          if (req.method !== 'GET') {
+            sendJson(res, 405, { ok: false, code: 'method', error: 'GET only' })
+            return
+          }
+          sendJson(res, 200, {
+            ok: true,
+            version: PLUGIN_VERSION,
+            // How this deployment resolves a reply edit. `patch` means both
+            // host seams were found and the projection registered; `replay`
+            // means the historical splice is what a save will use.
+            mode: resolved.patch === true ? 'patch' : 'replay',
+            capabilities: {
+              pluginRecords: typeof sessionApi.appendPluginRecord === 'function',
+              projection: resolved.patch === true,
+            },
+            requests: recentRequests(),
+          })
+        },
+      }),
+    )
+
+    fiber.effect(() =>
+      webServer.register({
+        kind: 'exact',
+        path: `${ROUTE_PREFIX}/apply`,
+        handler: async (req, res) => {
+          if (!guard(req, res)) return
+          if (req.method !== 'POST') {
+            sendJson(res, 405, { ok: false, code: 'method', error: 'POST only' })
+            return
+          }
+          let raw
+          try {
+            // A block list travels as base64 inside this body, so the ceiling is
+            // the upload ceiling (see MAX_BODY_BYTES) - and an oversized body is
+            // reported as such instead of being read as far as it goes.
+            raw = await readBody(req, MAX_BODY_BYTES)
+          } catch (error) {
+            const status = error instanceof HttpError ? error.status : 400
+            const detail = error instanceof HttpError ? error.message : 'malformed JSON body'
+            sendJson(res, status, { ok: false, code: 'invalid', error: detail })
+            return
+          }
+          let body = {}
+          try {
+            if (raw) body = JSON.parse(raw)
+          } catch {
+            sendJson(res, 400, { ok: false, code: 'invalid', error: 'malformed JSON body' })
+            return
+          }
+          try {
+            const sessionId = requireSessionId(typeof body.sessionId === 'string' ? body.sessionId.trim() : '')
+            const result = await applyEdit(ctx, sessionId, body, resolved)
+            // Recorded so the next "the button does nothing" can be answered
+            // from here: an apply that never appears was never sent - the click
+            // was lost in the browser half, not refused by this one.
+            noteRequest({
+              kind: 'apply',
+              sessionId,
+              ok: true,
+              edit: result.kind,
+              seq: typeof body.seq === 'number' ? body.seq : null,
+              replacement: typeof result.replacementSeq === 'number' ? result.replacementSeq : null,
+              // A save the host did not write because the text was already the
+              // live text. Worth distinguishing from a landed edit here: the log
+              // shows nothing for it, so this ring is the only place that records
+              // "the user pressed save and nothing needed saving".
+              unchanged: result.unchanged === true,
+              // Whether non-text blocks were left behind by this save (see
+              // applyEdit). The log cannot show this: the carrier is one event
+              // either way.
+              dropped: result.dropped === true,
+            })
+            sendJson(res, 200, { ok: true, ...result })
+          } catch (error) {
+            noteRequest({
+              kind: 'apply',
+              sessionId: typeof body.sessionId === 'string' ? body.sessionId.trim() : null,
+              ok: false,
+              code: error && error.code ? String(error.code) : 'internal',
+            })
+            failure(res, error)
+          }
+        },
+      }),
+    )
+  }
+
+  const webServer = ctx.get('webServer')
+  if (webServer) {
+    registerRoutes(webServer, ctx)
+  } else {
+    ctx.inject(['webServer'], (sub) => registerRoutes(sub.webServer, sub))
+  }
+
+  const tools = ctx.get('tools')
+  if (tools) {
+    registerTool(ctx, resolved)
+  } else {
+    ctx.inject(['tools'], (sub) => registerTool(sub, resolved))
+  }
+}
+
+export default apply

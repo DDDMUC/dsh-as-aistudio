@@ -75,16 +75,51 @@ test('every shipped path exists and is published', () => {
   }
 })
 
-test('the components are HARD dependencies, because four rows mount their host halves', () => {
-  // Every component row imports its package through src/shell.js. An optional
-  // dependency could be absent, and then the row would fail to import, its
-  // browser half would stay off the page, and the panel would report a component
-  // that is installed for nobody - the "advertised but cannot work" failure this
-  // package exists to avoid. (Optional was the old design, when the components
-  // mounted themselves through their own rows.)
-  assert.equal(manifest.optionalDependencies, undefined, 'no component may be optional any more')
+test('the components are vendored, not runtime dependencies', () => {
+  // The studio mounts a component by importing the copy beside it
+  // (src/vendor/host/<id>.js, written by tools/vendor.mjs). Installing the
+  // studio therefore installs nothing else - and a component's fix reaches the
+  // studio only through a re-vendor and a studio release, which is what keeps
+  // the browser half and the host half on one version.
   for (const component of COMPONENTS) {
-    assert.equal(typeof manifest.dependencies[component.package], 'string', component.id + ' must be a hard dependency')
+    assert.equal(manifest.dependencies?.[component.package], undefined, component.id + ' must not be a runtime dependency')
+    assert.equal(typeof manifest.devDependencies?.[component.package], 'string', component.id + ' must stay a devDependency (the vendor tool reads it)')
+    assert.ok(isShipped('src/vendor/host/' + component.id + '.js'), 'the vendored host half of ' + component.id + ' must ship')
+  }
+  assert.deepEqual(manifest.dependencies, {}, 'the studio installs alone')
+})
+
+test('nothing shipped reaches for a component package at runtime', () => {
+  // The whole point of vendoring the host halves: an install of this package
+  // must not need the component packages present. A dynamic import or a require
+  // of one of them anywhere in the shipped runtime files would break exactly
+  // that, so it is refused here rather than discovered on a user's machine.
+  for (const file of ['src/index.js', 'src/shell.js', 'src/client.js']) {
+    const source = readFileSync(join(root, file), 'utf8')
+    for (const component of COMPONENTS) {
+      assert.equal(
+        source.includes("import('" + component.package + "')") || source.includes('import("' + component.package + '")'),
+        false,
+        file + ' imports ' + component.package + ' at runtime',
+      )
+    }
+  }
+  // src/components.js names them as DATA (the manifest), which is fine: what
+  // matters is that the shell resolves a row to the vendored file.
+  assert.match(readFileSync(join(root, 'src', 'shell.js'), 'utf8'), /vendor\/host\//)
+})
+
+test('each component is vendored once, and both halves carry the same version', () => {
+  // The lockstep that the old dependency model could not promise: the browser
+  // half and the host half are the SAME component version, or nothing is.
+  for (const component of COMPONENTS) {
+    const clientHeader = readFileSync(join(root, 'src', 'vendor', component.id + '.js'), 'utf8').split('\n').slice(0, 6).join('\n')
+    const hostHeader = readFileSync(join(root, 'src', 'vendor', 'host', component.id + '.js'), 'utf8').split('\n').slice(0, 6).join('\n')
+    const clientVersion = /v([0-9]+\.[0-9]+\.[0-9]+[^,)]*)/.exec(clientHeader)
+    const hostVersion = /v([0-9]+\.[0-9]+\.[0-9]+[^,)]*)/.exec(hostHeader)
+    assert.ok(clientVersion !== null, component.id + ': the browser half header names no version')
+    assert.ok(hostVersion !== null, component.id + ': the host half header names no version')
+    assert.equal(hostVersion[1], clientVersion[1], component.id + ': the two halves are vendored from different versions')
   }
 })
 
