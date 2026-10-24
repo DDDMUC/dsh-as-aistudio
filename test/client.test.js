@@ -135,17 +135,24 @@ test('the plugin exports the platform contract', () => {
   assert.equal(exports.STATUS_ROUTE, '/api/dsh-as-aistudio/status')
 })
 
-test('apply registers the studio tab behind the platform tabs', () => {
+test("apply registers the studio's OWN row config, keyed like every other plugin", () => {
   const exports = materialize()
   const stub = contextStub()
   exports.apply(stub.ctx)
   assert.equal(stub.registrations.length, 1, 'exactly one surface is added')
   const { options, component } = stub.registrations[0]
-  assert.equal(options.name, 'settings.plugins.tab')
-  assert.equal(options.id, 'as-aistudio')
-  assert.equal(typeof options.label, 'function')
-  assert.equal(options.label(), 'AI Studio')
+  // `plugins.row.config` is keyed `<package name>#<row id>`; this package's row
+  // is the bare package name, so the key repeats and the configure arrow lands on
+  // OUR row in the plugin list - the surface every other plugin here already has.
+  assert.equal(options.name, 'plugins.row.config')
+  assert.equal(options.key, 'dsh-as-aistudio#dsh-as-aistudio')
   assert.equal(component, exports.StudioPanel)
+  // No second settings tab: the surface moved, it did not duplicate.
+  assert.equal(
+    stub.registrations.filter((row) => row.options.name === 'settings.plugins.tab').length,
+    0,
+    'the settings tab must be gone, not kept beside the row config',
+  )
 })
 
 test('apply owns no row surface, observer or listener', () => {
@@ -153,7 +160,7 @@ test('apply owns no row surface, observer or listener', () => {
   const stub = contextStub()
   exports.apply(stub.ctx)
   const names = stub.registrations.map((row) => row.options.name)
-  assert.deepEqual(names, ['settings.plugins.tab'])
+  assert.deepEqual(names, ['plugins.row.config'])
   for (const row of stub.registrations) {
     assert.notEqual(row.options.name, 'conversation.input.overlay')
     assert.notEqual(row.options.name, 'conversation.chat.assistant-actions')
@@ -220,7 +227,7 @@ test('apply draws nothing when the host reports every component down', async () 
   for (const id of exports.VENDORED) assert.equal(marker.mounted[id], false, id + ' must stay off the page')
   assert.deepEqual(
     stub.registrations.map((row) => row.options.name),
-    ['settings.plugins.tab'],
+    ['plugins.row.config'],
     'a gated-off component must register no surface',
   )
 })

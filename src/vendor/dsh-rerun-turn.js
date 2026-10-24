@@ -1,6 +1,6 @@
 // dsh-rerun-turn browser half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-rerun-turn/lib/client.js  (v0.2.4, sha256 32ee83dd4772c5a1)
+// Source: ../dsh-rerun-turn/lib/client.js  (v0.2.4, sha256 661ec4276296bdaf)
 // Regenerate with `npm run vendor`; test/vendor-sync.test.js fails when this is stale.
 //
 // The component registers its factory with the host module loader; inside this
@@ -1467,6 +1467,10 @@ export default (require) => {
     }
 
     exports.apply = apply
+    // The settings card, exported so a composing bundle (dsh-as-aistudio) can
+    // render THE SAME component on its own page instead of re-implementing it:
+    // one source of truth for 重跑 settings.
+    exports.ConfigCard = AskBeforeRerunOption
     exports.inject = ['slots', 'locale']
     exports.PLUGIN_VERSION = PLUGIN_VERSION
     return module.exports

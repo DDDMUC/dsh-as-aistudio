@@ -62,6 +62,20 @@ window.__ModuleLoader__.load({
     /** The four vendored factory names, in mount order. */
     const VENDORED = ['dsh-edit-turn', 'dsh-rerun-turn', 'dsh-delete-turn', 'dsh-markdown-bubble']
 
+    /**
+     * Which components export a settings card, and under what name.
+     *
+     * The components own their settings; this package only has to show them. A
+     * component exports its card (`exports.ConfigCard`) and the studio renders
+     * THAT component - never a copy - so the two surfaces cannot drift. A
+     * component with no settings simply is not in this table.
+     */
+    const CONFIG_CARDS = [
+      { id: 'dsh-edit-turn', title: { zh: '编辑与重跑', en: 'Edit and re-run' } },
+      { id: 'dsh-rerun-turn', title: { zh: '重跑', en: 'Re-run' } },
+      { id: 'dsh-delete-turn', title: { zh: '删除', en: 'Delete' } },
+    ]
+
     const h = react.createElement
 
     // --- copy ------------------------------------------------------------------
@@ -89,6 +103,8 @@ window.__ModuleLoader__.load({
       host: '宿主 DSH {version}',
       hostUnknown: '宿主版本未知',
       note: '四个组件由这个包的四个补丁行挂载（dsh-as-aistudio/edit 等），插件列表里仍然只有 AI Studio 一行；它们仍是独立 npm 包，单独安装时自己出现一行。宿主未挂载的组件不会画到界面上。',
+      summaryShort: '改词重跑 · 原位重跑 · 删这一轮 · 提示词渲染 Markdown',
+      settingsHeading: '组件设置',
     }
 
     const en = {
@@ -114,6 +130,8 @@ window.__ModuleLoader__.load({
       host: 'host DSH {version}',
       hostUnknown: 'host version unknown',
       note: 'The four components are mounted by the four patch rows of this package (dsh-as-aistudio/edit and friends), so the plugin list still shows only AI Studio; they remain independent npm packages that show their own row when installed standalone. A component whose host half is not mounted is not drawn at all.',
+      summaryShort: 'revise and re-run, re-run in place, delete the turn, render prompts as Markdown',
+      settingsHeading: 'Component settings',
     }
 
     const COMPONENT_COPY = {
@@ -185,7 +203,11 @@ window.__ModuleLoader__.load({
       '.dsas-error{color:var(--dsw-alias-state-danger-primary,#d94040);font-size:var(--dsh-content-font-size-secondary,13px);margin:0}',
       '.dsas-interop{border-top:.5px solid var(--dsw-alias-border-l2,#0000001f);flex-direction:column;gap:6px;display:flex;padding-top:12px}',
       '.dsas-interopTitle{color:var(--dsw-alias-label-primary);font-size:var(--dsh-content-font-size-secondary,13px);font-weight:600;margin:0}',
-      '.dsas-note{color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:1.7;margin:0}',
+            '.dsas-settings{display:flex;flex-direction:column;gap:10px;margin:18px 0 0;padding-top:14px;border-top:1px solid var(--dsas-line,rgba(128,128,128,.25))}',
+      '.dsas-settingsTitle{margin:0;font-size:13px;font-weight:600;line-height:20px}',
+      '.dsas-settingCard{display:flex;flex-direction:column;gap:8px;padding:12px 14px;border:1px solid var(--dsas-line,rgba(128,128,128,.25));border-radius:10px}',
+      '.dsas-settingName{margin:0;font-size:12.5px;font-weight:600;line-height:18px;opacity:.75}',
+'.dsas-note{color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:1.7;margin:0}',
     ].join('')
 
     function injectStyles() {
@@ -226,6 +248,30 @@ window.__ModuleLoader__.load({
       if (typeof VENDORED_TABLE === 'undefined') return null
       const factory = VENDORED_TABLE[id]
       return typeof factory === 'function' ? factory : null
+    }
+
+    /**
+     * The settings card a vendored component exports, or null.
+     *
+     * Read from the component's own module namespace: the factory runs once per
+     * read here (it is cheap - it only builds the module object), and `ConfigCard`
+     * is the component's own component function, so its state, storage keys and
+     * copy are the ones its own page uses.
+     *
+     * @param id - component id.
+     * @returns the component function, or null when it exports none.
+     */
+    function vendoredConfigCard(id) {
+      try {
+        const factory = vendoredFactory(id)
+        if (factory === null) return null
+        const plugin = factory(require)
+        const card = plugin === null || plugin === undefined ? null : plugin.ConfigCard
+        return typeof card === 'function' ? card : null
+      } catch (error) {
+        console.error('[' + NS + '] vendored ' + id + " 's settings card could not be read:", error)
+        return null
+      }
     }
 
     function applyVendored(ctx, id) {
@@ -352,7 +398,12 @@ window.__ModuleLoader__.load({
      * The studio tab: one row per component, plus the interop allocation.
      * @param props - slot props: t (locale-bound) and currentLocale.
      */
-    function StudioPanel({ t, currentLocale }) {
+    function StudioPanel({ view: slotView, t, currentLocale }) {
+      // `plugins.row.config` asks twice: once for the row's one-liner and once
+      // for the page. The one-liner must not fetch - it renders on every plugin
+      // row paint - so it is the static description of what the four components
+      // do, and the page below carries the live state and the settings.
+      if (slotView === 'summary') return h('span', null, t('summaryShort'))
       const [request, setRequest] = react.useState(0)
       const [view, setView] = react.useState({ status: 'loading' })
 
@@ -403,6 +454,15 @@ window.__ModuleLoader__.load({
             ? t('hostUnknown')
             : ''
       const rows = ready ? view.body.components.map((component) => renderRow(component, copy, t)) : []
+      // The settings each component owns, rendered from the component itself.
+      // Only for components the host reports as up: a card whose host half is off
+      // would write preferences nothing reads.
+      const mountedIds = new Set(
+        ready ? view.body.components.filter((component) => stateOf(component) === 'mounted').map((component) => component.id) : [],
+      )
+      const cards = CONFIG_CARDS.filter((entry) => mountedIds.has(entry.id))
+        .map((entry) => ({ entry, Card: vendoredConfigCard(entry.id) }))
+        .filter((pair) => pair.Card !== null)
       return h('div', { className: 'dsas-root' }, [
         h('p', { className: 'dsas-intro', key: 'intro' }, t('intro')),
         h('div', { className: 'dsas-bar', key: 'bar' }, [
@@ -424,6 +484,17 @@ window.__ModuleLoader__.load({
           ? h('p', { className: 'dsas-error', key: 'error', role: 'status' }, fill(t('error'), { reason: view.reason }))
           : null,
         ready ? h('ul', { className: 'dsas-list', key: 'list' }, rows) : null,
+        cards.length === 0
+          ? null
+          : h('div', { className: 'dsas-settings', key: 'settings' }, [
+              h('p', { className: 'dsas-settingsTitle', key: 'title' }, t('settingsHeading')),
+              ...cards.map((pair) =>
+                h('div', { className: 'dsas-settingCard', key: pair.entry.id, 'data-component': pair.entry.id }, [
+                  h('p', { className: 'dsas-settingName', key: 'name' }, pair.entry.title[chinese ? 'zh' : 'en']),
+                  h(pair.Card, { key: 'card', view: 'page', t }),
+                ]),
+              ),
+            ]),
         h('p', { className: 'dsas-note', key: 'note' }, t('note')),
         renderInterop(t),
       ])
@@ -501,13 +572,16 @@ window.__ModuleLoader__.load({
         }
       }
 
-      ctx.slots.inject('settings.plugins.tab', () =>
+      // The row's configure control, keyed the way the plugin manager dispatches
+      // it: `<package name>#<row id>`. This package's own row is the bare package
+      // name (see cordis.patch.yml), so the key is the package name twice, and the
+      // configure arrow appears on OUR row - the same surface every other plugin
+      // in this profile has, instead of a separate settings tab.
+      ctx.slots.inject('plugins.row.config', () =>
         ctx.slots.register(
           {
-            name: 'settings.plugins.tab',
-            id: 'as-aistudio',
-            order: 100,
-            label: () => t('tab'),
+            name: 'plugins.row.config',
+            key: 'dsh-as-aistudio#dsh-as-aistudio',
             locale: NS,
             inject: () => ({ currentLocale }),
           },

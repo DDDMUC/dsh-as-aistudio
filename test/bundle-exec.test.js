@@ -107,7 +107,7 @@ async function runBundle(options = {}) {
       slots: {
         inject(name, factory) { factory() },
         register(options) {
-          registered.push({ name: options.name, id: options.id, order: options.order })
+          registered.push({ name: options.name, id: options.id, order: options.order, key: options.key })
           return { dispose() {} }
         },
       },
@@ -190,7 +190,7 @@ test('applying the bundle claims the section-2 slot allocation', async () => {
   // markdown-bubble renders seats, not action buttons.
   assert.ok(registered.some((row) => row.name === 'conversation.chat.node'), 'markdown-bubble claims a render seat')
   // The studio's own surface is still there.
-  assert.ok(registered.some((row) => row.name === 'settings.plugins.tab' && row.id === 'as-aistudio'))
+  assert.ok(registered.some((row) => row.name === 'plugins.row.config' && row.key === 'dsh-as-aistudio#dsh-as-aistudio'))
 })
 
 test('no vendored component is reached through a subpath require', async () => {

@@ -1,6 +1,6 @@
 // dsh-edit-turn browser half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-edit-turn/lib/client.js  (v0.5.3, sha256 8469cc704150edd4)
+// Source: ../dsh-edit-turn/lib/client.js  (v0.5.3, sha256 d323e8a289ac0946)
 // Regenerate with `npm run vendor`; test/vendor-sync.test.js fails when this is stale.
 //
 // The component registers its factory with the host module loader; inside this
@@ -5030,6 +5030,10 @@ export default (require) => {
     }
 
     exports.apply = apply
+    // The settings card, exported so a composing bundle (dsh-as-aistudio) can
+    // render THE SAME component on its own page instead of re-implementing it:
+    // one source of truth for 编辑与重跑 settings.
+    exports.ConfigCard = EditorStyleOption
     exports.inject = ['slots', 'locale']
     exports.PLUGIN_VERSION = PLUGIN_VERSION
     return module.exports

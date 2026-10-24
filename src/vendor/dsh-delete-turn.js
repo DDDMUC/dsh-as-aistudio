@@ -1,6 +1,6 @@
 // dsh-delete-turn browser half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-delete-turn/src/client.js  (v0.1.14, sha256 80a1f339356cc03f)
+// Source: ../dsh-delete-turn/src/client.js  (v0.1.14, sha256 f0658b3124a4ed3f)
 // Regenerate with `npm run vendor`; test/vendor-sync.test.js fails when this is stale.
 //
 // The component registers its factory with the host module loader; inside this
@@ -1265,6 +1265,10 @@ export default (require) => {
     }
 
     exports.apply = apply
+    // The settings card, exported so a composing bundle (dsh-as-aistudio) can
+    // render THE SAME component on its own page instead of re-implementing it:
+    // one source of truth for 删除 settings.
+    exports.ConfigCard = AskBeforeDeleteOption
     exports.inject = ['slots', 'locale']
     return module.exports
   }
