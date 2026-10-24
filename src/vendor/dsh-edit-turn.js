@@ -1,6 +1,6 @@
 // dsh-edit-turn browser half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-edit-turn/lib/client.js  (v0.5.2, sha256 e712f941fa310089)
+// Source: ../dsh-edit-turn/lib/client.js  (v0.5.3, sha256 8469cc704150edd4)
 // Regenerate with `npm run vendor`; test/vendor-sync.test.js fails when this is stale.
 //
 // The component registers its factory with the host module loader; inside this
@@ -35,7 +35,7 @@ export default (require) => {
     const RERUN_PREFIX = '/dsh-rerun-turn'
 
     /** Keep in sync with package.json and lib/index.js. */
-    const PLUGIN_VERSION = '0.5.2'
+    const PLUGIN_VERSION = '0.5.3'
 
     // --- copy -----------------------------------------------------------------
 
@@ -104,6 +104,7 @@ export default (require) => {
       'error.invalid': '请求无效，请刷新后重试。',
       'error.session-not-active': '这个会话当前未激活，请先打开该会话再编辑。',
       'error.session-not-found': '找不到该会话的日志。',
+      'error.session-empty': '这个会话还没有内容，暂时没有可编辑的东西。',
       'error.busy': '该会话正在回复中，请等回复结束后再编辑。',
       'error.not-editable': '这条消息不支持编辑。',
       'error.unsupported': '当前宿主不支持就地改写回复，需要走重放路径。',
@@ -190,6 +191,7 @@ export default (require) => {
       'error.invalid': 'Invalid request; refresh and try again.',
       'error.session-not-active': 'This session is not open in DSH; open it first.',
       'error.session-not-found': 'No session log was found for this id.',
+      'error.session-empty': 'This session has nothing in it yet; there is nothing to edit.',
       'error.busy': 'This session is still replying; wait for it to finish.',
       'error.not-editable': 'This message cannot be edited.',
       'error.unsupported': 'This harness does not expose the in-place reply path; the replay path is needed.',
@@ -2156,9 +2158,39 @@ export default (require) => {
     // `_actions` suffix is stable) and hides that strip's ancestors' other
     // children up to the row. Returns false when there is no strip to keep, and
     // false is what tells the caller to hide the whole row instead.
+    /**
+     * The host's own message markup inside a row - the stack / bubble / markdown
+     * the transcript draws the text in. That subtree is the ONLY thing the
+     * collapse walk may hide: a sibling that does not contain it belongs to
+     * somebody else (another plugin's injected button, a portal), and hiding it
+     * is issue #1 - `dsh-rewind-pro`'s button stayed in the DOM, stayed
+     * clickable, and was `display:none` on screen with no console error to
+     * notice. Null when the host shape is not one we recognise; the walk then
+     * keeps its old "everything but ours" behaviour instead of leaving a
+     * rewritten prompt on screen.
+     */
+    function messageContentRoot(row) {
+      const selectors = ['[class*="_bubble"]', '[class*="userStack"]', '[class*="_markdown"]', '[class*="_stack"]', '[class*="messageBody"]']
+      for (const selector of selectors) {
+        let found = null
+        try {
+          found = row.querySelector(selector)
+        } catch {
+          found = null
+        }
+        if (found === null || found === undefined) continue
+        if (typeof found.closest === 'function' && found.closest('.dshet-editor') !== null) continue
+        return found
+      }
+      return null
+    }
+
     function collapseRowContent(row, hide) {
       const strip = row.querySelector('[class*="_actions"]')
       if (strip === null) return false
+      // Only consulted while hiding: the restore pass goes by the marker this
+      // plugin wrote, so a node an older build had hidden is still restored.
+      const contentRoot = hide ? messageContentRoot(row) : null
       let node = strip
       while (node !== null && node !== row) {
         const parent = node.parentElement
@@ -2175,6 +2207,16 @@ export default (require) => {
             (child.classList.contains('dshet-editor') ||
               child.classList.contains('dshet-action-host') ||
               child.classList.contains('dshet-revision'))
+          ) {
+            continue
+          }
+          // I5 / issue #1: another plugin's node beside the message is not ours
+          // to hide. Only a sibling that holds the message content is.
+          if (
+            hide &&
+            contentRoot !== null &&
+            typeof child.contains === 'function' &&
+            child.contains(contentRoot) !== true
           ) {
             continue
           }
