@@ -1,6 +1,6 @@
 // dsh-rerun-turn browser half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-rerun-turn/lib/client.js  (v0.2.4, sha256 7d7b7445010f48c1)
+// Source: ../dsh-rerun-turn/lib/client.js  (v0.2.4, sha256 f4efd0e0ea0239b7)
 // Regenerate with `npm run vendor`; test/vendor-sync.test.js fails when this is stale.
 //
 // The component registers its factory with the host module loader; inside this
@@ -66,8 +66,8 @@ export default (require) => {
       // The option is the WORD; what it does is the hint right below it.
       'config.resend.below': '顺补',
       'config.resend.inplace': '自补',
-      'config.hint.resend.below': '【顺补】点哪个缺失 O 的可见轮，都去重跑【从这个轮往下、第一个有 O 的可见轮】的回答（夹在中间的那几轮会被原样抄回上下文）。它下面一个【可见】的 O 都没有时，改成重发最新那条缺失 O 的可见轮。',
-      'config.hint.resend.inplace': '【自补】点哪个缺失 O 的可见轮，就重新生成【这个轮自己】的回答；它后面的轮次会被原样抄回上下文（内容不变，日志多一份尾巴）。这样上下文里的洞会被真正补上。',
+      'config.hint.resend.below': '重跑它下面第一个有 O 的可见轮；下面没有，就重发最新那条缺 O 的。',
+      'config.hint.resend.inplace': '重跑这一轮自己的回答，后面的轮次不动。',
       'config.summary.auto': '直接重跑',
     }
 
@@ -96,8 +96,8 @@ export default (require) => {
       'config.terms.visible.def': 'one of the turns the transcript should show after the plugins have done their work',
       'config.resend.below': 'Shunbu',
       'config.resend.inplace': 'Zibu',
-      'config.hint.resend.below': '[Shunbu] Any visible turn missing an O reruns the reply of the FIRST visible turn below it that has an O (the turns in between are copied back into the context verbatim). When nothing VISIBLE below has an O, it sends the newest visible turn missing an O again instead.',
-      'config.hint.resend.inplace': '[Zibu] Any visible turn missing an O regenerates its OWN reply; the turns after it are copied back into the context verbatim (same text, one more tail in the log). This is what actually closes the hole.',
+      'config.hint.resend.below': 'Reruns the first visible turn below it that has an O; if none, resends the newest one missing an O.',
+      'config.hint.resend.inplace': "Reruns this turn's own reply; the turns after it are left alone.",
       'config.summary.auto': 'Rerun without asking',
       'error.invalid': 'Invalid request; refresh and try again.',
       'error.session-not-active': 'This session is not open in DSH; open it first.',
