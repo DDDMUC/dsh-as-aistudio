@@ -14,7 +14,11 @@
     "./package.json": "./package.json"
   },
   "files": [
-    "src",
+    "src/index.js",
+    "src/shell.js",
+    "src/components.js",
+    "src/studio.js",
+    "src/client.js",
     "tools",
     "cordis.patch.yml",
     "docs/INTEROP.md",

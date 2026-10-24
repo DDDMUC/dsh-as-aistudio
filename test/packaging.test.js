@@ -56,12 +56,23 @@ test('the studio version is one number in three places', () => {
   )
 })
 
+/** Whether package.json `files` publishes this repo-relative path. */
+function isShipped(rel) {
+  return manifest.files.some((entry) => rel === entry || rel.startsWith(String(entry).replace(/\/$/, '') + '/'))
+}
+
 test('every shipped path exists and is published', () => {
   for (const entry of ['src/index.js', 'src/client.js', 'src/components.js', 'cordis.patch.yml', 'README.md', 'LICENSE', 'docs/INTEROP.md']) {
     readFileSync(join(root, entry), 'utf8')
+    assert.ok(isShipped(entry), entry + ' is read at runtime but not published')
   }
-  assert.ok(manifest.files.includes('src'))
   assert.ok(manifest.files.includes('cordis.patch.yml'))
+  // The vendored copies beside the built bundle are a development artifact: the
+  // bundle already contains those four halves, and the sync tests read the repo
+  // copy. Shipping them again doubled the tarball (659 kB -> 158 kB without).
+  for (const id of ['dsh-edit-turn', 'dsh-rerun-turn', 'dsh-delete-turn', 'dsh-markdown-bubble']) {
+    assert.equal(isShipped('src/vendor/' + id + '.js'), false, 'src/vendor must not ship: the bundle already carries ' + id)
+  }
 })
 
 test('the components are HARD dependencies, because four rows mount their host halves', () => {
@@ -148,8 +159,8 @@ test('every component row resolves to the shell, and the exports map says so', (
     assert.equal(manifest.exports['./' + component.suffix], './src/shell.js', 'exports["./' + component.suffix + '"]')
     assert.ok(rowNames.includes(rowNameOf(component)), rowNameOf(component) + ' has no patch row')
   }
-  // The shell is shipped (files includes src/) and is a real file.
-  assert.ok(manifest.files.includes('src'))
+  // The shell is shipped and is a real file.
+  assert.ok(isShipped('src/shell.js'))
   assert.match(readFileSync(join(root, 'src', 'shell.js'), 'utf8'), /export async function apply/)
 })
 
