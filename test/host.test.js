@@ -98,6 +98,31 @@ test('the host half names the studio', () => {
   assert.equal(name, 'dsh-as-aistudio')
 })
 
+test('the status reports the version of the copy that is running', async () => {
+  // Both halves of every component are vendored here, so the component package
+  // need not be installed at all. Reading the version off that absent package
+  // answered "unknown" for a studio that was working perfectly; the vendored
+  // record is what ships, so it is what the panel reports.
+  const { readFileSync } = await import('node:fs')
+  const { dirname, join } = await import('node:path')
+  const { fileURLToPath } = await import('node:url')
+  const here = dirname(fileURLToPath(import.meta.url))
+  const vendored = JSON.parse(readFileSync(join(here, '..', 'src', 'vendor', 'versions.json'), 'utf8'))
+  const status = statusWith(loaderRows())
+  for (const component of status.components) {
+    assert.equal(typeof vendored[component.id], 'string', component.id + ' is recorded as vendored')
+    assert.equal(component.version, vendored[component.id], component.id + ' reports the vendored version')
+    assert.notEqual(component.version, null, component.id + ' must never read as version unknown')
+  }
+  // And the record matches what was actually copied, not a hand-kept list.
+  for (const component of COMPONENTS) {
+    const header = readFileSync(join(here, '..', 'src', 'vendor', 'host', component.id + '.js'), 'utf8')
+    const stamp = /v(\d+\.\d+\.\d+[^,\s)]*), sha256/.exec(header)
+    assert.ok(stamp, component.id + ' host half carries a version stamp')
+    assert.equal(stamp[1], vendored[component.id], component.id + ' stamp matches the vendored record')
+  }
+})
+
 test('resolveAnchors turns a file:// baseUrl into a directory', () => {
   const anchors = resolveAnchors({ baseUrl: 'file:///Users/example/.dsh/profiles/web/', get: () => undefined })
   assert.equal(anchors[0], '/Users/example/.dsh/profiles/web')

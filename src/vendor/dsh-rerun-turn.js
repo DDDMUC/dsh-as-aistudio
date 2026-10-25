@@ -1,6 +1,6 @@
 // dsh-rerun-turn browser half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-rerun-turn/lib/client.js  (v0.2.4, sha256 e8f39d9f490e2056)
+// Source: ../dsh-rerun-turn/lib/client.js  (v0.2.4, sha256 cedaac025339a21e)
 // Regenerate with `npm run vendor`; test/vendor-sync.test.js fails when this is stale.
 //
 // The component registers its factory with the host module loader; inside this
@@ -67,7 +67,7 @@ export default (require) => {
       'config.resend.below': '顺补',
       'config.resend.inplace': '自补',
       'config.hint.resend.below': '重跑它下面第一个有 O 的可见轮；下面没有，就重发最新那条缺 O 的。',
-      'config.hint.resend.inplace': '重跑这一轮自己的回答，后面的轮次不动。',
+      'config.hint.resend.inplace': '重跑这一可见轮自己的 O，后面的轮次不动。',
       'config.summary.auto': '直接重跑',
     }
 
@@ -97,7 +97,7 @@ export default (require) => {
       'config.resend.below': 'Shunbu',
       'config.resend.inplace': 'Zibu',
       'config.hint.resend.below': 'Reruns the first visible turn below it that has an O; if none, resends the newest one missing an O.',
-      'config.hint.resend.inplace': "Reruns this turn's own reply; the turns after it are left alone.",
+      'config.hint.resend.inplace': "Reruns this visible turn's own O; the turns after it are left alone.",
       'config.summary.auto': 'Rerun without asking',
       'error.invalid': 'Invalid request; refresh and try again.',
       'error.session-not-active': 'This session is not open in DSH; open it first.',

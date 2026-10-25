@@ -138,6 +138,9 @@ function vendorHostHalf(component, hostPath) {
   return [{ name: component.id + '.js', text: entry.trimEnd() + '\n' }, ...extra.map((file) => ({ name: file.name, text: file.text.trimEnd() + '\n' }))]
 }
 
+/** Component id -> the version that was vendored, for the status route. */
+const versions = {}
+
 const checkOnly = process.argv.includes('--check')
 const generated = []
 let stale = 0
@@ -150,6 +153,7 @@ for (const component of COMPONENTS) {
   }
   const source = readFileSync(sourcePath, 'utf8')
   const version = JSON.parse(readFileSync(join(workspace, component.id, 'package.json'), 'utf8')).version
+  versions[component.id] = version
   const sha = createHash('sha256').update(source).digest('hex').slice(0, 16)
 
   // The bundle is a comment block, the loader call, and the factory body. Find
@@ -238,6 +242,24 @@ for (const file of generated) {
   }
   writeFileSync(file.target, file.out)
   console.log('wrote  ' + relative(root, file.target) + '  <- v' + file.version + ' sha256 ' + file.sha)
+}
+
+// What is vendored, in a form the HOST half can read. The status route reports
+// the version of the code that is actually running - the copy inside this package
+// - because with both halves stored here the component package need not be
+// installed at all, and "version unknown" was the wrong answer to "which code is
+// this".
+const versionsPath = join(root, 'src', 'vendor', 'versions.json')
+const versionsText = JSON.stringify(versions, null, 2) + '\n'
+const currentVersions = existsSync(versionsPath) ? readFileSync(versionsPath, 'utf8') : null
+if (currentVersions !== versionsText) {
+  if (checkOnly) {
+    stale += 1
+    console.log('STALE  src/vendor/versions.json')
+  } else {
+    writeFileSync(versionsPath, versionsText)
+    console.log('wrote  src/vendor/versions.json')
+  }
 }
 
 if (checkOnly && stale > 0) {

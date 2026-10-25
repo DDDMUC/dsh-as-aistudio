@@ -126,6 +126,20 @@ test('a host half that imports a sibling module gets that module vendored too', 
   }
 })
 
+test('the vendored version record ships, so a component can be absent', () => {
+  // Both halves live here, so a component package need not be installed. The
+  // status route reads src/vendor/versions.json to say WHICH code is running;
+  // left out of `files` the package would install without it and the panel would
+  // fall back to "version unknown".
+  const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
+  assert.ok(
+    manifest.files.includes('src/vendor/versions.json'),
+    'files must carry src/vendor/versions.json',
+  )
+  const record = JSON.parse(readFileSync(join(root, 'src', 'vendor', 'versions.json'), 'utf8'))
+  for (const component of COMPONENTS) assert.equal(typeof record[component.id], 'string', component.id)
+})
+
 test('nothing shipped reaches for a component package at runtime', () => {
   // The whole point of vendoring the host halves: an install of this package
   // must not need the component packages present. A dynamic import or a require

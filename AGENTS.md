@@ -40,6 +40,21 @@ tools/tail2.txt
 | src/studio.js | `node tools/build.mjs`（bundle 由它生成） |
 | src/index.js / src/shell.js / src/components.js / cordis.patch.yml / package.json | 不用重建，宿主重启即生效 |
 
+## 改文案 / 设置面板的规矩
+
+**组件是正本，Studio 只抄。** 改 rerun 的选项文字、提示、下拉宽度这类东西，一律先改
+`../dsh-rerun-turn/lib/client.js`，再 `npm run vendor` 抄进来。直接改 `src/vendor/`
+会在下一次 vendor 时被覆盖，`test/sync.test.js` 也会先失败（vendor --check 比 sha256）。
+
+反向同理：组件要在 Studio 的设置页露出自己的设置，走「组件导出 `exports.ConfigCard`」，
+**不是**「Studio 照着重画一份」——两处实现必然漂移。三张卡现在是
+`EditorStyleOption` / `AskBeforeRerunOption` / `AskBeforeDeleteOption`，由
+`src/studio.js` 的 `CONFIG_CARDS` 表按组件 id 取，并各自用**自己命名空间**的 `t`
+（`bindComponentLocale`），否则会把键名原样打出来。
+
+`src/vendor/versions.json` 由 `tools/vendor.mjs` 生成，宿主半侧拿它回答「正在跑的是哪一版」
+（组件包没装也照样有版本号，这正是它存在的理由）。它在 package.json 的 `files` 里，别删。
+
 只想重建 bundle 时**别**用 `npm run build`：它会先从组件仓库重取 vendor 副本，
 把别人尚未发布的改动一起拉进来。
 

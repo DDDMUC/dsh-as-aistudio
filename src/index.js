@@ -117,6 +117,27 @@ function safeGet(ctx, service) {
 }
 
 /**
+ * The version of the code this studio actually runs.
+ *
+ * Both halves of every component are vendored here (tools/vendor.mjs writes
+ * src/vendor/versions.json as it copies them), so a component package does not
+ * even have to be installed. Reading the version off the installed package would
+ * therefore answer "unknown" on a perfectly working studio - the exact report
+ * this function replaces.
+ *
+ * @returns {Record<string, string>} component id -> vendored version.
+ */
+function vendoredVersions() {
+  try {
+    const raw = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), 'vendor', 'versions.json'), 'utf8')
+    const parsed = JSON.parse(raw)
+    return parsed !== null && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+/**
  * Resolve one component package from the profile.
  * @param pkg - the bare package name.
  * @param anchors - resolution anchors from resolveAnchors.
@@ -251,6 +272,7 @@ export function hostStateOf(component, entries, installed) {
 export function statusOf(ctx) {
   const entries = loaderEntries(ctx)
   const anchors = resolveAnchors(ctx)
+  const vendored = vendoredVersions()
   const components = COMPONENTS.map((component) => {
     const found = inspectPackage(component.package, anchors)
     const host = hostStateOf(component, entries, found.installed)
@@ -265,7 +287,10 @@ export function statusOf(ctx) {
       kind: component.kind,
       repo: component.repo,
       installed: found.installed,
-      version: found.version,
+      // The version of the copy that is RUNNING. `installedVersion` is the
+      // package in the profile, which may be absent or a different build.
+      version: vendored[component.id] ?? found.version,
+      installedVersion: found.version,
       hostMounted: host.hostMounted,
       hostReason: host.hostReason,
       hostRow: host.hostRow,
