@@ -1,6 +1,6 @@
 // dsh-rerun-turn browser half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-rerun-turn/lib/client.js  (v0.2.4, sha256 f4efd0e0ea0239b7)
+// Source: ../dsh-rerun-turn/lib/client.js  (v0.2.4, sha256 e8f39d9f490e2056)
 // Regenerate with `npm run vendor`; test/vendor-sync.test.js fails when this is stale.
 //
 // The component registers its factory with the host module loader; inside this
@@ -271,7 +271,9 @@ export default (require) => {
       '.dsrr-config{display:flex;flex-direction:column;gap:14px;width:100%;max-width:none}',
       '.dsrr-config-group{display:flex;flex-direction:column;gap:6px}',
       '.dsrr-config-row{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:13px;font-weight:500}',
-      '.dsrr-select{min-width:190px;max-width:62%;padding:5px 8px;border:1px solid var(--dsrr-line);border-radius:8px;background:var(--dsrr-panel);color:inherit;font:inherit;font-size:12.5px;cursor:pointer;transition:border-color .15s ease}',
+      // Width follows the choice: the options are two characters each, so a
+      // fixed 190px floor only stretched the control across the card.
+      '.dsrr-select{flex:0 0 auto;width:auto;max-width:100%;padding:5px 8px;border:1px solid var(--dsrr-line);border-radius:8px;background:var(--dsrr-panel);color:inherit;font:inherit;font-size:12.5px;cursor:pointer;transition:border-color .15s ease}',
       '.dsrr-select:hover{border-color:var(--dsrr-accent)}',
       '.dsrr-select:focus-visible{outline:none;border-color:var(--dsrr-accent);box-shadow:0 0 0 2px var(--dsrr-hover)}',
       '.dsrr-config-hint{margin:0;max-width:72ch;color:var(--dsrr-ink-dim);font-size:12px;line-height:19px}',
