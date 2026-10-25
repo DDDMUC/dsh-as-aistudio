@@ -43,7 +43,7 @@ window.__ModuleLoader__.load({
     const RERUN_PREFIX = '/dsh-rerun-turn'
 
     /** Keep in sync with package.json and lib/index.js. */
-    const PLUGIN_VERSION = '0.5.3'
+    const PLUGIN_VERSION = '0.5.4'
 
     // --- copy -----------------------------------------------------------------
 
@@ -5062,7 +5062,7 @@ window.__ModuleLoader__.load({
     const ROUTE_PREFIX = '/dsh-rerun-turn'
 
     /** Keep in sync with package.json and lib/index.js. */
-    const PLUGIN_VERSION = '0.2.4'
+    const PLUGIN_VERSION = '0.2.5'
 
     // --- copy -----------------------------------------------------------------
 

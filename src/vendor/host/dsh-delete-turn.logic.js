@@ -1,6 +1,6 @@
 // dsh-delete-turn host half (dsh-delete-turn.logic.js), VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-delete-turn/src/logic.js  (v0.1.14, sha256 900c08468355aff3)
+// Source: ../dsh-delete-turn/src/logic.js  (v0.1.15, sha256 900c08468355aff3)
 // Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.
 //
 // src/shell.js imports the copy named after the component, which is why the

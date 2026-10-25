@@ -1,6 +1,6 @@
 // dsh-rerun-turn host half (dsh-rerun-turn.js), VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-rerun-turn/lib/index.js  (v0.2.4, sha256 1d54e8249f6ff9ef)
+// Source: ../dsh-rerun-turn/lib/index.js  (v0.2.5, sha256 1955b5db5e5262ee)
 // Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.
 //
 // src/shell.js imports the copy named after the component, which is why the
@@ -90,7 +90,7 @@ export const PLUGIN_ID = 'dsh-rerun-turn'
 export const name = PLUGIN_ID
 
 /** Keep in sync with package.json and lib/client.js. */
-export const PLUGIN_VERSION = '0.2.4'
+export const PLUGIN_VERSION = '0.2.5'
 
 const ROUTE_PREFIX = '/dsh-rerun-turn'
 // A session id is an OPAQUE string to DSH: the host's own schema is

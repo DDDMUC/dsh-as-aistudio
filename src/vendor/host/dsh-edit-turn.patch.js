@@ -1,6 +1,6 @@
 // dsh-edit-turn host half (dsh-edit-turn.patch.js), VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-edit-turn/lib/patch.js  (v0.5.3, sha256 5e1e8cce1d168f6c)
+// Source: ../dsh-edit-turn/lib/patch.js  (v0.5.4, sha256 5e1e8cce1d168f6c)
 // Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.
 //
 // src/shell.js imports the copy named after the component, which is why the

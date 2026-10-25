@@ -21,6 +21,7 @@
     "src/vendor/host",
     "src/vendor/versions.json",
     "cordis.patch.yml",
+    "CHANGELOG.md",
     "README.md",
     "LICENSE"
   ],
