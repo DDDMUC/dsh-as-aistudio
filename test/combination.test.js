@@ -784,6 +784,11 @@ test('with all four loaded the registrations match the section-2 allocation tabl
     'conversation.chat.assistant-actions | rerun-turn-reply | 6',
     'conversation.chat.node | steering | priority -1',
     'conversation.chat.node | user | priority -1',
+    // dsh-edit-turn 0.5.5 adds the fallback strip for a turn whose model reply has
+    // no closing body: TurnTailNodeView never renders assistant-actions on that
+    // branch, so the pencil has nowhere else to live. Order 40 keeps it after the
+    // shipped turnTail contributors (schedule is 20).
+    'conversation.chat.turnTail | edit-turn-tail | 40',
     'conversation.input.overlay | delete-turn | 8',
     'conversation.input.overlay | edit-turn | 9',
     'conversation.input.overlay | rerun-turn | 10',
