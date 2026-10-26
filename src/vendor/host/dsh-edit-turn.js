@@ -1,6 +1,6 @@
 // dsh-edit-turn host half (dsh-edit-turn.js), VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-edit-turn/lib/index.js  (v0.5.4, sha256 5b2ea50aee438789)
+// Source: ../dsh-edit-turn/lib/index.js  (v0.5.4, sha256 3f83242ba17b4d38)
 // Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.
 //
 // src/shell.js imports the copy named after the component, which is why the
@@ -1945,7 +1945,11 @@ async function applyTargetsEdit(ctx, sessionId, body, config) {
       // planned like a rewrite. The reply they belong to still has to be on the
       // in-place path, and that is what this probe establishes.
       try {
-        const probe = planRollback(events, surfaceNodes, { seq: target.seq, kind: 'text' }, { patches, patch: config.patch === true })
+        // No `kind` here on purpose: an insertion adds a block the reply does
+        // not have yet, so demanding that a block of that kind already exists is
+        // exactly backwards. Omitting it asks planRollback only what this needs -
+        // "is this seq an in-place reply this host can patch at all".
+        const probe = planRollback(events, surfaceNodes, { seq: target.seq }, { patches, patch: config.patch === true })
         if (probe.patch !== true) throw new HttpError(400, 'not-editable', 'inserted blocks need the in-place reply path')
       } catch (error) {
         if (error instanceof EditPlanError) {
