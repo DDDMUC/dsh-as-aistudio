@@ -1,6 +1,6 @@
 // dsh-edit-turn browser half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-edit-turn/lib/client.js  (v0.5.4, sha256 eb036f61065d38e6)
+// Source: ../dsh-edit-turn/lib/client.js  (v0.5.4, sha256 8a7c101f056d19f9)
 // Regenerate with `npm run vendor`; test/vendor-sync.test.js fails when this is stale.
 //
 // The component registers its factory with the host module loader; inside this
@@ -3893,9 +3893,11 @@ export default (require) => {
         error.className = 'dshet-error'
         error.setAttribute('role', 'status')
         const detail = typeof view.failureDetail === 'string' && view.failureDetail !== '' ? view.failureDetail : null
-        error.textContent = (failureCode === 'internal' || failureCode === 'generic') && detail !== null
-          ? `${errorText(t, failureCode)}（${detail.slice(0, 300)}）`
-          : errorText(t, failureCode)
+        // The host's own reason is always shown: "invalid" without the sentence
+        // that explains it sent the reader back to the UI with nothing to act on.
+        error.textContent = detail === null
+          ? errorText(t, failureCode)
+          : `${errorText(t, failureCode)}（${detail.slice(0, 300)}）`
         box.appendChild(error)
       }
 

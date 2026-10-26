@@ -3901,9 +3901,11 @@ window.__ModuleLoader__.load({
         error.className = 'dshet-error'
         error.setAttribute('role', 'status')
         const detail = typeof view.failureDetail === 'string' && view.failureDetail !== '' ? view.failureDetail : null
-        error.textContent = (failureCode === 'internal' || failureCode === 'generic') && detail !== null
-          ? `${errorText(t, failureCode)}（${detail.slice(0, 300)}）`
-          : errorText(t, failureCode)
+        // The host's own reason is always shown: "invalid" without the sentence
+        // that explains it sent the reader back to the UI with nothing to act on.
+        error.textContent = detail === null
+          ? errorText(t, failureCode)
+          : `${errorText(t, failureCode)}（${detail.slice(0, 300)}）`
         box.appendChild(error)
       }
 
@@ -9160,7 +9162,7 @@ window.__ModuleLoader__.load({
     const NS = 'dsh-as-aistudio'
 
     /** Keep in sync with package.json and src/components.js. */
-    const PLUGIN_VERSION = '0.3.3'
+    const PLUGIN_VERSION = '0.3.4'
 
     /** Presence marker the live verifier reads. */
     const DEBUG_KEY = '__DSH_AS_AISTUDIO__'

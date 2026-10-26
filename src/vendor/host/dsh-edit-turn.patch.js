@@ -1,6 +1,6 @@
 // dsh-edit-turn host half (dsh-edit-turn.patch.js), VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-edit-turn/lib/patch.js  (v0.5.4, sha256 69fa719cf2023965)
+// Source: ../dsh-edit-turn/lib/patch.js  (v0.5.4, sha256 3723eb1516ced1fb)
 // Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.
 //
 // src/shell.js imports the copy named after the component, which is why the
@@ -394,6 +394,10 @@ export function projectedBlocks(message, seq, patches) {
       out.push({
         index: INSERT_INDEX_BASE + item.order,
         insertId: item.id,
+        // The position travels with the block: a later save of THIS block has to
+        // name it again, and without it the record cannot be written at all
+        // ("an inserted block needs a position").
+        position: item.position,
         kind: item.kind,
         text: item.text,
         original: '',
