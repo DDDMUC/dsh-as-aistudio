@@ -1,6 +1,6 @@
 // dsh-edit-turn browser half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-edit-turn/lib/client.js  (v0.5.4, sha256 b2ae87b73f1782b3)
+// Source: ../dsh-edit-turn/lib/client.js  (v0.5.4, sha256 805954a069a13e39)
 // Regenerate with `npm run vendor`; test/vendor-sync.test.js fails when this is stale.
 //
 // The component registers its factory with the host module loader; inside this
@@ -25,14 +25,6 @@ export default (require) => {
     // per-image ceiling (dsh-attachment-local's 20 MiB), because a payload above
     // it would be refused by the store anyway - saying so in the picker is
     // kinder than a round trip that fails.
-    /**
-     * Display index base for inserted blocks.
-     *
-     * Recorded content indices are far below this; lib/patch.js owns the same
-     * number (INSERT_INDEX_BASE) and the two must agree, because this half reads
-     * the server's block list verbatim.
-     */
-    const INSERT_INDEX_BASE = 1000000
     const MAX_ATTACH_BYTES = 20 * 1024 * 1024
     // Above this a chip keeps its label instead of trying to draw itself: a
     // thumbnail is not worth decoding a 30 MB attachment for.
@@ -60,10 +52,6 @@ export default (require) => {
       'action.copied': '复制成功',
       'action.copy': '复制这条回答',
       'action.tail-actions': '这一轮的动作',
-      'editor.add-text': '加一个正文块',
-      'editor.add-reasoning': '加一个思维链块',
-      'editor.add-short': '+正文',
-      'editor.add-reasoning-short': '+思维链',
       'editor.title': '编辑这条消息',
       'editor.title-reply': '编辑这条回答',
       'editor.placeholder': '改成你希望自己当时说的内容。保存后就地替换这条消息，后面的对话保持不变。',
@@ -127,7 +115,6 @@ export default (require) => {
       'error.forbidden': '请求来源不被允许。',
       'error.method': '请求方式不被接受，请刷新后重试。',
       'error.generic': '编辑失败，请重试。',
-      'error.network': '没能连上宿主，请检查连接后重试。',
       'error.prompt': '已回退，但改后的内容没能写进上下文。请重试。',
       'error.reply': '已回退，但替换没有落地。请重试。',
       'error.empty': '改写后的内容不能为空。',
@@ -154,10 +141,6 @@ export default (require) => {
       'action.copied': 'Copied',
       'action.copy': 'Copy this reply',
       'action.tail-actions': 'Actions for this turn',
-      'editor.add-text': 'Add a body block',
-      'editor.add-reasoning': 'Add a reasoning block',
-      'editor.add-short': '+Body',
-      'editor.add-reasoning-short': '+Thinking',
       'editor.title': 'Edit this message',
       'editor.title-reply': 'Edit this reply',
       'editor.placeholder': 'Write what you want to have said. Saving replaces this message in place; the conversation after it stays as it is.',
@@ -221,7 +204,6 @@ export default (require) => {
       'error.forbidden': 'The request origin is not allowed.',
       'error.method': 'The request method is not accepted; refresh and try again.',
       'error.generic': 'The edit failed; try again.',
-      'error.network': 'Could not reach the host; check the connection and try again.',
       'error.prompt': 'Rolled back, but the re-run did not start. Send the revised text manually.',
       'error.reply': 'Rolled back, but the replacement did not land. Try again.',
       'error.empty': 'The revised message cannot be empty.',
@@ -597,10 +579,6 @@ export default (require) => {
       '.dshet-select{padding:3px 8px;border:1px solid var(--dshet-line);border-radius:var(--dshet-radius-sm);background:var(--dshet-field);color:var(--dshet-ink);font:inherit;font-size:12px;line-height:18px}',
       '.dshet-pick .dshet-select{height:28px;padding:0 6px;border:0;border-radius:8px;background:transparent;line-height:1;cursor:pointer;outline:none}',
       '.dshet-pick .dshet-select:hover{background:var(--dshet-hover)}',
-      '.dshet-addbar{display:inline-flex;align-items:center;gap:4px;margin-left:6px}',
-      '.dshet-addblock{padding:2px 8px;border:1px solid var(--dshet-line);border-radius:999px;background:var(--dshet-field);color:var(--dshet-ink);font:inherit;font-size:12px;line-height:18px;cursor:pointer}',
-      '.dshet-addblock:hover{background:var(--dshet-hover)}',
-      '.dshet-addblock:disabled{opacity:.5;cursor:default}',
       '[data-dshet-patch]{white-space:pre-wrap}',
       '.dshet-notice{margin:4px 0;padding:6px 10px;border:1px solid var(--dshet-line);border-radius:8px;background:var(--dshet-panel);backdrop-filter:blur(18px) saturate(1.2);box-shadow:var(--dshet-shadow);color:var(--dsw-alias-state-error-primary,#c93a31);font-size:12px;line-height:19px}',
       '@media (prefers-reduced-motion:reduce){.dshet-collapsing{transition:none}.dshet-floating{transition:none}}',
@@ -1038,76 +1016,6 @@ export default (require) => {
         this.publish({ editing: null, draft: '', parts: [], blocks: [], blockIndex: null, blockKind: null, confirming: false, failure: null })
       }
 
-      /**
-       * Add an empty block of `kind` right after the block being edited.
-       *
-       * The new block is a DRAFT until the save: it lives on the editor's block
-       * list with a synthetic index and a stable id, and the record that carries
-       * it names the id (never the index - inserting shifts every later index, so
-       * a position cannot be an identity). Saving it blank means "this block
-       * should not exist", which the host treats as a no-op for a draft and as a
-       * removal for one that was already written.
-       *
-       * @param kind - 'text' or 'reasoning'.
-       */
-      addBlock(kind) {
-        if (this.view.pending) return
-        const target = this.editor
-        if (target === null || !Array.isArray(target.blocks)) return
-        if (kind !== 'text' && kind !== 'reasoning') return
-        const current = target.blocks.find((block) => blockDraftKey(block) === this.editorBlockKey)
-        // Positions are CONTENT indices, which is what the message carries. A
-        // block we inserted has no recorded index, so it keeps its own position.
-        let position = 0
-        if (current !== undefined) {
-          position = typeof current.insertId === 'string' ? current.position : current.index + 1
-        } else if (target.blocks.length > 0) {
-          const last = target.blocks[target.blocks.length - 1]
-          position = typeof last.insertId === 'string' ? last.position : last.index + 1
-        }
-        const order = this.insertSeq === undefined ? 0 : this.insertSeq
-        this.insertSeq = order + 1
-        const id = 'ins-' + Date.now().toString(36) + '-' + order.toString(36) + '-' + Math.random().toString(36).slice(2, 8)
-        const block = {
-          seq: target.seq,
-          index: INSERT_INDEX_BASE + order,
-          kind,
-          text: '',
-          original: '',
-          patched: false,
-          insertId: id,
-          position,
-        }
-        target.blocks.push(block)
-        this.editorAll = false
-        this.editorBlockKey = blockDraftKey(block)
-        this.editorBlockIndex = block.index
-        this.editorBlockKind = kind
-        this.editorDraft = ''
-        this.setDraftFor(block, '')
-        this.editorElement = null
-        this.publish({
-          blocks: target.blocks,
-          blockIndex: block.index,
-          blockKind: kind,
-          targetSeq: target.seq,
-          draft: '',
-          allBlocks: false,
-          failure: null,
-        })
-      }
-
-      /** The inserted draft block the editor is on, or undefined. */
-      currentInsertedBlock(target) {
-        if (target === null || target === undefined || !Array.isArray(target.blocks)) return undefined
-        return target.blocks.find(
-          (block) =>
-            typeof block.insertId === 'string' &&
-            (blockDraftKey(block) === this.editorBlockKey ||
-              (typeof this.editorBlockIndex === 'number' && block.index === this.editorBlockIndex)),
-        )
-      }
-
       /** The draft of one block: what the user typed, else the recorded text. */
       draftOfBlock(block) {
         const drafts = this.editorDrafts
@@ -1210,81 +1118,12 @@ export default (require) => {
         }
       }
 
-      /**
-       * Save one inserted draft block.
-       *
-       * @param target - the open editor's target.
-       * @param block - the inserted draft block.
-       * @param text - its current draft; blank removes it (a draft it never
-       *   wrote is simply not recorded).
-       */
-      async confirmInserted(target, block, text) {
-        this.publish({ pending: true, failure: null, failureDetail: null })
-        try {
-          const res = await fetch(`${ROUTE_PREFIX}/apply`, {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            ...(typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
-              ? { signal: AbortSignal.timeout(20000) }
-              : {}),
-            body: JSON.stringify({
-              sessionId: this.sessionId,
-              targets: [
-                {
-                  seq: typeof block.seq === 'number' ? block.seq : target.seq,
-                  kind: block.kind,
-                  text,
-                  insert: { id: block.insertId, position: block.position },
-                },
-              ],
-            }),
-          })
-          const data = await res.json().catch(() => ({}))
-          if (!res.ok || !data.ok) {
-            const code = data && data.code ? String(data.code) : 'generic'
-            const detail = data && typeof data.error === 'string' && data.error !== '' ? data.error : null
-            this.publish({ pending: false, failure: code, failureDetail: detail })
-            return
-          }
-          this.editor = null
-          this.editorDraft = ''
-          this.editorAll = false
-          this.editorElement = null
-          this.editorBox = null
-          this.editorRow = null
-          this.publish({
-            pending: false,
-            editing: null,
-            draft: '',
-            blocks: [],
-            blockIndex: null,
-            blockKind: null,
-            confirming: false,
-            failure: null,
-          })
-          await this.load(true)
-        } catch (error) {
-          this.publish({ pending: false, failure: 'network', failureDetail: String((error && error.message) || error) })
-        }
-      }
-
       /** The all-blocks save: one request carrying every edited block. */
       async confirmAll(target) {
         const blocks = Array.isArray(target.blocks) ? target.blocks : []
         const targets = []
         for (const block of blocks) {
           const text = this.draftOfBlock(block)
-          if (typeof block.insertId === 'string') {
-            // An inserted draft may be saved blank: that means it should not
-            // exist, and the host stores nothing for a draft it never wrote.
-            targets.push({
-              seq: typeof block.seq === 'number' ? block.seq : target.seq,
-              kind: block.kind,
-              text,
-              insert: { id: block.insertId, position: block.position },
-            })
-            continue
-          }
           if (typeof text !== 'string' || text.trim() === '') {
             this.publish({ failure: 'empty' })
             return
@@ -1371,13 +1210,6 @@ export default (require) => {
           return this.confirmAll(target)
         }
         const text = this.editorDraft
-        const inserted = this.currentInsertedBlock(target)
-        if (inserted !== undefined) {
-          // A block this editor just created is saved as an insertion, not as a
-          // rewrite: it has no recorded block to point at. Blank means "forget
-          // it", which is why the empty check below does not apply.
-          return this.confirmInserted(target, inserted, text)
-        }
         if (text.trim() === '') {
           this.publish({ failure: 'empty' })
           return
@@ -3684,28 +3516,6 @@ export default (require) => {
         picker.appendChild(caption)
         picker.appendChild(select)
         box.appendChild(picker)
-
-        // Adding a block of either kind, right after the one being edited. The
-        // block is a draft until the save, and saving it blank simply does not
-        // record it.
-        const addBar = document.createElement('span')
-        addBar.className = 'dshet-addbar'
-        for (const kind of ['text', 'reasoning']) {
-          const add = document.createElement('button')
-          add.type = 'button'
-          add.className = 'dshet-addblock dshet-tail-action'
-          add.setAttribute('data-dshet-add', kind)
-          add.textContent = t(kind === 'reasoning' ? 'editor.add-reasoning-short' : 'editor.add-short')
-          add.title = t(kind === 'reasoning' ? 'editor.add-reasoning' : 'editor.add-text')
-          add.disabled = view.pending || view.confirming
-          add.addEventListener('click', (event) => {
-            event.preventDefault()
-            event.stopPropagation()
-            controller.addBlock(kind)
-          })
-          addBar.appendChild(add)
-        }
-        box.appendChild(addBar)
       }
 
       const area = document.createElement('textarea')
@@ -3899,8 +3709,9 @@ export default (require) => {
         error.className = 'dshet-error'
         error.setAttribute('role', 'status')
         const detail = typeof view.failureDetail === 'string' && view.failureDetail !== '' ? view.failureDetail : null
-        // The host's own reason is always shown: "invalid" without the sentence
-        // that explains it sent the reader back to the UI with nothing to act on.
+        // The host's own sentence is always shown: a code-only message leaves the
+        // reader with nothing to act on, and it is what made a real 400 impossible
+        // to diagnose.
         error.textContent = detail === null
           ? errorText(t, failureCode)
           : `${errorText(t, failureCode)}（${detail.slice(0, 300)}）`
