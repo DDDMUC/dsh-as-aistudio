@@ -1,6 +1,6 @@
 // dsh-edit-turn browser half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-edit-turn/lib/client.js  (v0.5.4, sha256 94d7c1d6c0126e13)
+// Source: ../dsh-edit-turn/lib/client.js  (v0.5.4, sha256 4180763594f0d1ec)
 // Regenerate with `npm run vendor`; test/vendor-sync.test.js fails when this is stale.
 //
 // The component registers its factory with the host module loader; inside this
@@ -603,7 +603,8 @@ export default (require) => {
       // host's to draw over, so they are appended after that row's content.
       '.dshet-added{display:flex;flex-direction:column;gap:6px;margin-top:8px}',
       '.dshet-added-block{white-space:pre-wrap;overflow-wrap:anywhere}',
-      '.dshet-added-reasoning{padding-left:10px;border-left:2px solid var(--dshet-line);color:var(--dsw-alias-label-secondary,#6b7280);font-size:12.5px;line-height:20px}',
+      '.dshet-added-reasoning{padding:6px 10px;border-left:3px solid var(--dshet-line,rgba(128,128,128,.45));border-radius:0 8px 8px 0;background:var(--dshet-panel,rgba(128,128,128,.06));color:var(--dsw-alias-label-secondary,#6b7280);font-size:12.5px;line-height:20px}',
+      '.dshet-added-text{color:inherit}',
       '.dshet-addbar{display:inline-flex;align-items:center;gap:4px;margin-left:6px}',
       '.dshet-addblock{padding:2px 8px;border:1px solid var(--dshet-line);border-radius:999px;background:var(--dshet-field);color:var(--dshet-ink);font:inherit;font-size:12px;line-height:18px;cursor:pointer}',
       '.dshet-addblock:hover{background:var(--dshet-hover)}',
@@ -614,12 +615,18 @@ export default (require) => {
     ].join('')
 
     const TAG_ID = 'dsh-edit-turn/edit-turn.css'
-    if (typeof document !== 'undefined' && document.querySelector('style[data-plugin-css=' + JSON.stringify(TAG_ID) + ']') === null) {
-      const tag = document.createElement('style')
-      tag.dataset.plugin = NS
-      tag.dataset.pluginCss = TAG_ID
-      tag.textContent = CSS
-      document.head.appendChild(tag)
+    if (typeof document !== 'undefined') {
+      // Reused, not skipped. A plugin upgrade over a live page finds the tag the
+      // PREVIOUS build injected; leaving it alone meant a new rule never reached
+      // the page - the added-block styling was on screen as plain body text.
+      let tag = document.querySelector('style[data-plugin-css=' + JSON.stringify(TAG_ID) + ']')
+      if (tag === null) {
+        tag = document.createElement('style')
+        tag.dataset.plugin = NS
+        tag.dataset.pluginCss = TAG_ID
+        document.head.appendChild(tag)
+      }
+      if (tag.textContent !== CSS) tag.textContent = CSS
     }
 
     // --- icon -----------------------------------------------------------------
