@@ -3,12 +3,12 @@
 // A component copied into this package must NOT get its own copy of
 // `@deepseek-ai/dsh-session`: two module instances mean two registries, and the
 // second copy's `appendPluginRecord` cannot touch a Session the host created
-// (the brand check inside it throws). The same goes for `dsh-tools`, whose
-// `defineTool` builds validators against schemas the host's own tool registry
-// expects.
+// (the brand check inside it throws). So the copies import THIS file, and this
+// file resolves that one package from the running harness.
 //
-// So the copies import THIS file, and this file resolves the two packages from
-// the running harness. The harness lives in the `dsh` installation, so the base
+// (`@deepseek-ai/dsh-tools` used to be here as well, for the agent tool that
+// dsh-edit-turn registered. That tool is gone - the family exposes no model-facing
+// tools - so the studio no longer needs the package at all.) The harness lives in the `dsh` installation, so the base
 // is found by walking up from this file to the nearest node_modules that has it,
 // with the profile's own tree as the second try. A failure here is a failure of
 // the whole component row and says exactly which package was missing - silence
@@ -124,9 +124,6 @@ async function importPlatformOrThrow(spec) {
     )
   }
 }
-
-/** `@deepseek-ai/dsh-tools`, resolved from the running harness. */
-export const dshTools = await importPlatformOrThrow('@deepseek-ai/dsh-tools')
 
 /** `@deepseek-ai/dsh-session`, resolved from the running harness. */
 export const dshSession = await importPlatformOrThrow('@deepseek-ai/dsh-session')

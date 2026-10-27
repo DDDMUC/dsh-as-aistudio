@@ -101,7 +101,9 @@ test('a vendored host half finds the platform packages the harness provides', ()
   // entry point (process.argv[1], the dsh binary).
   const platform = readFileSync(join(root, 'src', 'vendor', 'host', '_platform.js'), 'utf8')
   assert.match(platform, /process\.argv\[1\]/, 'the running entry point is one of the roots')
-  assert.match(platform, /export const dshTools/, 'dsh-tools is exported resolved')
+  // Only dsh-session is resolved: the components expose no model-facing tools any
+  // more, so dsh-tools is not needed and must not be demanded at load.
+  assert.doesNotMatch(platform, /export const dshTools/, 'dsh-tools is not required')
   assert.match(platform, /export const dshSession/, 'dsh-session is exported resolved')
   // Each vendored host half must import that resolver and nothing bare.
   for (const component of COMPONENTS) {
