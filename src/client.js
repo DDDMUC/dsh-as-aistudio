@@ -43,7 +43,7 @@ window.__ModuleLoader__.load({
     const RERUN_PREFIX = '/dsh-rerun-turn'
 
     /** Keep in sync with package.json and lib/index.js. */
-    const PLUGIN_VERSION = '0.5.6'
+    const PLUGIN_VERSION = '0.5.7'
 
     // --- copy -----------------------------------------------------------------
 
@@ -1935,6 +1935,17 @@ window.__ModuleLoader__.load({
     const COPY_TIMER = 'dshetCopyTimer'
     /** The host draws its own check for a second; this is the same second. */
     const COPY_FEEDBACK_MS = 1000
+    /**
+     * Row key -> the text that row's copy button must hand over.
+     *
+     * The host's copy button copies the message the row was drawn for, so on a row
+     * this plugin rewrote it would copy the wording the user just replaced. The
+     * press is answered from a document-level listener keyed by ROW rather than by
+     * button node: the host re-renders its action bar, and a listener planted on
+     * the button it drew goes away with that node (the button it draws next is a
+     * different one).
+     */
+    const rowCopyText = new Map()
 
     /**
      * A button another plugin put in this bar.
@@ -1999,6 +2010,13 @@ window.__ModuleLoader__.load({
      * takeover that cannot copy is worse than none.
      */
     function takeOverRowCopy(row, text, t) {
+      // Registered before the button lookup on purpose: the handover has to work
+      // even when this pass cannot find the button to mark (the next one may, and
+      // the document-level press answers from this table either way).
+      {
+        const key = row.getAttribute('data-chat-flow-key')
+        if (typeof key === 'string' && key !== '') rowCopyText.set(key, text)
+      }
       const button = nativeCopyButton(row, t)
       if (button === null) return
       const write = primitives !== null && primitives !== undefined && typeof primitives.writeClipboard === 'function'
@@ -2127,6 +2145,8 @@ window.__ModuleLoader__.load({
 
     /** The copy handover of a row, wherever the last pass left it. */
     function releaseRowCopy(row) {
+      const key = row.getAttribute('data-chat-flow-key')
+      if (typeof key === 'string' && key !== '') rowCopyText.delete(key)
       const button = nativeCopyButton(row)
       if (button !== null) releaseCopyButton(button)
     }
@@ -4775,6 +4795,45 @@ window.__ModuleLoader__.load({
       // left". Blur cannot be that signal: a host re-render replaces the node
       // (blur without a related target) and a save temporarily disables it -
       // both used to drop the caret for good.
+      // The press that matters: the host's own copy button on a row this plugin
+      // rewrote. Capture phase, so the host's handler (which listens at the React
+      // root, below the document) never sees the press; by row key, so a button
+      // the host re-rendered is still answered.
+      react.useEffect(() => {
+        if (typeof document.addEventListener !== 'function' || typeof document.removeEventListener !== 'function') {
+          return undefined
+        }
+        const onCopyPress = (event) => {
+          const target = event.target
+          if (target === null || target === undefined || typeof target.closest !== 'function') return
+          const button = target.closest('button')
+          if (button === null) return
+          // Our own buttons sit in the same bar: theirs is not this press.
+          if (pluginOwned(button)) return
+          const row = button.closest('[data-chat-flow-key]')
+          if (row === null) return
+          const key = row.getAttribute('data-chat-flow-key')
+          if (typeof key !== 'string' || key === '') return
+          const text = rowCopyText.get(key)
+          if (typeof text !== 'string') return
+          const write = primitives !== null && primitives !== undefined && typeof primitives.writeClipboard === 'function'
+            ? primitives.writeClipboard
+            : null
+          if (write === null) return
+          if (typeof event.preventDefault === 'function') event.preventDefault()
+          if (typeof event.stopPropagation === 'function') event.stopPropagation()
+          if (typeof event.stopImmediatePropagation === 'function') event.stopImmediatePropagation()
+          Promise.resolve(write(text)).then(
+            (ok) => {
+              if (ok === true) flashRowCopy(button, typeof t === 'function' ? t('action.copied') : null)
+            },
+            () => {},
+          )
+        }
+        document.addEventListener('click', onCopyPress, true)
+        return () => document.removeEventListener('click', onCopyPress, true)
+      }, [t])
+
       react.useEffect(() => {
         if (typeof document.addEventListener !== 'function' || typeof document.removeEventListener !== 'function') {
           return undefined
