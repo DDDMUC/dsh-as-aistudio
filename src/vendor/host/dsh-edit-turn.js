@@ -1,6 +1,6 @@
 // dsh-edit-turn host half (dsh-edit-turn.js), VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-edit-turn/lib/index.js  (v0.5.4, sha256 ee351787e5f5dd3d)
+// Source: ../dsh-edit-turn/lib/index.js  (v0.5.6, sha256 c4da00d187ff461d)
 // Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.
 //
 // src/shell.js imports the copy named after the component, which is why the
@@ -85,7 +85,7 @@ export const PLUGIN_ID = 'dsh-edit-turn'
 export const name = PLUGIN_ID
 
 /** Keep in sync with package.json and lib/client.js. */
-export const PLUGIN_VERSION = '0.5.4'
+export const PLUGIN_VERSION = '0.5.6'
 
 // A ring of the last few requests, answering "did the browser half even ask, and
 // what did it get?" without needing its console. Read-only diagnostics: the
