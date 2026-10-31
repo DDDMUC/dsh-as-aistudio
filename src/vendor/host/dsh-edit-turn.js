@@ -1,6 +1,6 @@
 // dsh-edit-turn host half (dsh-edit-turn.js), VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-edit-turn/lib/index.js  (v0.5.12, sha256 6adfd5b9699657d5)
+// Source: ../dsh-edit-turn/lib/index.js  (v0.5.13, sha256 85d229824536a84b)
 // Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.
 //
 // src/shell.js imports the copy named after the component, which is why the
@@ -85,7 +85,7 @@ export const PLUGIN_ID = 'dsh-edit-turn'
 export const name = PLUGIN_ID
 
 /** Keep in sync with package.json and lib/client.js. */
-export const PLUGIN_VERSION = '0.5.12'
+export const PLUGIN_VERSION = '0.5.13'
 
 // A ring of the last few requests, answering "did the browser half even ask, and
 // what did it get?" without needing its console. Read-only diagnostics: the
@@ -1491,6 +1491,13 @@ function eventsFromLive(session) {
 // Live-preferred read through the public query service; the live session's own
 // snapshot is the fallback when the service is absent.
 async function readEvents(ctx, sessionId) {
+  // A session the host has open answers from memory. Going through the query
+  // service instead makes the route re-decode the whole log from disk first:
+  // measured 1.4 s for a 15 MB log, while every computation this route does on
+  // top of it adds up to a few tens of milliseconds. That read was the entire
+  // reason the edit entry took seconds to appear.
+  const live = eventsFromLive(findLiveSession(ctx, sessionId))
+  if (live !== undefined && live.length > 0) return live
   const query = ctx.get('sessionQuery')
   if (query && typeof query.readSession === 'function') {
     try {
