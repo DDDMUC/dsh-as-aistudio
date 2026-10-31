@@ -4,6 +4,12 @@
 
 ## 中文
 
+**0.4.4** —— 复制失败的诊断（跟进 `dsh-edit-turn` 0.5.10）。
+
+- **组件跟进**：`dsh-edit-turn` **0.5.10**（另三个不变：`dsh-rerun-turn` 0.2.6、`dsh-delete-turn` 0.1.15、`dsh-markdown-bubble` 0.1.5）。
+
+- 复制仍拿到改写前的原文时，浏览器**标签页标题**会显示 `[复制诊断] <原因>`，用来定位是哪一环没接管；接管成功时标题自动恢复。
+
 **0.4.3** —— 编辑入口不再"等半天才出现"（`/state` 从 25 MB 降到几百 KB）。
 
 - **组件跟进**：`dsh-edit-turn` **0.5.9**（另三个不变：`dsh-rerun-turn` 0.2.6、`dsh-delete-turn` 0.1.15、`dsh-markdown-bubble` 0.1.5）。

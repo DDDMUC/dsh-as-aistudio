@@ -1,6 +1,6 @@
 // dsh-edit-turn browser half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-edit-turn/lib/client.js  (v0.5.9, sha256 9b49691a834e5eae)
+// Source: ../dsh-edit-turn/lib/client.js  (v0.5.10, sha256 6d6ab8c27082ee35)
 // Regenerate with `npm run vendor`; test/vendor-sync.test.js fails when this is stale.
 //
 // The component registers its factory with the host module loader; inside this
@@ -35,7 +35,7 @@ export default (require) => {
     const RERUN_PREFIX = '/dsh-rerun-turn'
 
     /** Keep in sync with package.json and lib/index.js. */
-    const PLUGIN_VERSION = '0.5.9'
+    const PLUGIN_VERSION = '0.5.10'
 
     // --- copy -----------------------------------------------------------------
 
@@ -1990,6 +1990,25 @@ export default (require) => {
       return created
     })()
     const rowCopyText = copyRegistry.text
+
+    // TEMP DIAG (删除时机：复制修好后). 复制按下没被接管时，把原因写进标签页标题：
+    // 不污染剪贴板、不改页面内容，用户念一眼标题即可；成功接管时自动恢复原标题。
+    const copyDiag = (page) => {
+      try {
+        if (page.__dshetTitle === undefined) page.__dshetTitle = document.title
+        const base = String(page.__dshetTitle ?? '')
+        const show = (reason) => {
+          document.title = `[复制诊断] ${reason}${base === '' ? '' : ' · ' + base}`
+        }
+        const clear = () => {
+          if (String(document.title).startsWith('[复制诊断]')) document.title = base
+        }
+        return { show, clear }
+      } catch {
+        return { show: () => {}, clear: () => {} }
+      }
+    }
+    const titleDiag = typeof globalThis !== 'undefined' ? copyDiag(globalThis) : { show: () => {}, clear: () => {} }
     const rowHostText = copyRegistry.host
 
     /**
@@ -2121,6 +2140,11 @@ export default (require) => {
       const native = clipboard.writeText.bind(clipboard)
       const wrapped = (value) => {
         const rewritten = rewriteCopiedText(String(value ?? ''))
+        if (rewritten === null && rowCopyText.size > 0) {
+          titleDiag.show(`写入没匹配上（登记 ${rowCopyText.size} 行，长度 ${String(value ?? '').length}）`)
+        } else if (rewritten !== null) {
+          titleDiag.clear()
+        }
         return rewritten === null ? native(value) : native(rewritten)
       }
       wrapped[CLIPBOARD_WRAPPED] = true
@@ -4961,11 +4985,15 @@ export default (require) => {
           // Our own buttons sit in the same bar: theirs is not this press.
           if (pluginOwned(button)) return
           const row = button.closest('[data-chat-flow-key]')
-          if (row === null) return
+          if (row === null) { titleDiag.show('按钮不在行内'); return }
           const key = row.getAttribute('data-chat-flow-key')
-          if (typeof key !== 'string' || key === '') return
+          if (typeof key !== 'string' || key === '') { titleDiag.show('行没有 key'); return }
           const text = rowCopyText.get(key)
-          if (typeof text !== 'string') return
+          if (typeof text !== 'string') {
+            titleDiag.show(`这一行没登记文本（登记 ${rowCopyText.size} 行）`)
+            return
+          }
+          titleDiag.clear()
           const write = primitives !== null && primitives !== undefined && typeof primitives.writeClipboard === 'function'
             ? primitives.writeClipboard
             : null
