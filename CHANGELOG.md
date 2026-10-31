@@ -4,6 +4,16 @@
 
 ## 中文
 
+**0.4.3** —— 编辑入口不再"等半天才出现"（`/state` 从 25 MB 降到几百 KB）。
+
+- **组件跟进**：`dsh-edit-turn` **0.5.9**（另三个不变：`dsh-rerun-turn` 0.2.6、`dsh-delete-turn` 0.1.15、`dsh-markdown-bubble` 0.1.5）。
+
+- **症状**：编辑笔要等很久才出现；而且在这之前按复制，拿到的是改写前的原文。
+
+- **根因（两件事同一个原因）**：`dsh-edit-turn` 的 `/state` 把每条回复的**整轮**推理与正文全文都发了出去。实测一个会话 291 条回复 = **27.9 MB**，一次 `/state` 要 **13 秒**。这段时间里浏览器半部没有任何编辑条目 —— 笔不出现，复制也就不会被插件接管。
+
+- **修法**：`/state` 的 `replies` 只发身份（`seq` / `turn` / `messageId` / `attachments` / `textLength` / `blockCount`），全文与分块走新的 `/reply` 接口，只在按复制或打开编辑器时取一次。
+
 **0.4.2** —— 复制拿到改写后的文本（改到平台写入器这一层）。
 
 - **组件跟进**：`dsh-edit-turn` **0.5.8**（另三个不变：`dsh-rerun-turn` 0.2.6、`dsh-delete-turn` 0.1.15、`dsh-markdown-bubble` 0.1.5）。

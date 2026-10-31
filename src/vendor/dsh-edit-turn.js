@@ -1,6 +1,6 @@
 // dsh-edit-turn browser half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-edit-turn/lib/client.js  (v0.5.8, sha256 6a5f201da3a86282)
+// Source: ../dsh-edit-turn/lib/client.js  (v0.5.9, sha256 9b49691a834e5eae)
 // Regenerate with `npm run vendor`; test/vendor-sync.test.js fails when this is stale.
 //
 // The component registers its factory with the host module loader; inside this
@@ -35,7 +35,7 @@ export default (require) => {
     const RERUN_PREFIX = '/dsh-rerun-turn'
 
     /** Keep in sync with package.json and lib/index.js. */
-    const PLUGIN_VERSION = '0.5.8'
+    const PLUGIN_VERSION = '0.5.9'
 
     // --- copy -----------------------------------------------------------------
 
@@ -131,6 +131,7 @@ export default (require) => {
       'error.attachment-too-large': '这个文件太大，无法作为附件。',
       'error.too-large': '这次修改太大，服务器没有接收。',
       'error.replay-partial': '已保存并改写了这条回答，但后面的轮次没能全部重放回来，请重新打开会话确认。',
+      'error.reply-not-found': '这条回答已经不可编辑了（可能已被改写或不在当前上下文里）。',
     }
 
     const en = {
@@ -220,6 +221,7 @@ export default (require) => {
       'error.attachment-too-large': 'That file is too large to attach.',
       'error.too-large': 'That revision was too large for the host to accept.',
       'error.replay-partial': 'Saved and corrected, but the turns after it could not all be replayed; reopen the session to check.',
+      'error.reply-not-found': 'That reply is no longer editable (it may have been rewritten, or left the current context).',
     }
 
     // Every error code the host can return travels through here. A code is
@@ -635,6 +637,9 @@ export default (require) => {
         this.sessionId = sessionId
         this.listeners = new Set()
         this.inflight = null
+        // One reply's full wording, fetched on demand and kept: `/state` ships
+        // identities only (a reply carries its whole turn's text).
+        this.replyBodies = new Map()
         this.animateOnce = false
         this.rowCount = -1
         this.editor = null
@@ -737,6 +742,32 @@ export default (require) => {
         const value = this.animateOnce === true
         this.animateOnce = false
         return value
+      }
+
+      /**
+       * One reply's full wording and blocks, on demand.
+       *
+       * `/state` publishes identities only: a reply carries its whole turn's
+       * reasoning and answer text, and a long session's list ran to 27.9 MB -
+       * 13 seconds for one refresh, which is why the edit entry appeared so late.
+       *
+       * @param {string} messageId - the reply's message id.
+       * @returns {Promise<object|null>} `{ text, blocks, attachments }`, or null.
+       */
+      replyBody(messageId) {
+        if (typeof messageId !== 'string' || messageId === '') return Promise.resolve(null)
+        const cached = this.replyBodies.get(messageId)
+        if (cached !== undefined) return cached
+        const url = `${ROUTE_PREFIX}/reply?sessionId=${encodeURIComponent(this.sessionId)}&messageId=${encodeURIComponent(messageId)}`
+        const pending = fetch(url, { headers: { accept: 'application/json' } })
+          .then(async (res) => {
+            const data = await res.json().catch(() => ({}))
+            if (!res.ok || !data.ok) throw new Error(data && data.error ? String(data.error) : `HTTP ${res.status}`)
+            return { text: data.text, blocks: Array.isArray(data.blocks) ? data.blocks : [], attachments: data.attachments }
+          })
+          .catch(() => null)
+        this.replyBodies.set(messageId, pending)
+        return pending
       }
 
       load(force) {
@@ -4817,37 +4848,55 @@ export default (require) => {
       const open = (event) => {
         event.preventDefault()
         event.stopPropagation()
-        controller.open({
-          anchor: event.currentTarget,
-          seq: entry.seq,
-          mode: 'reply',
-          turn: entry.turn,
-          messageId: entry.messageId,
-          text: typeof entry.text === 'string' ? entry.text : '',
-          attachments: typeof entry.attachments === 'number' ? entry.attachments : 0,
-          ...(Array.isArray(entry.blocks) ? { blocks: entry.blocks, patch: true } : { blocks: [] }),
-        })
+        // `currentTarget` is null once this handler returns, so it is read before
+        // the await that may fetch the reply's wording.
+        const anchor = event.currentTarget
+        void (async () => {
+          let body = null
+          if (!Array.isArray(entry.blocks) && typeof entry.blockCount === 'number' && entry.blockCount > 0) {
+            body = await controller.replyBody(entry.messageId)
+          }
+          const blocks = body !== null && Array.isArray(body.blocks)
+            ? body.blocks
+            : Array.isArray(entry.blocks) ? entry.blocks : []
+          controller.open({
+            anchor,
+            seq: entry.seq,
+            mode: 'reply',
+            turn: entry.turn,
+            messageId: entry.messageId,
+            text: body !== null && typeof body.text === 'string'
+              ? body.text
+              : typeof entry.text === 'string' ? entry.text : '',
+            attachments: typeof entry.attachments === 'number' ? entry.attachments : 0,
+            ...(blocks.length > 0 ? { blocks, patch: true } : { blocks: [] }),
+          })
+        })()
       }
       const copy = (event) => {
         event.preventDefault()
         event.stopPropagation()
-        const text = replyCopyText(entry)
-        if (text === '') return
-        const write = primitives !== null && primitives !== undefined && typeof primitives.writeClipboard === 'function'
-          ? primitives.writeClipboard
-          : typeof navigator !== 'undefined' && navigator.clipboard && typeof navigator.clipboard.writeText === 'function'
-            ? (value) => navigator.clipboard.writeText(value)
-            : null
-        if (write === null) return
-        Promise.resolve()
-          .then(() => write(text))
-          .then(
-            () => {
-              setCopied(true)
-              window.setTimeout(() => setCopied(false), 1200)
-            },
-            () => {},
-          )
+        void (async () => {
+          let text = replyCopyText(entry)
+          if (text === '' && typeof entry.blockCount === 'number' && entry.blockCount > 0) {
+            const body = await controller.replyBody(entry.messageId)
+            if (body !== null) text = replyCopyText(body)
+          }
+          if (text === '') return
+          const write = primitives !== null && primitives !== undefined && typeof primitives.writeClipboard === 'function'
+            ? primitives.writeClipboard
+            : typeof navigator !== 'undefined' && navigator.clipboard && typeof navigator.clipboard.writeText === 'function'
+              ? (value) => navigator.clipboard.writeText(value)
+              : null
+          if (write === null) return
+          try {
+            await write(text)
+          } catch {
+            return
+          }
+          setCopied(true)
+          window.setTimeout(() => setCopied(false), 1200)
+        })()
       }
       return jsxs('div', {
         className: 'dshet-tail',
