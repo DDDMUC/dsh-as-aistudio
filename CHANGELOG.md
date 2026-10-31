@@ -4,6 +4,16 @@
 
 ## 中文
 
+**0.4.6** —— 复制已修好，临时诊断撤掉；`/state` 再快一档。
+
+- **组件跟进**：`dsh-edit-turn` **0.5.12**、`dsh-rerun-turn` 0.2.6、`dsh-delete-turn` 0.1.15、`dsh-markdown-bubble` 0.1.5。
+
+- **复制修好了**：根因是 `/state` 太大太慢（25 MB / 13 秒），那段时间里浏览器半部没有任何编辑条目，按下复制不会被插件接管 —— 瘦身之后复制拿到的是改写后的文本。0.4.4 加的自报诊断按计划撤掉。
+
+- **再提速**：`rollbackLedger` 原本自己又折了一遍表面（`/state` 已经折过），31k 事件等于走两遍；现在折一次、四个遍历共用同一份索引。
+
+- `dsh-edit-turn` 同时把工具链依赖的 `dsh-session-format-catalog` 写进了 devDependencies（之前只在 node_modules 里，重装就丢）。
+
 **0.4.5** —— `/state` 再提速（跟进 `dsh-edit-turn` 0.5.11）。
 
 - **组件跟进**：`dsh-edit-turn` **0.5.11**、`dsh-rerun-turn` 0.2.6、`dsh-delete-turn` 0.1.15、`dsh-markdown-bubble` 0.1.5。

@@ -1,6 +1,6 @@
 // dsh-edit-turn host half (dsh-edit-turn.js), VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-edit-turn/lib/index.js  (v0.5.11, sha256 bd1a9f8f275c3c0f)
+// Source: ../dsh-edit-turn/lib/index.js  (v0.5.12, sha256 6adfd5b9699657d5)
 // Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.
 //
 // src/shell.js imports the copy named after the component, which is why the
@@ -85,7 +85,7 @@ export const PLUGIN_ID = 'dsh-edit-turn'
 export const name = PLUGIN_ID
 
 /** Keep in sync with package.json and lib/client.js. */
-export const PLUGIN_VERSION = '0.5.11'
+export const PLUGIN_VERSION = '0.5.12'
 
 // A ring of the last few requests, answering "did the browser half even ask, and
 // what did it get?" without needing its console. Read-only diagnostics: the
@@ -706,10 +706,13 @@ function copyBlock(block) {
  * @returns `{ hidden, edits }`: one hidden entry per shadowed seq, and one
  *   record per landed rollback.
  */
-export function rollbackLedger(events) {
-  const folded = foldSurface(events)
-  const bySeq = new Map(events.map((event) => [event.seq, event]))
-  const turnOf = turnIndex(events)
+export function rollbackLedger(events, options = {}) {
+  // A caller that already folded the surface (the state route does) hands it in:
+  // folding twice over a long session is the single most expensive thing this
+  // route did - 31k events, and every fold walks all of them.
+  const folded = options.folded ?? foldSurface(events)
+  const bySeq = options.bySeq ?? new Map(events.map((event) => [event.seq, event]))
+  const turnOf = options.turnOf ?? turnIndex(events)
   const hidden = []
   const edits = []
   for (const replacement of folded.replacements) {
@@ -1251,8 +1254,8 @@ export function buildReplayWrites(events, plan, baseTurn, replayId, startSeq, pr
  * @returns one entry per editable prompt, in conversation order.
  */
 export function editableTurns(events, surfaceNodes, options = {}) {
-  const eventBySeq = new Map(events.map((event) => [event.seq, event]))
-  const turnOf = turnIndex(events)
+  const eventBySeq = options.bySeq ?? new Map(events.map((event) => [event.seq, event]))
+  const turnOf = options.turnOf ?? turnIndex(events)
   const head = surfaceNodes[0]
   const out = []
   // Surface order, not log order: a prompt rewritten in place travels as a
@@ -1308,7 +1311,7 @@ export function editableTurns(events, surfaceNodes, options = {}) {
  */
 export function editableReplies(events, surfaceNodes, options = {}) {
   const nodeIndex = new Map(surfaceNodes.map((seq, index) => [seq, index]))
-  const turnOf = turnIndex(events)
+  const turnOf = options.turnOf ?? turnIndex(events)
   const head = surfaceNodes[0]
   const patches = options.patches instanceof Map ? options.patches : new Map()
   const patch = options.patch === true
@@ -1776,7 +1779,9 @@ async function stateOf(ctx, sessionId, config) {
     }
   }
   const folded = foldSurface(events)
-  const ledger = rollbackLedger(events)
+  const bySeq = new Map(events.map((event) => [event.seq, event]))
+  const turnOf = turnIndex(events)
+  const ledger = rollbackLedger(events, { folded, bySeq, turnOf })
   const patches = patchesOf(events)
   // A patch whose target has been retired (a later rerun shadowed it) is inert:
   // the projection skips it and no row can show it. Reporting it in /state made
@@ -1790,8 +1795,8 @@ async function stateOf(ctx, sessionId, config) {
   // now, so a store that is unmounted (or not yet mounted) cannot leave the
   // editor promising to keep blocks the host would have to drop.
   const store = resolveAttachmentStore(ctx)
-  const turns = editableTurns(events, folded.nodes, { preview: canPreviewAttachments(store) })
-  const replies = editableReplies(events, folded.nodes, { patches, patch: config.patch === true, light: true }).map(lightReply)
+  const turns = editableTurns(events, folded.nodes, { preview: canPreviewAttachments(store), bySeq, turnOf })
+  const replies = editableReplies(events, folded.nodes, { patches, patch: config.patch === true, light: true, bySeq, turnOf }).map(lightReply)
   noteRequest({
     kind: 'state',
     sessionId,
