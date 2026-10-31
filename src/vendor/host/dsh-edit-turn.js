@@ -1,6 +1,6 @@
 // dsh-edit-turn host half (dsh-edit-turn.js), VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-edit-turn/lib/index.js  (v0.5.10, sha256 8bfd50c80995d96e)
+// Source: ../dsh-edit-turn/lib/index.js  (v0.5.11, sha256 bd1a9f8f275c3c0f)
 // Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.
 //
 // src/shell.js imports the copy named after the component, which is why the
@@ -85,7 +85,7 @@ export const PLUGIN_ID = 'dsh-edit-turn'
 export const name = PLUGIN_ID
 
 /** Keep in sync with package.json and lib/client.js. */
-export const PLUGIN_VERSION = '0.5.10'
+export const PLUGIN_VERSION = '0.5.11'
 
 // A ring of the last few requests, answering "did the browser half even ask, and
 // what did it get?" without needing its console. Read-only diagnostics: the
@@ -1312,6 +1312,11 @@ export function editableReplies(events, surfaceNodes, options = {}) {
   const head = surfaceNodes[0]
   const patches = options.patches instanceof Map ? options.patches : new Map()
   const patch = options.patch === true
+  // `/state` publishes identities only, so the blocks never leave this function.
+  // Skipping them also skips the per-turn widening below, which walks every reply
+  // of the same turn for every reply: that widening is what made one refresh of a
+  // long session take seconds.
+  const light = options.light === true
   const out = []
   for (const event of events) {
     if (!isAssistantReply(event)) continue
@@ -1331,7 +1336,7 @@ export function editableReplies(events, surfaceNodes, options = {}) {
     // text of that turn is offered, each annotated with the seq it lives in.
     let listed = blocks.map((block) => ({ ...block, seq: event.seq }))
     const carriesAnswer = blocks.some((block) => block.kind === 'text' && block.text.trim() !== '')
-    if (patch && carriesAnswer && typeof turn === 'number') {
+    if (!light && patch && carriesAnswer && typeof turn === 'number') {
       const acrossTurn = []
       for (const other of events) {
         if (!isAssistantReply(other) || turnOf.get(other.seq) !== turn) continue
@@ -1345,6 +1350,7 @@ export function editableReplies(events, surfaceNodes, options = {}) {
       if (acrossTurn.length > listed.length) listed = acrossTurn
     }
     out.push({
+      ...(light ? {} : { blocks: listed }),
       seq: event.seq,
       turn: typeof turn === 'number' ? turn : null,
       messageId: messageIdOf(event) ?? null,
@@ -1785,7 +1791,7 @@ async function stateOf(ctx, sessionId, config) {
   // editor promising to keep blocks the host would have to drop.
   const store = resolveAttachmentStore(ctx)
   const turns = editableTurns(events, folded.nodes, { preview: canPreviewAttachments(store) })
-  const replies = editableReplies(events, folded.nodes, { patches, patch: config.patch === true }).map(lightReply)
+  const replies = editableReplies(events, folded.nodes, { patches, patch: config.patch === true, light: true }).map(lightReply)
   noteRequest({
     kind: 'state',
     sessionId,

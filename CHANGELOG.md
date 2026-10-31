@@ -4,6 +4,12 @@
 
 ## 中文
 
+**0.4.5** —— `/state` 再提速（跟进 `dsh-edit-turn` 0.5.11）。
+
+- **组件跟进**：`dsh-edit-turn` **0.5.11**、`dsh-rerun-turn` 0.2.6、`dsh-delete-turn` 0.1.15、`dsh-markdown-bubble` 0.1.5。
+
+- 回复列表不再构建分块：同一个会话 **2,227 ms → 29 ms**（中间数据 22.4 MB → 1.1 MB）。编辑笔的出现不再等这一下。
+
 **0.4.4** —— 复制失败的诊断（跟进 `dsh-edit-turn` 0.5.10）。
 
 - **组件跟进**：`dsh-edit-turn` **0.5.10**（另三个不变：`dsh-rerun-turn` 0.2.6、`dsh-delete-turn` 0.1.15、`dsh-markdown-bubble` 0.1.5）。
