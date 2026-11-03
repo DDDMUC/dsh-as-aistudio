@@ -1,6 +1,6 @@
 // dsh-rerun-turn browser half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-rerun-turn/lib/client.js  (v0.2.6, sha256 01220165d898134c)
+// Source: ../dsh-rerun-turn/lib/client.js  (v0.2.6, sha256 1e1f5b2f620b6558)
 // Regenerate with `npm run vendor`; test/vendor-sync.test.js fails when this is stale.
 //
 // The component registers its factory with the host module loader; inside this
@@ -339,6 +339,9 @@ export default (require) => {
         // button still carries the previous instance's click handler) must not
         // open a confirm panel on a controller nobody renders any more.
         this.disposed = false
+        // Rows cloned from the rerun turn so the old prompt stays on screen while
+        // the host has already shadowed it (see freezeTurn).
+        this.frozen = []
         this.view = Object.freeze({
           hidden: new Map(),
           reruns: [],
@@ -431,6 +434,14 @@ export default (require) => {
               if (typeof reply.messageId === 'string' && reply.messageId !== '') repliesByMessage.set(reply.messageId, reply)
             }
             const rerunning = data.rerunning === true
+            // Merge the optimistic hide from the click that started this rerun:
+            // /state only reports a rerun's rows once it is COMPLETE, and the
+            // retired prompt must stay hidden while the replay streams in.
+            if (this.pendingHidden instanceof Map) {
+              for (const [seq] of this.pendingHidden) if (!hidden.has(seq)) hidden.set(seq, null)
+              if (!rerunning) this.pendingHidden = null
+            }
+            if (!rerunning) this.releaseFrozen()
             const markerTurns = new Set(Array.isArray(data.markerTurns) ? data.markerTurns.filter((turn) => typeof turn === 'number') : [])
             // Turns whose content a landed rerun fully retired: their
             // process/tail strips hold nothing and must vanish with it.
@@ -554,9 +565,45 @@ export default (require) => {
         this.publish({ notice: null, noticeError: false, dismissedKey: key })
       }
 
+      /**
+       * 冻结目标轮的渲染：宿主在 apply 的那一刻就把这一轮的表面节点遮蔽了，重放的提问
+       * 要等下一次渲染才出现，中间那一帧会没有提问气泡。这里在点击时把这一轮的行
+       * 克隆一份，apply 成功后插回去，重跑结束再撤掉——只影响视觉，不碰日志。
+       */
+      freezeTurn(turn) {
+        this.releaseFrozen()
+        if (!Number.isFinite(turn)) return
+        for (const row of document.querySelectorAll('[data-chat-flow-key][data-chat-turn]')) {
+          if (Number(row.getAttribute('data-chat-turn')) !== turn) continue
+          const parent = row.parentElement
+          if (parent === null) continue
+          const clone = row.cloneNode(true)
+          clone.setAttribute('data-dsrr-frozen', '1')
+          // 别让平台/本插件把它当真实行：去掉流键，摘掉自己注入的动作条。
+          clone.removeAttribute('data-chat-flow-key')
+          for (const junk of clone.querySelectorAll('[data-dsrrh], [class*="_actions"]')) junk.remove()
+          this.frozen.push({ clone, parent, before: row.nextSibling })
+        }
+      }
+
+      applyFrozen() {
+        for (const item of this.frozen) {
+          if (item.clone.parentElement !== null || !item.parent.isConnected) continue
+          const anchor = item.before !== null && item.before.parentElement === item.parent ? item.before : null
+          item.parent.insertBefore(item.clone, anchor)
+        }
+      }
+
+      releaseFrozen() {
+        for (const item of this.frozen) if (item.clone.parentElement !== null) item.clone.remove()
+        this.frozen = []
+      }
+
       async send(entry) {
         if (this.view.pending) return
         this.publish({ pending: true, failure: null, notice: null, noticeError: false })
+        const turn = Number.isFinite(entry.turn) ? entry.turn : entry.reply && Number.isFinite(entry.reply.turn) ? entry.reply.turn : null
+        this.freezeTurn(turn)
         try {
           const res = await fetch(`${ROUTE_PREFIX}/apply`, {
             method: 'POST',
@@ -564,6 +611,7 @@ export default (require) => {
             body: JSON.stringify({ sessionId: this.sessionId, seq: entry.seq, messageId: entry.messageId }),
           })
           const data = await res.json().catch(() => ({}))
+          this.releaseFrozen()
           if (!res.ok || !data.ok) {
             const code = data && data.code ? String(data.code) : 'generic'
             if (code === 'already-retired') {
@@ -578,14 +626,22 @@ export default (require) => {
             this.publish({ pending: false, failure: code, failureDetail: typeof data.error === 'string' && data.error !== '' ? data.error : null })
             return
           }
-          // Do NOT hide the retired rows here: the rerun's replacement (fresh
-          // answer + replay) is not on screen yet, and /state only reports the
-          // retired set for COMPLETED reruns. The rows switch over when the
-          // replay lands.
+          // 宿主已经把这几行遮蔽了（shadow 是同步写下的），所以立刻隐藏它们：
+          // 否则窗口盖掉 edit 载体的一瞬，它压住的原文会重新渲染出来（闪回）。
+          // /state 在重跑完成前不会报告这些行（只报已完成），所以这份乐观集合要
+          // 一直保留到 rerunning 结束，见 load() 里的合并。
+          // 只藏“窗口之外的原文”（被 edit 载体替换掉的那些）。窗口自身的行由
+          // 重跑中的分组逻辑处理，整段藏起来会把界面清空。
+          const immediate = Array.isArray(data.retired) ? data.retired : []
+          const pendingHidden = new Map()
+          for (const seq of immediate) if (typeof seq === 'number') pendingHidden.set(seq, null)
+          this.pendingHidden = pendingHidden
+          this.applyFrozen()
           this.publish({ pending: false, failure: null, rerunning: true })
           this.ensurePolling()
           this.load(true)
         } catch {
+          this.releaseFrozen()
           this.publish({ pending: false, failure: 'generic' })
         }
       }

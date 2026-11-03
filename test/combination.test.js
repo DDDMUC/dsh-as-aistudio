@@ -792,6 +792,9 @@ test('with all four loaded the registrations match the section-2 allocation tabl
     'conversation.input.overlay | delete-turn | 8',
     'conversation.input.overlay | edit-turn | 9',
     'conversation.input.overlay | rerun-turn | 10',
+    // dsh-delete-turn 0.1.16 puts the multi-select door in the Session header,
+    // beside the shipped utilities (open-in-app -10, schedule -5, log 0, export 10).
+    'conversation.session.header.utilities | delete-turn | 10',
     // dsh-delete-turn 0.1.10 added the "ask before deleting" toggle on the
     // plugin page, so the bundle also registers this key-based entry. It has no
     // order (the row-config slot is keyed, not ordered), so §2 stays unique.
@@ -910,6 +913,10 @@ const DELETE_VIEW_KEYS = [
   'pending',
   'replyTurns',
   'revision',
+  // dsh-delete-turn 0.1.16: multi-select. `selecting` is the mode, `selected`
+  // maps a row's selection key to the target that row would delete.
+  'selected',
+  'selecting',
   'surface',
   'surfaceReady',
   'surfaceThrough',
