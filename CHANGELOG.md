@@ -4,6 +4,12 @@
 
 ## 中文
 
+**0.4.8** —— 跟进内嵌组件：delete 0.2.0、rerun 0.2.7。
+
+- **dsh-delete-turn 0.2.0**：多选删除；载体写上 `op`/`turn`，整轮删除额外写 `deletedTurn`/`deleteIndex`。
+- **dsh-rerun-turn 0.2.7**：遮蔽窗口按表面节点、重放按槽位顺序、生成期间冻结旧轮渲染（不再闪回/空白/丢提问）。
+- 内置版本记录同步更新；`vendor --check` 干净，115/115 全绿。
+
 **0.4.7** —— 打开着的会话不再重新解码整份日志（跟进 `dsh-edit-turn` 0.5.13）。
 
 - **组件跟进**：`dsh-edit-turn` **0.5.13**、`dsh-rerun-turn` 0.2.6、`dsh-delete-turn` 0.1.15、`dsh-markdown-bubble` 0.1.5。

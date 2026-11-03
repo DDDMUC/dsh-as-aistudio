@@ -5527,7 +5527,7 @@ window.__ModuleLoader__.load({
     const ROUTE_PREFIX = '/dsh-rerun-turn'
 
     /** Keep in sync with package.json and lib/index.js. */
-    const PLUGIN_VERSION = '0.2.6'
+    const PLUGIN_VERSION = '0.2.7'
 
     // --- copy -----------------------------------------------------------------
 
@@ -9583,7 +9583,7 @@ window.__ModuleLoader__.load({
     const NS = 'dsh-as-aistudio'
 
     /** Keep in sync with package.json and src/components.js. */
-    const PLUGIN_VERSION = '0.4.7'
+    const PLUGIN_VERSION = '0.4.8'
 
     /** Presence marker the live verifier reads. */
     const DEBUG_KEY = '__DSH_AS_AISTUDIO__'

@@ -1,6 +1,6 @@
 // dsh-delete-turn browser half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-delete-turn/src/client.js  (v0.1.15, sha256 194f739c2c5aba1c)
+// Source: ../dsh-delete-turn/src/client.js  (v0.2.0, sha256 194f739c2c5aba1c)
 // Regenerate with `npm run vendor`; test/vendor-sync.test.js fails when this is stale.
 //
 // The component registers its factory with the host module loader; inside this
