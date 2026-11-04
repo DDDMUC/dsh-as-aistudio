@@ -4,6 +4,8 @@
 
 ## 中文
 
+**0.5.7** —— 跟进 dsh-delete-turn 0.2.4（多选条「取消」）。
+
 **0.5.6** —— 组件设置里补上「会话日志裁剪」的卡片。
 
 - `CONFIG_CARDS` 之前只列了 edit / rerun / delete，log-trim 的 `ConfigCard` 虽然已导出却没被渲染，

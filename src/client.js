@@ -7150,7 +7150,7 @@ window.__ModuleLoader__.load({
       'select.count': '已选',
       'select.unit': '项',
       'select.delete': '删除选中',
-      'select.cancel': '退出多选',
+      'select.cancel': '取消',
       'config.ask': '删除时询问',
       'config.hint.ask': '每次删除前都会弹出确认框。',
       'config.hint.auto': '删除会直接执行，不再询问。',
@@ -7198,7 +7198,7 @@ window.__ModuleLoader__.load({
       'select.count': 'Selected',
       'select.unit': '',
       'select.delete': 'Delete selected',
-      'select.cancel': 'Exit multi-select',
+      'select.cancel': 'Cancel',
       'config.ask': 'Ask before deleting',
       'config.hint.ask': 'Show a confirmation dialog before every deletion.',
       'config.hint.auto': 'Delete right away without asking.',
@@ -10089,7 +10089,7 @@ window.__ModuleLoader__.load({
     const NS = 'dsh-as-aistudio'
 
     /** Keep in sync with package.json and src/components.js. */
-    const PLUGIN_VERSION = '0.5.6'
+    const PLUGIN_VERSION = '0.5.7'
 
     /** Presence marker the live verifier reads. */
     const DEBUG_KEY = '__DSH_AS_AISTUDIO__'

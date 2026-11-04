@@ -1,6 +1,6 @@
 // dsh-delete-turn browser half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-delete-turn/src/client.js  (v0.2.3, sha256 3cba30fcc339c776)
+// Source: ../dsh-delete-turn/src/client.js  (v0.2.4, sha256 fd670d0a402fe038)
 // Regenerate with `npm run vendor`; test/vendor-sync.test.js fails when this is stale.
 //
 // The component registers its factory with the host module loader; inside this
@@ -110,7 +110,7 @@ export default (require) => {
       'select.count': '已选',
       'select.unit': '项',
       'select.delete': '删除选中',
-      'select.cancel': '退出多选',
+      'select.cancel': '取消',
       'config.ask': '删除时询问',
       'config.hint.ask': '每次删除前都会弹出确认框。',
       'config.hint.auto': '删除会直接执行，不再询问。',
@@ -158,7 +158,7 @@ export default (require) => {
       'select.count': 'Selected',
       'select.unit': '',
       'select.delete': 'Delete selected',
-      'select.cancel': 'Exit multi-select',
+      'select.cancel': 'Cancel',
       'config.ask': 'Ask before deleting',
       'config.hint.ask': 'Show a confirmation dialog before every deletion.',
       'config.hint.auto': 'Delete right away without asking.',
