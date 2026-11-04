@@ -1,6 +1,6 @@
 // dsh-as-aistudio - host half.
 //
-// Self-contained: the plugin list shows ONE row (this package). The four
+// Self-contained: the plugin list shows ONE row (this package). The five
 // components are ordinary dependencies, not profile bundles, so they have no
 // rows of their own and never appear there.
 //
@@ -378,7 +378,7 @@ function guard(req, res) {
 // --- plugin --------------------------------------------------------------------
 
 export async function apply(ctx) {
-  // Nothing is mounted here any more: the four component rows in
+  // Nothing is mounted here any more: the five component rows in
   // cordis.patch.yml mount the component host halves through src/shell.js, and
   // the Loader owns their lifetime. Mounting them here as well would run every
   // component twice in one process and collide on its routes.

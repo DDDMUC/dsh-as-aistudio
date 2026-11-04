@@ -260,11 +260,12 @@ test('the status document reports installed state and the own-row count', () => 
 })
 
 test('the summary counts the rows that are really live', () => {
-  const rows = loaderRows((component) => (component.id === COMPONENTS[2].id ? { fiber: { uid: 77, state: 3 } } : {}))
+  const stuck = COMPONENTS[2]
+  const rows = loaderRows((component) => (component.id === stuck.id ? { fiber: { uid: 77, state: 3 } } : {}))
   const status = statusWith(rows)
-  assert.equal(status.summary.mounted, 3)
-  assert.deepEqual(status.summary.combination, ['dsh-edit-turn', 'dsh-rerun-turn', 'dsh-markdown-bubble'])
-  const failed = status.components.find((component) => component.id === 'dsh-delete-turn')
+  assert.equal(status.summary.mounted, COMPONENTS.length - 1)
+  assert.deepEqual(status.summary.combination, COMPONENTS.filter((component) => component.id !== stuck.id).map((component) => component.id))
+  const failed = status.components.find((component) => component.id === stuck.id)
   assert.equal(failed.hostMounted, false)
   assert.equal(failed.hostReason, 'start-failed')
   assert.equal(failed.hostRow, 'dsh-as-aistudio/delete')
@@ -362,7 +363,7 @@ test('the route reports what the loader says, per request', async () => {
   const answer = await call(await statusRoute({ loader: { entries: () => loaderRows() } }), 'GET', '/api/dsh-as-aistudio/status')
   assert.equal(answer.status, 200)
   assert.equal(answer.body.loaderVisible, true)
-  assert.equal(answer.body.summary.mounted, COMPONENTS.length, 'the four component rows are live')
+  assert.equal(answer.body.summary.mounted, COMPONENTS.length, 'every component row is live')
   assert.deepEqual(answer.body.summary.combination, COMPONENTS.map((component) => component.id))
 })
 

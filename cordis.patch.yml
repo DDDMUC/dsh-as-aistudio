@@ -59,3 +59,8 @@
       name: 'dsh-as-aistudio/markdown'
       config:
         plugin: 'dsh-markdown-bubble'
+- insert:
+    - id: dsh-as-aistudio-trim
+      name: 'dsh-as-aistudio/trim'
+      config:
+        plugin: 'dsh-log-trim'

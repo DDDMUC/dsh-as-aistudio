@@ -36,6 +36,7 @@ const COMPONENTS = [
   { id: 'dsh-rerun-turn', from: 'lib/client.js', hostFrom: 'lib/index.js' },
   { id: 'dsh-delete-turn', from: 'src/client.js', hostFrom: 'src/index.js' },
   { id: 'dsh-markdown-bubble', from: 'src/client.js', hostFrom: 'src/index.js' },
+  { id: 'dsh-log-trim', from: 'lib/client.js', hostFrom: 'lib/index.js' },
 ]
 
 /** Everything before the loader call must be comments, or the shape is not ours. */
@@ -80,10 +81,11 @@ const PLATFORM = [
  * @returns [{ name, text }] - the entry file first, then what it imports.
  */
 function vendorHostHalf(component, hostPath) {
-  const dir = dirname(hostPath)
   const extra = []
+  // 已经抄过的绝对路径 → 包内名字；模块互相引用（校验器 ↔ 裁剪器），没有这张表会无限递归。
+  const visited = new Map([[hostPath, component.id + '.js']])
 
-  const rewrite = (source, file) => {
+  const rewrite = (source, file, dir = dirname(file)) => {
     const destructures = []
     let out = source.replace(/^\/\/# sourceMappingURL=.*$/gm, '')
     for (const { spec, alias } of PLATFORM) {
@@ -99,24 +101,42 @@ function vendorHostHalf(component, hostPath) {
         out = out.replace(match[0], "import { " + alias + " } from './_platform.js'")
         destructures.push('const {' + match[1] + '} = ' + alias)
       }
-      if (new RegExp("from '" + quoted + "'").test(out)) {
+      // 只认真正的 import 语句：模板字符串里拼出来的 `export * from '@deepseek-ai/...'`
+      // 是校验器生成转发文件用的文本，不是这个文件自己的依赖。
+      if (new RegExp("^\\s*import\\b[^\\n]*from '" + quoted + "'", 'm').test(out)) {
         console.error(component.id + ': ' + file + ' imports ' + spec + ' in a form this vendoring does not rewrite; refusing to guess')
         process.exit(3)
       }
     }
     // Relative modules: copied beside the entry, renamed per component.
-    out = out.replace(/from '(\.\/[^']+\.js)'/g, (whole, rel) => {
+    out = out.replace(/from '(\.\/[^']+\.(?:m?js))'/g, (whole, rel) => {
       if (rel === './_platform.js') return whole
       const abs = join(dir, rel)
       if (!existsSync(abs)) {
         console.error(component.id + ': ' + file + ' imports ' + rel + ', which does not exist')
         process.exit(3)
       }
-      const flat = component.id + '.' + rel.slice(2)
-      if (!extra.some((entry) => entry.name === flat)) {
-        extra.push({ name: flat, text: rewrite(readFileSync(abs, 'utf8'), rel) })
+      const flat = component.id + '.' + rel.slice(2).replace(/\//g, '.')
+      if (!visited.has(abs)) {
+        visited.set(abs, flat)
+        extra.push({ name: flat, text: rewrite(readFileSync(abs, 'utf8'), abs, dirname(abs)) })
       }
       return "from './" + flat + "'"
+    })
+    // 动态导入：宿主半部会在用到校验器时才 `await import('./vendor/verify-session-log.mjs')`，
+    // 静态改写管不到它，这里按同一套规则改名。
+    out = out.replace(/import\('(\.\/[^']+\.(?:m?js))'\)/g, (whole, rel) => {
+      const abs = join(dir, rel)
+      if (!existsSync(abs)) {
+        console.error(component.id + ': ' + file + ' dynamically imports ' + rel + ', which does not exist')
+        process.exit(3)
+      }
+      const flat = component.id + '.' + rel.slice(2).replace(/\//g, '.')
+      if (!visited.has(abs)) {
+        visited.set(abs, flat)
+        extra.push({ name: flat, text: rewrite(readFileSync(abs, 'utf8'), abs, dirname(abs)) })
+      }
+      return "import('./" + flat + "')"
     })
     if (destructures.length > 0) {
       // Hoisted bindings read from the resolved namespace, placed after the
@@ -134,7 +154,7 @@ function vendorHostHalf(component, hostPath) {
     return out
   }
 
-  const entry = rewrite(readFileSync(hostPath, 'utf8'), component.hostFrom)
+  const entry = rewrite(readFileSync(hostPath, 'utf8'), hostPath)
   return [{ name: component.id + '.js', text: entry.trimEnd() + '\n' }, ...extra.map((file) => ({ name: file.name, text: file.text.trimEnd() + '\n' }))]
 }
 

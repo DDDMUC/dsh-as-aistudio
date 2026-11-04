@@ -17,7 +17,7 @@
 // matches a component to its row.
 //
 // "optional" is the honest word for a component: the studio boots with any
-// subset of them present (none, one, two, three, four), because every row the
+// subset of them present (none, one, ... five), because every row the
 // patch inserts fails in isolation when its package is missing — one entry
 // reports the missing module, every other entry still starts (see
 // @cordisjs/plugin-loader: Entry#_init catches the import error and returns).
@@ -26,7 +26,7 @@
 export const STUDIO_ID = 'dsh-as-aistudio'
 
 /** Keep in sync with package.json and src/client.js. */
-export const STUDIO_VERSION = '0.4.9'
+export const STUDIO_VERSION = '0.5.0'
 
 /**
  * The AI Studio action strip this studio composes, in the order the user meets
@@ -43,7 +43,7 @@ export const STUDIO_VERSION = '0.4.9'
  * load-bearing (docs/INTEROP.md section 11):
  *
  *   - the plugin list is a deduplicated set of package identities, and a subpath
- *     of this package resolves to this package's identity, so four extra rows
+ *     of this package resolves to this package's identity, so five extra rows
  *     still cost exactly zero extra list rows;
  *   - the client-module scanner accepts only an exact package specifier, so a
  *     subpath row never becomes a second browser source for the component - its
@@ -110,6 +110,21 @@ export const COMPONENTS = [
       en: 'Sent prompts render as Markdown (lists, code, tables, quotes) while queues and previews keep the plain projection.',
     },
   },
+  {
+    id: 'dsh-log-trim',
+    package: 'dsh-log-trim',
+    suffix: 'trim',
+    feature: 'trim',
+    kind: 'maintenance',
+    repo: 'https://github.com/DDDMUC/dsh-log-trim',
+    slot: null,
+    overlay: null,
+    title: { zh: '会话日志裁剪', en: 'Session log trim' },
+    pitch: {
+      zh: '启动时裁掉模型早已看不到的旧窗口、清空逐块回放记录、把 edit/rerun/delete 的痕迹折叠掉；写盘前过宿主自己的九项校验。',
+      en: 'At boot: drops windows the model can no longer see, clears streaming replay records, and folds edit/rerun/delete traces away - every write validated by the host own checks first.',
+    },
+  }
 ]
 
 /** Component ids, in manifest order. */

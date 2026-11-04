@@ -8,7 +8,7 @@
 // which first re-vendors src/vendor/ from the component checkouts).
 //
 // Self-contained: the plugin list shows ONE row (this package). This bundle is
-// served for that row, so it is the only way the four components' browser halves
+// served for that row, so it is the only way the five components' browser halves
 // can reach the page. They travel in src/vendor/<component>.js, generated from
 // the component sources by tools/vendor.mjs, and build.mjs places each factory
 // verbatim into this scope.
@@ -48,7 +48,7 @@ window.__ModuleLoader__.load({
     const NS = 'dsh-as-aistudio'
 
     /** Keep in sync with package.json and src/components.js. */
-    const PLUGIN_VERSION = '0.4.9'
+    const PLUGIN_VERSION = '0.5.0'
 
     /** Presence marker the live verifier reads. */
     const DEBUG_KEY = '__DSH_AS_AISTUDIO__'
@@ -84,7 +84,7 @@ window.__ModuleLoader__.load({
       tab: 'AI Studio',
       heading: 'AI Studio 组件',
       intro:
-        '这些组件就是 AI Studio 式的一轮循环：改提示词并重跑、原位重跑、删掉这一轮，以及把发出的提示词按 Markdown 渲染。四个都是独立插件，单独安装也能用，任意子集都能共存。这个面板显示它们各自的实际状态。',
+        '这些组件就是 AI Studio 式的一轮循环：改提示词并重跑、原位重跑、删掉这一轮，把发出的提示词按 Markdown 渲染，再加上会话日志的启动维护。五个都是独立插件，单独安装也能用，任意子集都能共存。这个面板显示它们各自的实际状态。',
       statusMounted: '已启用',
       statusInstalled: '已安装，宿主未挂载',
       statusMissing: '未安装',
@@ -102,8 +102,8 @@ window.__ModuleLoader__.load({
       interopHide: '行隐藏归属属性（别人声明的隐藏，我不能清掉）',
       host: '宿主 DSH {version}',
       hostUnknown: '宿主版本未知',
-      note: '四个组件由这个包的四个补丁行挂载（dsh-as-aistudio/edit 等），插件列表里仍然只有 AI Studio 一行；它们仍是独立 npm 包，单独安装时自己出现一行。宿主未挂载的组件不会画到界面上。',
-      summaryShort: '改词重跑 · 原位重跑 · 删这一轮 · 提示词渲染 Markdown',
+      note: '五个组件由这个包的五个补丁行挂载（dsh-as-aistudio/edit、…/trim 等），插件列表里仍然只有 AI Studio 一行；它们仍是独立 npm 包，单独安装时自己出现一行。宿主未挂载的组件不会画到界面上。',
+      summaryShort: '改词重跑 · 原位重跑 · 删这一轮 · 提示词渲染 Markdown · 日志裁剪',
       settingsHeading: '组件设置',
     }
 
@@ -111,7 +111,7 @@ window.__ModuleLoader__.load({
       tab: 'AI Studio',
       heading: 'AI Studio components',
       intro:
-        'These components are the AI Studio loop for a turn: revise a prompt and re-run it, re-run a reply in place, delete the turn, and render sent prompts as Markdown. All four are independent plugins that also work alone, and any subset coexists. This panel shows what each one is actually doing.',
+        'These components are the AI Studio loop for a turn: revise a prompt and re-run it, re-run a reply in place, delete the turn, render sent prompts as Markdown, and keep session logs trimmed at boot. All five are independent plugins that also work alone, and any subset coexists. This panel shows what each one is actually doing.',
       statusMounted: 'Enabled',
       statusInstalled: 'Installed, host not mounted',
       statusMissing: 'Not installed',
@@ -129,8 +129,8 @@ window.__ModuleLoader__.load({
       interopHide: 'Row-hide ownership attributes (a foreign hide is never cleared)',
       host: 'host DSH {version}',
       hostUnknown: 'host version unknown',
-      note: 'The four components are mounted by the four patch rows of this package (dsh-as-aistudio/edit and friends), so the plugin list still shows only AI Studio; they remain independent npm packages that show their own row when installed standalone. A component whose host half is not mounted is not drawn at all.',
-      summaryShort: 'revise and re-run, re-run in place, delete the turn, render prompts as Markdown',
+      note: 'The five components are mounted by the five patch rows of this package (dsh-as-aistudio/edit, .../trim and friends), so the plugin list still shows only AI Studio; they remain independent npm packages that show their own row when installed standalone. A component whose host half is not mounted is not drawn at all.',
+      summaryShort: 'revise and re-run, re-run in place, delete the turn, render prompts as Markdown, trim session logs',
       settingsHeading: 'Component settings',
     }
 
@@ -150,6 +150,10 @@ window.__ModuleLoader__.load({
       'dsh-markdown-bubble': {
         zh: { title: 'Markdown 气泡', pitch: '发出的提示词按 Markdown 渲染；排队与预览保持纯文本。' },
         en: { title: 'Markdown bubble', pitch: 'Sent prompts render as Markdown; queues and previews stay plain.' },
+      },
+      'dsh-log-trim': {
+        zh: { title: '会话日志裁剪', pitch: '启动时裁掉模型看不到的旧窗口、清空逐块回放、折叠编辑痕迹；写盘前过九项校验。' },
+        en: { title: 'Session log trim', pitch: 'At boot: drop invisible windows, clear streaming replay, fold edit/rerun/delete traces — validated before writing.' },
       },
     }
 
@@ -401,7 +405,7 @@ window.__ModuleLoader__.load({
     function StudioPanel({ view: slotView, t, currentLocale, bindComponentLocale }) {
       // `plugins.row.config` asks twice: once for the row's one-liner and once
       // for the page. The one-liner must not fetch - it renders on every plugin
-      // row paint - so it is the static description of what the four components
+      // row paint - so it is the static description of what the five components
       // do, and the page below carries the live state and the settings.
       if (slotView === 'summary') return h('span', null, t('summaryShort'))
       const [request, setRequest] = react.useState(0)

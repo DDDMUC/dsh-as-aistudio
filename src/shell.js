@@ -2,7 +2,7 @@
 //
 // One file, mounted once per component row in cordis.patch.yml. A Loader row
 // mounts whatever its `name` resolves to, so every component row is named
-// `dsh-as-aistudio/<suffix>` - package.json maps all four suffixes to THIS
+// `dsh-as-aistudio/<suffix>` - package.json maps all five suffixes to THIS
 // file - and carries the real component package in `config.plugin`. The shell
 // is what turns that name into a mount:
 //
@@ -13,7 +13,7 @@
 //
 //   * the plugin list is the deduplicated package identity set
 //     (name + version), and a subpath of this package resolves to this one
-//     identity - so four extra rows still cost exactly ZERO extra list rows;
+//     identity - so five extra rows still cost exactly ZERO extra list rows;
 //   * the client-module scanner only accepts an exact package specifier, so a
 //     subpath row is never mistaken for a second browser source. The browser
 //     halves keep travelling inside this package's single bundle (src/client.js),
@@ -37,7 +37,7 @@
 import { COMPONENTS, STUDIO_ID } from './components.js'
 import { pluginOf } from './index.js'
 
-/** Loader display name of this shell (all four rows share it). */
+/** Loader display name of this shell (all five rows share it). */
 export const name = STUDIO_ID + '/component'
 
 /** Required services: none. The shell must be able to activate on its own. */

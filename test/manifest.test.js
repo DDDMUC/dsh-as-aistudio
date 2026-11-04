@@ -27,7 +27,7 @@ test('every component is an independent npm package with its own repo', () => {
     assert.equal(component.id, component.package, component.id + ': id and package must agree')
     assert.match(component.package, NPM_NAME)
     assert.match(component.repo, /^https:\/\/github\.com\//, component.id + ': needs a repo link')
-    assert.ok(['action', 'reader'].includes(component.kind), component.id + ': kind')
+    assert.ok(['action', 'reader', 'maintenance'].includes(component.kind), component.id + ': kind')
     assert.notEqual(component.package, STUDIO_ID)
   }
 })
@@ -79,7 +79,7 @@ test('no two components claim the same slot order', () => {
 })
 
 test('the assistant action strip is ordered edit, rerun, delete', () => {
-  const strip = COMPONENTS.filter((component) => component.slot !== null && component.slot.name === 'conversation.chat.assistant-actions')
+  const strip = COMPONENTS.filter((component) => component.slot != null && component.slot.name === 'conversation.chat.assistant-actions')
   const ordered = [...strip].sort((a, b) => a.slot.order - b.slot.order).map((component) => component.id)
   assert.deepEqual(ordered, ['dsh-edit-turn', 'dsh-rerun-turn', 'dsh-delete-turn'])
 })
