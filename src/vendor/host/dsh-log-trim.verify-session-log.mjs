@@ -32,7 +32,7 @@
 import fs from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import { loadHostLibs } from './dsh-log-trim.host-libs.mjs'
-import { readLog, normalizeRefs, isCheckpoint } from './dsh-log-trim.compact-session.mjs'
+import { readLog, normalizeRefs, isCheckpoint } from './dsh-log-trim.vendor.compact-session.mjs'
 
 /** 不以 `Seq` 结尾、但同样指向本会话 seq 的字段（本仓库插件自己写的）。 */
 const EXTRA_SEQ_FIELDS = new Set(['logFrom', 'logTo', 'rerunTurnEnd'])

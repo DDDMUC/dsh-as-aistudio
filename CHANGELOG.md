@@ -4,6 +4,11 @@
 
 ## 中文
 
+**0.5.9** —— 修复内嵌 dsh-log-trim 的校验器副本缺失。
+
+- `dsh-log-trim.js` / `lossless.js` 动态导入 `dsh-log-trim.vendor.verify-session-log.mjs`，但 0.5.8 只带了一份 `dsh-log-trim.verify-session-log.mjs`（少了 `.vendor.`），且那份内部还指向不存在的 `dsh-log-trim.compact-session.mjs`。任何走到「裁剪前用宿主校验器验日志」的路径都会抛 `Cannot find module`，表现为扫描失败、`last:null`。现在补齐命名正确的副本，并对齐两份文件内部的相对导入。
+- 新增 `test/vendor-imports.test.js`：扫描 `src/vendor/host/` 下全部相对导入，发布前拦住悬空引用。
+
 **0.5.8** —— 跟进 dsh-log-trim 0.6.1（扫描崩溃修复、`/run` 后台执行）。
 
 **0.5.7** —— 跟进 dsh-delete-turn 0.2.4（多选条「取消」）。
@@ -136,6 +141,11 @@
 **0.2.14** —— 浏览器半侧与宿主半侧全部内置：本包没有任何运行时依赖，装它不会再装别的包；宿主半侧改为从运行中的 harness 解析平台包（`_platform.js`），并把组件导入的兄弟模块一起抄进来。
 
 ## English
+
+**0.5.9** — fix a missing vendored verifier.
+
+- `dsh-log-trim.js` / `lossless.js` dynamically import `dsh-log-trim.vendor.verify-session-log.mjs`, but 0.5.8 shipped only `dsh-log-trim.verify-session-log.mjs`, whose own import pointed at a non-existent `dsh-log-trim.compact-session.mjs`. Any trim reaching pre-write verification threw `Cannot find module`. Both names now exist and every internal import resolves.
+- New `test/vendor-imports.test.js` scans all relative imports under `src/vendor/host/` so a dangling copy cannot ship again.
 
 **0.3.0** — the settings page moved to this plugin's own row, and the component cards are the components' own.
 
