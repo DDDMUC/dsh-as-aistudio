@@ -4,6 +4,13 @@
 
 ## 中文
 
+**0.5.10** —— 开机扫描不再把宿主按住（会话列表变空的那个 bug）。
+
+- 整轮扫描搬进 worker（`src/vendor/host/dsh-log-trim.worker.mjs`），主线程只等一份摘要。本机实测：162 个会话、12 个大会话，旧版按住事件循环 **117 秒**，新版全程最大停顿 **43 ms**。
+- 解压/压缩分片让出事件循环（`readLogAsync` / `encodeLogAsync`），会话之间也 `setImmediate` 一次。
+- 修 `keepLastWindows` 的两处浪费：`events.find()` 套在可见事件的 `map` 里是 O(n²)；被裁掉的事件也照样 `structuredClone` 了一遍。18 MB 日志 6.3 s → 1.6 s。
+- 开机扫描延后 3 秒再起，把首屏让开。
+
 **0.5.9** —— 修复内嵌 dsh-log-trim 的校验器副本缺失。
 
 - `dsh-log-trim.js` / `lossless.js` 动态导入 `dsh-log-trim.vendor.verify-session-log.mjs`，但 0.5.8 只带了一份 `dsh-log-trim.verify-session-log.mjs`（少了 `.vendor.`），且那份内部还指向不存在的 `dsh-log-trim.compact-session.mjs`。任何走到「裁剪前用宿主校验器验日志」的路径都会抛 `Cannot find module`，表现为扫描失败、`last:null`。现在补齐命名正确的副本，并对齐两份文件内部的相对导入。
@@ -141,6 +148,13 @@
 **0.2.14** —— 浏览器半侧与宿主半侧全部内置：本包没有任何运行时依赖，装它不会再装别的包；宿主半侧改为从运行中的 harness 解析平台包（`_platform.js`），并把组件导入的兄弟模块一起抄进来。
 
 ## English
+
+**0.5.10** — the boot scan no longer freezes the host (the bug that left the session list empty).
+
+- The whole scan now runs in a worker (`src/vendor/host/dsh-log-trim.worker.mjs`); the main thread only receives a summary. Measured here: 162 sessions with 12 large ones went from **117 s of blocked event loop** to a **43 ms worst stall**.
+- Decompression, parsing and re-compression yield between slices (`readLogAsync` / `encodeLogAsync`), and between sessions.
+- Two wasteful passes in `keepLastWindows`: `events.find()` inside a map over visible events was O(n²), and events that were about to be dropped were still `structuredClone`d. 18 MB log: 6.3 s → 1.6 s.
+- The boot scan starts 3 s after mount so the first screen loads first.
 
 **0.5.9** — fix a missing vendored verifier.
 

@@ -25,7 +25,7 @@
 
 import fs from 'node:fs'
 import { recordFor } from './dsh-log-trim.ledger.js'
-import { commitTrim, derivedHistory, dropOrphanCompactions, encodeLog, foldSurface, readLog, renumber, seededHeaderFor, textLengthOf } from './dsh-log-trim.vendor.compact-session.mjs'
+import { commitTrim, derivedHistory, dropOrphanCompactions, encodeLogAsync, foldSurface, readLogAsync, renumber, seededHeaderFor, textLengthOf } from './dsh-log-trim.vendor.compact-session.mjs'
 
 /**
  * Pick the events a lossless pass keeps.
@@ -119,12 +119,12 @@ export function sameView(before, after) {
  * @param {object} config - the resolved config.
  * @returns {object} the plan: `should`, `reason`, and the numbers behind it.
  */
-export function planLossless(logFile, config) {
-  const original = readLog(logFile)
+export async function planLossless(logFile, config) {
+  const original = await readLogAsync(logFile)
   const before = modelView(original.events)
   const cut = selectLossless(original.events)
   const after = modelView(cut.events)
-  const bytes = encodeLog(original.header, cut.events).length
+  const bytes = (await encodeLogAsync(original.header, cut.events)).length
   const same = sameView(before, after)
   const raised = cut.dropped
   const ratio = original.events.length === 0 ? 0 : raised / original.events.length
@@ -188,7 +188,7 @@ export function planLossless(logFile, config) {
  * @returns {Promise<object>} the summary of what was written.
  */
 export async function applyLossless(logFile, config, plan, options = {}) {
-  const original = readLog(logFile)
+  const original = await readLogAsync(logFile)
   const renamed = renumber(plan.cut.events)
   const seqs = new Set(renamed.events.map((event) => event.seq))
   for (let index = 0; index < renamed.events.length; index += 1) {
@@ -205,7 +205,7 @@ export async function applyLossless(logFile, config, plan, options = {}) {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-')
   const backup = `${logFile}.precompact-${stamp}`
   const staging = `${logFile}.staging-${stamp}`
-  fs.writeFileSync(staging, encodeLog(original.header, renamed.events))
+  await fs.promises.writeFile(staging, await encodeLogAsync(original.header, renamed.events))
 
   if (options.verify !== false) {
     let verified
@@ -213,18 +213,18 @@ export async function applyLossless(logFile, config, plan, options = {}) {
       const { verifyLog } = await import('./dsh-log-trim.vendor.verify-session-log.mjs')
       verified = await verifyLog(staging)
     } catch (error) {
-      fs.rmSync(staging, { force: true })
+      await fs.promises.rm(staging, { force: true })
       throw new Error(`校验器跑不起来，未写入：${error instanceof Error ? error.message : String(error)}`)
     }
     if (!verified.ok) {
-      fs.rmSync(staging, { force: true })
+      await fs.promises.rm(staging, { force: true })
       const failed = (verified.checks || []).filter((check) => !check.ok).slice(0, 3)
       const detail = failed.map((check) => `${check.name}：${check.detail}`).join('；')
       throw new Error(`校验未通过，未写入：${detail === '' ? '未知原因' : detail}`)
     }
   }
 
-  const summary = commitTrim({ staging, backup }, logFile)
+  const summary = await commitTrim({ staging, backup }, logFile)
   recordFor(logFile, 'lossless', original.events, renamed.events, { bytesBefore: original.compressedBytes, bytesAfter: summary.after.bytes, record: config?.recordLedger !== false })
   return {
     ...summary,
@@ -241,21 +241,21 @@ export async function applyLossless(logFile, config, plan, options = {}) {
  * @returns {object} the same summary shape a window trim returns.
  */
 export async function applyRebuild(logFile, config) {
-  const original = readLog(logFile)
+  const original = await readLogAsync(logFile)
   const rebuilt = rebuildSurface(original.events)
   const stamp = new Date().toISOString().replace(/[:.]/g, '-')
   const backup = `${logFile}.precompact-${stamp}`
   const staging = `${logFile}.staging-${stamp}`
-  fs.writeFileSync(staging, encodeLog(seededHeaderFor(original.header, rebuilt), rebuilt))
+  await fs.promises.writeFile(staging, await encodeLogAsync(seededHeaderFor(original.header, rebuilt), rebuilt))
   const { verifyLog } = await import('./dsh-log-trim.vendor.verify-session-log.mjs')
   const verified = await verifyLog(staging)
   if (!verified.ok) {
-    fs.rmSync(staging, { force: true })
+    await fs.promises.rm(staging, { force: true })
     const failed = (verified.checks || []).filter((check) => !check.ok).slice(0, 3)
     throw new Error('重写结果没通过宿主校验，未写入：' + failed.map((check) => check.name + '：' + check.detail).join('；'))
   }
   const beforeBytes = fs.statSync(staging).size
-  commitTrim({ staging, backup }, logFile)
+  await commitTrim({ staging, backup }, logFile)
   recordFor(logFile, 'rebuild', original.events, rebuilt, { bytesBefore: original.compressedBytes, bytesAfter: beforeBytes, record: config?.recordLedger !== false })
   return {
     mode: 'rebuild',
@@ -276,21 +276,21 @@ export async function applyRebuild(logFile, config) {
  */
 export async function applyStreamOnly(logFile, keepTurns, options = {}) {
   const { stripOldStreams } = await import('./dsh-log-trim.vendor.compact-session.mjs')
-  const original = readLog(logFile)
+  const original = await readLogAsync(logFile)
   const stripped = stripOldStreams(original.events, keepTurns)
   if (stripped.stripped === 0) return null
   const stamp = new Date().toISOString().replace(/[:.]/g, '-')
   const backup = `${logFile}.precompact-${stamp}`
   const staging = `${logFile}.staging-${stamp}`
-  fs.writeFileSync(staging, encodeLog(seededHeaderFor(original.header, stripped.events), stripped.events))
+  await fs.promises.writeFile(staging, await encodeLogAsync(seededHeaderFor(original.header, stripped.events), stripped.events))
   const { verifyLog } = await import('./dsh-log-trim.vendor.verify-session-log.mjs')
   const verified = await verifyLog(staging)
   if (!verified.ok) {
-    fs.rmSync(staging, { force: true })
+    await fs.promises.rm(staging, { force: true })
     throw new Error('清理流式回放后没通过宿主校验，未写入')
   }
   const beforeBytes = fs.statSync(staging).size
-  commitTrim({ staging, backup }, logFile)
+  await commitTrim({ staging, backup }, logFile)
   recordFor(logFile, 'stream', original.events, stripped.events, {
     bytesBefore: original.compressedBytes,
     bytesAfter: beforeBytes,
@@ -310,7 +310,7 @@ export async function applyStreamOnly(logFile, keepTurns, options = {}) {
  * @returns {Promise<object>} 结果摘要。
  */
 export async function applyFlatten(logFile, config) {
-  const original = readLog(logFile)
+  const original = await readLogAsync(logFile)
   // 动态导入：flatten 依赖本文件的 rebuildSurface，静态导入会形成环。
   const { flattenHistory } = await import('./dsh-log-trim.flatten.js')
   const { stripOldStreams } = await import('./dsh-log-trim.vendor.compact-session.mjs')
@@ -325,16 +325,16 @@ export async function applyFlatten(logFile, config) {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-')
   const backup = `${logFile}.precompact-${stamp}`
   const staging = `${logFile}.staging-${stamp}`
-  fs.writeFileSync(staging, encodeLog(seededHeaderFor(original.header, folded), folded))
+  await fs.promises.writeFile(staging, await encodeLogAsync(seededHeaderFor(original.header, folded), folded))
   const { verifyLog } = await import('./dsh-log-trim.vendor.verify-session-log.mjs')
   const verified = await verifyLog(staging)
   if (!verified.ok) {
-    fs.rmSync(staging, { force: true })
+    await fs.promises.rm(staging, { force: true })
     const failed = (verified.checks || []).filter((check) => !check.ok).slice(0, 3)
     throw new Error('折叠结果没通过宿主校验，未写入：' + failed.map((check) => check.name + '：' + check.detail).join('；'))
   }
   const beforeBytes = fs.statSync(staging).size
-  commitTrim({ staging, backup }, logFile)
+  await commitTrim({ staging, backup }, logFile)
   recordFor(logFile, 'flatten', original.events, folded, { bytesBefore: original.compressedBytes, bytesAfter: beforeBytes, record: config?.recordLedger !== false })
   return {
     mode: 'flatten',

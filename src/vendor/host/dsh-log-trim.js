@@ -37,7 +37,7 @@ import { discoverRoots, isCurrentLog, listLegacy } from './dsh-log-trim.roots.js
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { applyTrim, foldSurface, isSessionLocked, keepLastWindows, readLog, renumber, windowsOf } from './dsh-log-trim.vendor.compact-session.mjs'
+import { applyTrim, foldSurface, isSessionLocked, keepLastWindows, readLogAsync, renumber, windowsOf } from './dsh-log-trim.vendor.compact-session.mjs'
 import { applyFlatten, applyLossless, applyStreamOnly, planLossless, applyRebuild } from './dsh-log-trim.lossless.js'
 import { readLedger, recordFor } from './dsh-log-trim.ledger.js'
 
@@ -60,6 +60,8 @@ const LEGACY_MEMORY_FILE = 'dsh-session-compact/scan-memory.json'
 
 /** Where the settings card's values are kept. */
 const CONFIG_FILE = 'dsh-log-trim/config.json'
+/** 开机扫描先等一下界面：第一屏还没拿到会话列表时不该跟它抢线程池。 */
+const BOOT_SCAN_DELAY_MS = 3000
 /** 重命名前的目录，只读兜底。 */
 const LEGACY_CONFIG_FILE = 'dsh-session-compact/config.json'
 
@@ -127,12 +129,12 @@ export function writeSavedConfig(config) {
  * @param {object} result - `applyTrim` 的返回。
  * @param {boolean} record - 是否记录（配置项）。
  */
-function noteWindowTrim(logFile, result, record) {
+async function noteWindowTrim(logFile, result, record) {
   if (record === false) return
   try {
     let windowsAfter = null
     try {
-      windowsAfter = windowsOf(readLog(logFile).events).length
+      windowsAfter = windowsOf((await readLogAsync(logFile)).events).length
     } catch {
       windowsAfter = null
     }
@@ -161,9 +163,9 @@ export async function trimOne(logFile, config) {
     result = await applyFlatten(logFile, config)
   } else if (config.mode === 'window') {
     result = await applyTrim(logFile, config.keepWindows, { streamKeepTurns: 0 })
-    noteWindowTrim(logFile, result, config.recordLedger)
+    await noteWindowTrim(logFile, result, config.recordLedger)
   } else {
-    const plan = planLossless(logFile, config)
+    const plan = await planLossless(logFile, config)
     if (!plan.should) throw new Error(plan.reason)
     result = await applyLossless(logFile, config, plan)
   }
@@ -647,8 +649,8 @@ export function writeMemory(memory) {
  * @param {string} logFile - 日志路径。
  * @returns {number} 载体条数；读不出来时抛错，由调用方当作 0。
  */
-export function carriersIn(logFile) {
-  const log = readLog(logFile)
+export async function carriersIn(logFile) {
+  const log = await readLogAsync(logFile)
   let count = 0
   for (const event of log.events) {
     const source = event?.data?.source
@@ -696,8 +698,8 @@ export function listLogs(root) {
  * @param {number} keepWindows - 保留最后几窗。
  * @returns {object} 试算结果。
  */
-export function estimate(logFile, keepWindows) {
-  const log = readLog(logFile)
+export async function estimate(logFile, keepWindows) {
+  const log = await readLogAsync(logFile)
   // Read the live surface BEFORE planning: keepLastWindows re-anchors replace
   // ranges on the events it keeps, so the caller's view of `log.events` is only
   // the original one until the planner has run.
@@ -790,6 +792,9 @@ export async function runScan(config, logger = {}) {
   summary.legacy = { files: legacy.length, bytes: legacy.reduce((sum, item) => sum + item.bytes, 0) }
   const allLogs = roots.flatMap((root) => listLogs(root))
   for (const logFile of allLogs) {
+    // 每个会话之间让出一次事件循环：宿主还要应答界面和工具调用，
+    // 一轮扫描（162 个会话）不该把它按住。
+    await new Promise((resolve) => setImmediate(resolve))
     summary.scanned += 1
     const sessionId = path.basename(path.dirname(logFile))
     if (isSessionLocked(logFile)) {
@@ -850,7 +855,7 @@ export async function runScan(config, logger = {}) {
     let carriers = 0
     if (config.flattenOnBoot !== false) {
       try {
-        carriers = carriersIn(logFile)
+        carriers = await carriersIn(logFile)
       } catch {
         carriers = 0
       }
@@ -906,7 +911,7 @@ export async function runScan(config, logger = {}) {
     const flattenWillRun = config.flattenOnBoot === true && carriers > 0
     if (config.losslessOnBoot === true && !flattenWillRun) {
       try {
-        const plan = planLossless(logFile, config)
+        const plan = await planLossless(logFile, config)
         if (plan.should) {
           const applied = await applyLossless(logFile, config, plan)
           summary.trimmed.push({
@@ -951,9 +956,9 @@ export async function runScan(config, logger = {}) {
     let lossless = null
     try {
       if (config.mode === 'window') {
-        report = estimate(logFile, config.keepWindows)
+        report = await estimate(logFile, config.keepWindows)
       } else {
-        lossless = planLossless(logFile, config)
+        lossless = await planLossless(logFile, config)
         report = lossless.report
       }
     } catch (error) {
@@ -974,7 +979,7 @@ export async function runScan(config, logger = {}) {
         // 这条路径一行都不新增，宿主的隐式契约不需要重述。
         let plan = null
         try {
-          plan = planLossless(logFile, config)
+          plan = await planLossless(logFile, config)
         } catch {
           plan = null
         }
@@ -1031,7 +1036,7 @@ export async function runScan(config, logger = {}) {
     }
     try {
       const result = config.mode === 'window' ? await applyTrim(logFile, config.keepWindows) : await applyLossless(logFile, config, lossless)
-      if (config.mode === 'window') noteWindowTrim(logFile, result, config.recordLedger)
+      if (config.mode === 'window') await noteWindowTrim(logFile, result, config.recordLedger)
       const pruned = pruneBackups(logFile, config.backupKeep)
       summary.savedBytes += Math.max(0, result.before.bytes - result.after.bytes)
       summary.trimmed.push({
@@ -1127,7 +1132,7 @@ export function apply(ctx, config = {}) {
         if (!live.enabled) return
         const logFile = logFileOf(live.sessionsRoot, sessionId)
         if (logFile === null || isSessionLocked(logFile)) return
-        const report = estimate(logFile, live.keepWindows)
+        const report = await estimate(logFile, live.keepWindows)
         if (report.windows <= live.keepWindows) return
         if (live.mode === 'rebuild') {
           await applyRebuild(logFile, live)
@@ -1137,12 +1142,12 @@ export function apply(ctx, config = {}) {
           const plan = planTrim(report, live)
           if (plan.should) {
             const done = await applyTrim(logFile, live.keepWindows, { streamKeepTurns: 0 })
-            noteWindowTrim(logFile, done, live.recordLedger)
+            await noteWindowTrim(logFile, done, live.recordLedger)
           }
           else await applyRebuild(logFile, live)
           return
         }
-        const plan = planLossless(logFile, live)
+        const plan = await planLossless(logFile, live)
         if (plan.should) await applyLossless(logFile, live, plan)
       } catch {
         // Best effort: a failed rewrite leaves the log exactly as it was.
@@ -1156,12 +1161,42 @@ export function apply(ctx, config = {}) {
     return resolved
   }
 
+  /**
+   * 整轮扫描丢给 worker：主线程只等一份摘要。
+   *
+   * 扫描的活是解压/解析/重编号/重压缩，全在 CPU 上，放主线程跑等于把宿主按住
+   * （162 个会话、12 个大会话，实测两分钟）。worker 起不来时退回主线程，
+   * 慢但正确。
+   */
+  const scanInWorker = async (config, logger) => {
+    let Worker
+    try {
+      ;({ Worker } = await import('node:worker_threads'))
+    } catch {
+      return runScan(config, logger)
+    }
+    const worker = new Worker(new URL('./dsh-log-trim.worker.mjs', import.meta.url), { workerData: { config } })
+    try {
+      return await new Promise((resolve, reject) => {
+        worker.on('message', (message) => {
+          if (message?.type === 'done') resolve(message.summary)
+          else if (message?.type === 'error') reject(new Error(message.message))
+          else if (message?.type === 'warn' && typeof logger.warn === 'function') logger.warn(`[dsh-log-trim] ${message.message}`)
+        })
+        worker.on('error', reject)
+        worker.on('exit', (code) => reject(new Error(`扫描线程退出（code ${code}），未拿到结果`)))
+      })
+    } finally {
+      void worker.terminate()
+    }
+  }
+
   const run = async () => {
     if (state.running) return state.last
     state.running = true
     state.error = null
     try {
-      state.last = await runScan(resolved, ctx.logger ?? {})
+      state.last = await scanInWorker(resolved, ctx.logger ?? {})
       return state.last
     } catch (error) {
       // 扫描失败要能在 /status 里看到，否则界面只会一直转圈。
@@ -1178,6 +1213,9 @@ export function apply(ctx, config = {}) {
       let cancelled = false
       void (async () => {
         try {
+          // 先等界面第一屏拿完数据再干活：开机那几秒是宿主最要紧的窗口。
+          await new Promise((resolve) => setTimeout(resolve, BOOT_SCAN_DELAY_MS))
+          if (cancelled) return
           await run()
         } catch (error) {
           if (!cancelled && typeof ctx.logger?.warn === 'function') {
