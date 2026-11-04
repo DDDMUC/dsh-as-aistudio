@@ -1,6 +1,6 @@
 // dsh-log-trim host half (dsh-log-trim.lossless.js), VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-log-trim/lib/lossless.js  (v0.6.0, sha256 a35a99d4fe824689)
+// Source: ../dsh-log-trim/lib/lossless.js  (v0.6.1, sha256 a35a99d4fe824689)
 // Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.
 //
 // src/shell.js imports the copy named after the component, which is why the

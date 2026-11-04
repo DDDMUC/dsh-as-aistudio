@@ -1,6 +1,6 @@
 // dsh-log-trim browser half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-log-trim/lib/client.js  (v0.6.0, sha256 2bf57f5a3c2a3193)
+// Source: ../dsh-log-trim/lib/client.js  (v0.6.1, sha256 b927d08309d5effa)
 // Regenerate with `npm run vendor`; test/vendor-sync.test.js fails when this is stale.
 //
 // The component registers its factory with the host module loader; inside this
@@ -14,7 +14,7 @@ export default (require) => {
     const react = require('react')
     const { jsx, jsxs } = require('react/jsx-runtime')
 
-    const PLUGIN_VERSION = '0.6.0'
+    const PLUGIN_VERSION = '0.6.1'
     const ROUTE_PREFIX = '/api/dsh-log-trim'
 
     /** The knobs this card edits, in the order they are drawn. */
@@ -327,9 +327,24 @@ export default (require) => {
         setNote('')
         try {
           const data = await call('/run', {})
-          setStatus({ last: data.result })
-          const last = data.result || {}
-          setNote(`扫了 ${last.scanned || 0} 个会话：裁 ${(last.trimmed || []).length}，跳过 ${(last.skipped || []).length}，失败 ${(last.failed || []).length}`)
+          if (data.started === false) setNote('已经在扫了，等它跑完…')
+          // 扫描在后台跑：轮询 /status，直到 running 变回 false。
+          let last = data.result || null
+          for (let attempt = 0; attempt < 240; attempt += 1) {
+            await new Promise((resolve) => setTimeout(resolve, 500))
+            const state = await call('/status')
+            setStatus(state)
+            if (state.error) {
+              setError(`扫描失败：${state.error}`)
+              return
+            }
+            if (state.running !== true) {
+              last = state.last || last
+              break
+            }
+          }
+          const scanned = last || {}
+          setNote(`扫了 ${scanned.scanned || 0} 个会话：裁 ${(scanned.trimmed || []).length}，跳过 ${(scanned.skipped || []).length}，失败 ${(scanned.failed || []).length}`)
           void loadBackups()
         } catch (failure) {
           setError(String(failure.message || failure))

@@ -1,6 +1,6 @@
 // dsh-log-trim host half (dsh-log-trim.js), VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-log-trim/lib/index.js  (v0.6.0, sha256 1ef6710b85f69330)
+// Source: ../dsh-log-trim/lib/index.js  (v0.6.1, sha256 6716b35e8747d594)
 // Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.
 //
 // src/shell.js imports the copy named after the component, which is why the
@@ -43,7 +43,7 @@ import { readLedger, recordFor } from './dsh-log-trim.ledger.js'
 
 export const name = 'dsh-log-trim'
 export const PLUGIN_ID = name
-export const PLUGIN_VERSION = '0.6.0'
+export const PLUGIN_VERSION = '0.6.1'
 export const ROUTE_PREFIX = '/api/dsh-log-trim'
 
 /**
@@ -846,8 +846,9 @@ export async function runScan(config, logger = {}) {
     }
     // 先折叠：edit/rerun/delete 的载体是“注释行”，落成正文后日志才是“本来如此”。
     // 折叠完继续往下走，于是同一份日志还能顺带被裁窗口（两步都各自验过才写）。
+    // 这个计数跨两个分支用（折叠要不要跑、清理已遮蔽要不要跳过），必须在外层声明。
+    let carriers = 0
     if (config.flattenOnBoot !== false) {
-      let carriers = 0
       try {
         carriers = carriersIn(logFile)
       } catch {
@@ -1158,9 +1159,14 @@ export function apply(ctx, config = {}) {
   const run = async () => {
     if (state.running) return state.last
     state.running = true
+    state.error = null
     try {
       state.last = await runScan(resolved, ctx.logger ?? {})
       return state.last
+    } catch (error) {
+      // 扫描失败要能在 /status 里看到，否则界面只会一直转圈。
+      state.error = error instanceof Error ? error.message : String(error)
+      throw error
     } finally {
       state.running = false
     }
@@ -1228,7 +1234,7 @@ export function apply(ctx, config = {}) {
             return
           }
           res.setHeader('content-type', 'application/json; charset=utf-8')
-          res.end(JSON.stringify({ ok: true, version: PLUGIN_VERSION, config: resolved, running: state.running, last: state.last, duplicateStudio: duplicate }, null, 2))
+          res.end(JSON.stringify({ ok: true, version: PLUGIN_VERSION, config: resolved, running: state.running, last: state.last, error: state.error ?? null, duplicateStudio: duplicate }, null, 2))
         },
       }),
     )
@@ -1247,9 +1253,18 @@ export function apply(ctx, config = {}) {
             res.end('POST only')
             return
           }
-          const result = await run()
+          // 一次扫描可能要几十秒（169 份日志 / 62 MB），不能把 HTTP 请求挂在那里。
+          // 启动后台扫描并立刻返回，客户端轮询 /status 拿 running / last / error。
+          if (state.running) {
+            res.setHeader('content-type', 'application/json; charset=utf-8')
+            res.end(JSON.stringify({ ok: true, started: false, busy: true }, null, 2))
+            return
+          }
+          void run().catch((error) => {
+            if (typeof ctx.logger?.warn === 'function') ctx.logger.warn(`[dsh-log-trim] 扫描失败：${error instanceof Error ? error.message : String(error)}`)
+          })
           res.setHeader('content-type', 'application/json; charset=utf-8')
-          res.end(JSON.stringify({ ok: true, result }, null, 2))
+          res.end(JSON.stringify({ ok: true, started: true }, null, 2))
         },
       }),
     )

@@ -1,6 +1,6 @@
 // dsh-log-trim host half (dsh-log-trim.ledger.js), VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-log-trim/lib/ledger.js  (v0.6.0, sha256 1b391592e0cc0fbf)
+// Source: ../dsh-log-trim/lib/ledger.js  (v0.6.1, sha256 1b391592e0cc0fbf)
 // Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.
 //
 // src/shell.js imports the copy named after the component, which is why the
