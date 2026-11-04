@@ -1,6 +1,6 @@
 // dsh-log-trim browser half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-log-trim/lib/client.js  (v0.5.2, sha256 1e4e340fb59f0f37)
+// Source: ../dsh-log-trim/lib/client.js  (v0.6.0, sha256 2bf57f5a3c2a3193)
 // Regenerate with `npm run vendor`; test/vendor-sync.test.js fails when this is stale.
 //
 // The component registers its factory with the host module loader; inside this
@@ -14,7 +14,7 @@ export default (require) => {
     const react = require('react')
     const { jsx, jsxs } = require('react/jsx-runtime')
 
-    const PLUGIN_VERSION = '0.5.2'
+    const PLUGIN_VERSION = '0.6.0'
     const ROUTE_PREFIX = '/api/dsh-log-trim'
 
     /** The knobs this card edits, in the order they are drawn. */
@@ -56,6 +56,12 @@ export default (require) => {
         suffix: '条',
       },
       { key: 'minRatio', label: '最少可丢占比', hint: '占整份日志的比例，默认 0.2（20%）', min: 0, max: 1, step: 0.05, kind: 'ratio' },
+      {
+        key: 'recordLedger',
+        label: '记录裁剪统计',
+        hint: '每次改写日志记一笔（窗口数 / 事件数 / 字节），写到 ~/.dsh/dsh-log-trim/ledger.json；dsh-session-pages 会读它显示，其它插件也能读。关掉就不记',
+        kind: 'toggle',
+      },
       { key: 'minBytes', label: '最小日志体积', hint: '小于它就根本不读，默认 1 MB', min: 0, max: 200, step: 1, kind: 'mb' },
       {
         key: 'backupKeep',

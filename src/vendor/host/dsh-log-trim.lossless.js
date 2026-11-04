@@ -1,6 +1,6 @@
 // dsh-log-trim host half (dsh-log-trim.lossless.js), VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-log-trim/lib/lossless.js  (v0.5.2, sha256 adf9bf5d79aa41b0)
+// Source: ../dsh-log-trim/lib/lossless.js  (v0.6.0, sha256 a35a99d4fe824689)
 // Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.
 //
 // src/shell.js imports the copy named after the component, which is why the
@@ -24,6 +24,7 @@
  */
 
 import fs from 'node:fs'
+import { recordFor } from './dsh-log-trim.ledger.js'
 import { commitTrim, derivedHistory, dropOrphanCompactions, encodeLog, foldSurface, readLog, renumber, seededHeaderFor, textLengthOf } from './dsh-log-trim.vendor.compact-session.mjs'
 
 /**
@@ -224,6 +225,7 @@ export async function applyLossless(logFile, config, plan, options = {}) {
   }
 
   const summary = commitTrim({ staging, backup }, logFile)
+  recordFor(logFile, 'lossless', original.events, renamed.events, { bytesBefore: original.compressedBytes, bytesAfter: summary.after.bytes, record: config?.recordLedger !== false })
   return {
     ...summary,
     mode: 'lossless',
@@ -254,6 +256,7 @@ export async function applyRebuild(logFile, config) {
   }
   const beforeBytes = fs.statSync(staging).size
   commitTrim({ staging, backup }, logFile)
+  recordFor(logFile, 'rebuild', original.events, rebuilt, { bytesBefore: original.compressedBytes, bytesAfter: beforeBytes, record: config?.recordLedger !== false })
   return {
     mode: 'rebuild',
     before: { events: original.events.length, bytes: original.compressedBytes, windows: 0 },
@@ -271,7 +274,7 @@ export async function applyRebuild(logFile, config) {
  * @param {number} keepTurns - 保留最近几轮。
  * @returns {Promise<object|null>} 摘要；没有可清的就返回 null。
  */
-export async function applyStreamOnly(logFile, keepTurns) {
+export async function applyStreamOnly(logFile, keepTurns, options = {}) {
   const { stripOldStreams } = await import('./dsh-log-trim.vendor.compact-session.mjs')
   const original = readLog(logFile)
   const stripped = stripOldStreams(original.events, keepTurns)
@@ -288,6 +291,11 @@ export async function applyStreamOnly(logFile, keepTurns) {
   }
   const beforeBytes = fs.statSync(staging).size
   commitTrim({ staging, backup }, logFile)
+  recordFor(logFile, 'stream', original.events, stripped.events, {
+    bytesBefore: original.compressedBytes,
+    bytesAfter: beforeBytes,
+    record: options.record !== false,
+  })
   return { events: stripped.stripped, before: original.compressedBytes, after: beforeBytes, backup: backup.slice(backup.lastIndexOf('.precompact-') + 1) }
 }
 
@@ -327,6 +335,7 @@ export async function applyFlatten(logFile, config) {
   }
   const beforeBytes = fs.statSync(staging).size
   commitTrim({ staging, backup }, logFile)
+  recordFor(logFile, 'flatten', original.events, folded, { bytesBefore: original.compressedBytes, bytesAfter: beforeBytes, record: config?.recordLedger !== false })
   return {
     mode: 'flatten',
     before: { events: original.events.length, bytes: original.compressedBytes, windows: 0 },

@@ -4,6 +4,11 @@
 
 ## 中文
 
+**0.5.4** —— 跟进 dsh-log-trim 0.6.0（裁剪统计账本）。
+
+- 内嵌的 log-trim 升到 0.6.0：每次改写记一笔窗口/事件/字节账，写在 `~/.dsh/dsh-log-trim/ledger.json`，
+  并暴露 `GET /api/dsh-log-trim/ledger` 给其它插件读。
+
 **0.5.3** —— 跟进四个组件：设置卡只挂在包自己的页面上。
 
 - edit 0.5.16 / rerun 0.2.9 / delete 0.2.2 / log-trim 0.5.2：去掉 `plugins.row.config`，只保留 `plugins.bundle.config`。

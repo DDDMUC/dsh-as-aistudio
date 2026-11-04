@@ -1,6 +1,6 @@
 // dsh-log-trim host half (dsh-log-trim.js), VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-log-trim/lib/index.js  (v0.5.2, sha256 00bb7354aa5fb45d)
+// Source: ../dsh-log-trim/lib/index.js  (v0.6.0, sha256 1ef6710b85f69330)
 // Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.
 //
 // src/shell.js imports the copy named after the component, which is why the
@@ -37,12 +37,13 @@ import { discoverRoots, isCurrentLog, listLegacy } from './dsh-log-trim.roots.js
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { applyTrim, foldSurface, isSessionLocked, keepLastWindows, readLog, renumber } from './dsh-log-trim.vendor.compact-session.mjs'
+import { applyTrim, foldSurface, isSessionLocked, keepLastWindows, readLog, renumber, windowsOf } from './dsh-log-trim.vendor.compact-session.mjs'
 import { applyFlatten, applyLossless, applyStreamOnly, planLossless, applyRebuild } from './dsh-log-trim.lossless.js'
+import { readLedger, recordFor } from './dsh-log-trim.ledger.js'
 
 export const name = 'dsh-log-trim'
 export const PLUGIN_ID = name
-export const PLUGIN_VERSION = '0.5.2'
+export const PLUGIN_VERSION = '0.6.0'
 export const ROUTE_PREFIX = '/api/dsh-log-trim'
 
 /**
@@ -118,6 +119,36 @@ export function writeSavedConfig(config) {
  * @param {number} backupKeep - how many backups to keep afterwards.
  * @returns {Promise<object>} what happened.
  */
+
+/**
+ * 窗口裁剪写完之后记一笔账：窗口数、事件数、字节数都来自这次操作本身。
+ *
+ * @param {string} logFile - 日志路径。
+ * @param {object} result - `applyTrim` 的返回。
+ * @param {boolean} record - 是否记录（配置项）。
+ */
+function noteWindowTrim(logFile, result, record) {
+  if (record === false) return
+  try {
+    let windowsAfter = null
+    try {
+      windowsAfter = windowsOf(readLog(logFile).events).length
+    } catch {
+      windowsAfter = null
+    }
+    recordFor(logFile, 'window', [], [], {
+      windowsBefore: result?.before?.windows,
+      windowsAfter: windowsAfter === null ? undefined : windowsAfter,
+      eventsBefore: result?.before?.events,
+      eventsAfter: result?.after?.events,
+      bytesBefore: result?.before?.bytes,
+      bytesAfter: result?.after?.bytes,
+    })
+  } catch {
+    // 记账失败不影响裁剪本身。
+  }
+}
+
 export async function trimOne(logFile, config) {
   if (isSessionLocked(logFile)) {
     throw new Error('这个会话正被宿主打开着（session.lock）。先切到别的对话或重启 DSH，再压缩它')
@@ -130,6 +161,7 @@ export async function trimOne(logFile, config) {
     result = await applyFlatten(logFile, config)
   } else if (config.mode === 'window') {
     result = await applyTrim(logFile, config.keepWindows, { streamKeepTurns: 0 })
+    noteWindowTrim(logFile, result, config.recordLedger)
   } else {
     const plan = planLossless(logFile, config)
     if (!plan.should) throw new Error(plan.reason)
@@ -419,6 +451,8 @@ export const DEFAULTS = {
   streamOnBoot: true,
   // 每次扫描先把 edit/rerun/delete 的载体折叠掉（重启即自动执行）。
   flattenOnBoot: false,
+  // 每次改写过日志就记一笔统计（账本文件，别的插件可读）；关掉就不记。
+  recordLedger: true,
   // 启动时是否裁剪窗口（关掉就只剩折叠/清理）。
   trimOnBoot: true,
   // 只在开启时清理“已被 replace 盖住、界面早就不显示”的事件（要重编号，默认关）。
@@ -494,6 +528,10 @@ export function resolveConfig(raw = {}) {
     }
     if (key === 'streamOnBoot') {
       if (typeof value === 'boolean') merged.streamOnBoot = value
+      continue
+    }
+    if (key === 'recordLedger') {
+      if (typeof value === 'boolean') merged.recordLedger = value
       continue
     }
     if (key === 'losslessOnBoot') {
@@ -992,6 +1030,7 @@ export async function runScan(config, logger = {}) {
     }
     try {
       const result = config.mode === 'window' ? await applyTrim(logFile, config.keepWindows) : await applyLossless(logFile, config, lossless)
+      if (config.mode === 'window') noteWindowTrim(logFile, result, config.recordLedger)
       const pruned = pruneBackups(logFile, config.backupKeep)
       summary.savedBytes += Math.max(0, result.before.bytes - result.after.bytes)
       summary.trimmed.push({
@@ -1095,7 +1134,10 @@ export function apply(ctx, config = {}) {
         }
         if (live.mode === 'window') {
           const plan = planTrim(report, live)
-          if (plan.should) await applyTrim(logFile, live.keepWindows, { streamKeepTurns: 0 })
+          if (plan.should) {
+            const done = await applyTrim(logFile, live.keepWindows, { streamKeepTurns: 0 })
+            noteWindowTrim(logFile, done, live.recordLedger)
+          }
           else await applyRebuild(logFile, live)
           return
         }
@@ -1363,6 +1405,29 @@ export function apply(ctx, config = {}) {
 
     // Where the backups are, and a way to open the folder holding them. The card
     // shows the paths; the button hands them to the system file manager.
+    // 裁剪统计账本：别的插件（如 dsh-session-pages）直接读这个接口，
+    // 不必依赖本包；不带 sessionId 时返回全量，带时只返回那一个会话。
+    fiber.effect(() =>
+      webServer.register({
+        kind: 'exact',
+        path: `${ROUTE_PREFIX}/ledger`,
+        handler: (req, res) => {
+          if (!isLoopback(req)) return sendJson(res, 403, { ok: false, error: 'loopback only' })
+          if (req.method !== 'GET') return sendJson(res, 405, { ok: false, error: 'GET only' })
+          let sessionId = null
+          try {
+            sessionId = new URL(req.url, 'http://127.0.0.1').searchParams.get('sessionId')
+          } catch {
+            sessionId = null
+          }
+          const ledger = readLedger()
+          if (sessionId === null || sessionId === '') return sendJson(res, 200, { ok: true, ...ledger })
+          const entry = ledger.sessions[sessionId] ?? null
+          return sendJson(res, 200, { ok: true, sessionId, trim: entry })
+        },
+      }),
+    )
+
     fiber.effect(() =>
       webServer.register({
         kind: 'exact',

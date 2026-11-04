@@ -9577,7 +9577,7 @@ window.__ModuleLoader__.load({
     const react = require('react')
     const { jsx, jsxs } = require('react/jsx-runtime')
 
-    const PLUGIN_VERSION = '0.5.2'
+    const PLUGIN_VERSION = '0.6.0'
     const ROUTE_PREFIX = '/api/dsh-log-trim'
 
     /** The knobs this card edits, in the order they are drawn. */
@@ -9619,6 +9619,12 @@ window.__ModuleLoader__.load({
         suffix: '条',
       },
       { key: 'minRatio', label: '最少可丢占比', hint: '占整份日志的比例，默认 0.2（20%）', min: 0, max: 1, step: 0.05, kind: 'ratio' },
+      {
+        key: 'recordLedger',
+        label: '记录裁剪统计',
+        hint: '每次改写日志记一笔（窗口数 / 事件数 / 字节），写到 ~/.dsh/dsh-log-trim/ledger.json；dsh-session-pages 会读它显示，其它插件也能读。关掉就不记',
+        kind: 'toggle',
+      },
       { key: 'minBytes', label: '最小日志体积', hint: '小于它就根本不读，默认 1 MB', min: 0, max: 200, step: 1, kind: 'mb' },
       {
         key: 'backupKeep',
@@ -10082,7 +10088,7 @@ window.__ModuleLoader__.load({
     const NS = 'dsh-as-aistudio'
 
     /** Keep in sync with package.json and src/components.js. */
-    const PLUGIN_VERSION = '0.5.3'
+    const PLUGIN_VERSION = '0.5.4'
 
     /** Presence marker the live verifier reads. */
     const DEBUG_KEY = '__DSH_AS_AISTUDIO__'
