@@ -4,6 +4,11 @@
 
 ## 中文
 
+**0.4.9** —— 跟进内嵌组件 dsh-edit-turn 0.5.14。
+
+- 内置版本记录与浏览器半部同步到 `dsh-edit-turn 0.5.14`（工具侧修复，运行代码无行为变化）。
+- `vendor --check` 干净，115/115。
+
 **0.4.8** —— 跟进内嵌组件：delete 0.2.0、rerun 0.2.7。
 
 - **dsh-delete-turn 0.2.0**：多选删除；载体写上 `op`/`turn`，整轮删除额外写 `deletedTurn`/`deleteIndex`。
