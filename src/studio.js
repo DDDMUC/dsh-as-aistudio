@@ -48,7 +48,7 @@ window.__ModuleLoader__.load({
     const NS = 'dsh-as-aistudio'
 
     /** Keep in sync with package.json and src/components.js. */
-    const PLUGIN_VERSION = '0.5.5'
+    const PLUGIN_VERSION = '0.5.6'
 
     /** Presence marker the live verifier reads. */
     const DEBUG_KEY = '__DSH_AS_AISTUDIO__'
@@ -74,6 +74,7 @@ window.__ModuleLoader__.load({
       { id: 'dsh-edit-turn', title: { zh: '编辑与重跑', en: 'Edit and re-run' } },
       { id: 'dsh-rerun-turn', title: { zh: '重跑', en: 'Re-run' } },
       { id: 'dsh-delete-turn', title: { zh: '删除', en: 'Delete' } },
+      { id: 'dsh-log-trim', title: { zh: '会话日志裁剪', en: 'Session log trim' } },
     ]
 
     const h = react.createElement
