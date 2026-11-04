@@ -9575,7 +9575,7 @@ window.__ModuleLoader__.load({
     const react = require('react')
     const { jsx, jsxs } = require('react/jsx-runtime')
 
-    const PLUGIN_VERSION = '0.5.0'
+    const PLUGIN_VERSION = '0.5.1'
     const ROUTE_PREFIX = '/api/dsh-log-trim'
 
     /** The knobs this card edits, in the order they are drawn. */
@@ -9988,6 +9988,12 @@ window.__ModuleLoader__.load({
               `版本 ${PLUGIN_VERSION}；设置在 ~/.dsh/dsh-log-trim/config.json，配置文件里的那一行只是初始值。`,
             ],
           }),
+          status !== null && status !== undefined && status.duplicateStudio === true
+            ? jsx('p', {
+                style: { ...style.status, color: 'var(--dsw-alias-state-warning-primary, #d98b00)' },
+                children: '检测到同时安装了 dsh-as-aistudio（它内置了本插件）：两份会各跑一次启动扫描，建议在插件列表里只保留一份。',
+              })
+            : null,
           jsx('div', {
             style: style.grid,
             children: FIELDS.filter((field) => field.kind === 'select').map((field) =>
@@ -10076,7 +10082,7 @@ window.__ModuleLoader__.load({
     const NS = 'dsh-as-aistudio'
 
     /** Keep in sync with package.json and src/components.js. */
-    const PLUGIN_VERSION = '0.5.0'
+    const PLUGIN_VERSION = '0.5.1'
 
     /** Presence marker the live verifier reads. */
     const DEBUG_KEY = '__DSH_AS_AISTUDIO__'
@@ -10117,6 +10123,8 @@ window.__ModuleLoader__.load({
       statusInstalled: '已安装，宿主未挂载',
       statusMissing: '未安装',
       statusUnknown: '宿主未报告',
+      kindAction: '动作',
+      kindMaintenance: '维护',
       hostOnly: '（独立安装时走自己的插件行）',
       row: '行 {row}',
       version: '版本 {version}',
@@ -10143,6 +10151,8 @@ window.__ModuleLoader__.load({
       statusMounted: 'Enabled',
       statusInstalled: 'Installed, host not mounted',
       statusMissing: 'Not installed',
+      kindAction: 'action',
+      kindMaintenance: 'maintenance',
       statusUnknown: 'Host did not report',
       hostOnly: '(a standalone install also shows its own row)',
       row: 'row {row}',
@@ -10554,6 +10564,7 @@ window.__ModuleLoader__.load({
         h('div', { className: 'dsas-rowHead', key: 'head' }, [
           h('span', { className: 'dsas-dot', 'data-state': state, key: 'dot' }),
           h('span', { className: 'dsas-name', key: 'name' }, text.title),
+          h('span', { className: 'dsas-badge', key: 'kind' }, component.kind === 'maintenance' ? t('kindMaintenance') : t('kindAction')),
           h('span', { className: 'dsas-badge', key: 'badge' }, stateLabelText),
           h('span', { className: 'dsas-badge dsas-code', key: 'version' }, version),
         ]),

@@ -1,6 +1,6 @@
 // dsh-log-trim host half (dsh-log-trim.js), VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-log-trim/lib/index.js  (v0.5.0, sha256 f8f01a5f2ae2ca7b)
+// Source: ../dsh-log-trim/lib/index.js  (v0.5.1, sha256 bd4d3c438d7c00ba)
 // Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.
 //
 // src/shell.js imports the copy named after the component, which is why the
@@ -42,7 +42,7 @@ import { applyFlatten, applyLossless, applyStreamOnly, planLossless, applyRebuil
 
 export const name = 'dsh-log-trim'
 export const PLUGIN_ID = name
-export const PLUGIN_VERSION = '0.5.0'
+export const PLUGIN_VERSION = '0.5.1'
 export const ROUTE_PREFIX = '/api/dsh-log-trim'
 
 /**
@@ -1032,11 +1032,47 @@ function isLoopback(req) {
  * @param {object} ctx - 插件上下文。
  * @param {object} [config] - 用户配置。
  */
+
+/**
+ * 本机是否同时装了独立的本插件与内嵌了它的聚合包（`dsh-as-aistudio`）。
+ *
+ * 两份会各跑一次启动扫描：都能看见对方的 `.precompact-` 备份，也能同时改写同一份日志。
+ * 这不是错误，是需要提醒的配置。
+ *
+ * @param {string} [home] - 家目录（测试用）。
+ * @returns {boolean} 同时装了就是 true。
+ */
+export function duplicateStudioInstall(home = os.homedir()) {
+  const profiles = path.join(home, '.dsh', 'profiles')
+  let names = []
+  try {
+    names = fs.readdirSync(profiles)
+  } catch {
+    return false
+  }
+  for (const name of names) {
+    let manifest
+    try {
+      manifest = JSON.parse(fs.readFileSync(path.join(profiles, name, 'package.json'), 'utf8'))
+    } catch {
+      continue
+    }
+    const bundles = Array.isArray(manifest?.dsh?.profile?.bundles) ? manifest.dsh.profile.bundles : []
+    if (bundles.includes('dsh-log-trim') && bundles.includes('dsh-as-aistudio')) return true
+  }
+  return false
+}
+
 export function apply(ctx, config = {}) {
   // The card can change these while the host runs, so the resolved values live in
   // a box the routes can replace instead of a frozen const.
   let resolved = resolveConfig({ ...config, ...readSavedConfig() })
   const state = { last: null, running: false }
+  // 双份安装：聚合包里已经内嵌了一份裁剪器，再单装一份会各跑一遍启动扫描。
+  const duplicate = duplicateStudioInstall()
+  if (duplicate && typeof ctx.logger?.warn === 'function') {
+    ctx.logger.warn('[dsh-log-trim] 检测到同时安装了 dsh-as-aistudio（内置本插件）：两份会各跑一次启动扫描，建议只留一份')
+  }
 
   // A session the GUI has open cannot be rewritten (the host holds its lock).
   // The moment one closes it becomes writable, so the deferred work happens
@@ -1150,7 +1186,7 @@ export function apply(ctx, config = {}) {
             return
           }
           res.setHeader('content-type', 'application/json; charset=utf-8')
-          res.end(JSON.stringify({ ok: true, version: PLUGIN_VERSION, config: resolved, running: state.running, last: state.last }, null, 2))
+          res.end(JSON.stringify({ ok: true, version: PLUGIN_VERSION, config: resolved, running: state.running, last: state.last, duplicateStudio: duplicate }, null, 2))
         },
       }),
     )

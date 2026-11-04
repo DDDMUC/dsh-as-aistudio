@@ -1,6 +1,6 @@
 // dsh-log-trim browser half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-log-trim/lib/client.js  (v0.5.0, sha256 cad35e653b679e11)
+// Source: ../dsh-log-trim/lib/client.js  (v0.5.1, sha256 e0f7421fa887a4b2)
 // Regenerate with `npm run vendor`; test/vendor-sync.test.js fails when this is stale.
 //
 // The component registers its factory with the host module loader; inside this
@@ -14,7 +14,7 @@ export default (require) => {
     const react = require('react')
     const { jsx, jsxs } = require('react/jsx-runtime')
 
-    const PLUGIN_VERSION = '0.5.0'
+    const PLUGIN_VERSION = '0.5.1'
     const ROUTE_PREFIX = '/api/dsh-log-trim'
 
     /** The knobs this card edits, in the order they are drawn. */
@@ -427,6 +427,12 @@ export default (require) => {
               `版本 ${PLUGIN_VERSION}；设置在 ~/.dsh/dsh-log-trim/config.json，配置文件里的那一行只是初始值。`,
             ],
           }),
+          status !== null && status !== undefined && status.duplicateStudio === true
+            ? jsx('p', {
+                style: { ...style.status, color: 'var(--dsw-alias-state-warning-primary, #d98b00)' },
+                children: '检测到同时安装了 dsh-as-aistudio（它内置了本插件）：两份会各跑一次启动扫描，建议在插件列表里只保留一份。',
+              })
+            : null,
           jsx('div', {
             style: style.grid,
             children: FIELDS.filter((field) => field.kind === 'select').map((field) =>

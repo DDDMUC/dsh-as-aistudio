@@ -48,7 +48,7 @@ window.__ModuleLoader__.load({
     const NS = 'dsh-as-aistudio'
 
     /** Keep in sync with package.json and src/components.js. */
-    const PLUGIN_VERSION = '0.5.0'
+    const PLUGIN_VERSION = '0.5.1'
 
     /** Presence marker the live verifier reads. */
     const DEBUG_KEY = '__DSH_AS_AISTUDIO__'
@@ -89,6 +89,8 @@ window.__ModuleLoader__.load({
       statusInstalled: '已安装，宿主未挂载',
       statusMissing: '未安装',
       statusUnknown: '宿主未报告',
+      kindAction: '动作',
+      kindMaintenance: '维护',
       hostOnly: '（独立安装时走自己的插件行）',
       row: '行 {row}',
       version: '版本 {version}',
@@ -115,6 +117,8 @@ window.__ModuleLoader__.load({
       statusMounted: 'Enabled',
       statusInstalled: 'Installed, host not mounted',
       statusMissing: 'Not installed',
+      kindAction: 'action',
+      kindMaintenance: 'maintenance',
       statusUnknown: 'Host did not report',
       hostOnly: '(a standalone install also shows its own row)',
       row: 'row {row}',
@@ -526,6 +530,7 @@ window.__ModuleLoader__.load({
         h('div', { className: 'dsas-rowHead', key: 'head' }, [
           h('span', { className: 'dsas-dot', 'data-state': state, key: 'dot' }),
           h('span', { className: 'dsas-name', key: 'name' }, text.title),
+          h('span', { className: 'dsas-badge', key: 'kind' }, component.kind === 'maintenance' ? t('kindMaintenance') : t('kindAction')),
           h('span', { className: 'dsas-badge', key: 'badge' }, stateLabelText),
           h('span', { className: 'dsas-badge dsas-code', key: 'version' }, version),
         ]),

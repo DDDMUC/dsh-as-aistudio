@@ -4,6 +4,11 @@
 
 ## 中文
 
+**0.5.1** —— 组件行标出「动作 / 维护」；跟进内嵌组件。
+
+- 面板里每个组件行在名字后多一个徽章：`动作`（edit/rerun/delete/markdown）或 `维护`（log-trim）。
+- 内嵌 dsh-log-trim 升到 0.5.1（双份安装告警）。
+
 **0.5.0** —— 第五个组件：会话日志裁剪（dsh-log-trim 0.5.0）。
 
 - **维护型组件**：manifest 新增 `{ id: 'dsh-log-trim', suffix: 'trim', kind: 'maintenance' }`，它没有消息行动作、没有输入区浮层，因此不占 slot / overlay；补丁行、`exports["./trim"]`、vendor 副本与状态行照旧，和其它四个组件一样由本包内置。
