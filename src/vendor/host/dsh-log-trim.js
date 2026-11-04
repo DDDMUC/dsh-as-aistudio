@@ -1,6 +1,6 @@
 // dsh-log-trim host half (dsh-log-trim.js), VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-log-trim/lib/index.js  (v0.5.1, sha256 bd4d3c438d7c00ba)
+// Source: ../dsh-log-trim/lib/index.js  (v0.5.2, sha256 00bb7354aa5fb45d)
 // Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.
 //
 // src/shell.js imports the copy named after the component, which is why the
@@ -42,7 +42,7 @@ import { applyFlatten, applyLossless, applyStreamOnly, planLossless, applyRebuil
 
 export const name = 'dsh-log-trim'
 export const PLUGIN_ID = name
-export const PLUGIN_VERSION = '0.5.1'
+export const PLUGIN_VERSION = '0.5.2'
 export const ROUTE_PREFIX = '/api/dsh-log-trim'
 
 /**

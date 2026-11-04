@@ -1,6 +1,6 @@
 // dsh-log-trim browser half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-log-trim/lib/client.js  (v0.5.1, sha256 e0f7421fa887a4b2)
+// Source: ../dsh-log-trim/lib/client.js  (v0.5.2, sha256 1e4e340fb59f0f37)
 // Regenerate with `npm run vendor`; test/vendor-sync.test.js fails when this is stale.
 //
 // The component registers its factory with the host module loader; inside this
@@ -14,7 +14,7 @@ export default (require) => {
     const react = require('react')
     const { jsx, jsxs } = require('react/jsx-runtime')
 
-    const PLUGIN_VERSION = '0.5.1'
+    const PLUGIN_VERSION = '0.5.2'
     const ROUTE_PREFIX = '/api/dsh-log-trim'
 
     /** The knobs this card edits, in the order they are drawn. */
@@ -491,8 +491,6 @@ export default (require) => {
     function apply(ctx) {
       const render = (slotProps) =>
         slotProps && slotProps.view === 'summary' ? summaryText() : jsx(CompactCard, { page: true })
-      ctx.slots.inject('plugins.row.config', () =>
-        ctx.slots.register({ name: 'plugins.row.config', key: 'dsh-log-trim#dsh-log-trim' }, render))
       ctx.slots.inject('plugins.bundle.config', () =>
         ctx.slots.register({ name: 'plugins.bundle.config', key: 'dsh-log-trim' }, render))
     }

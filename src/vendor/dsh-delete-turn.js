@@ -1,6 +1,6 @@
 // dsh-delete-turn browser half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-delete-turn/src/client.js  (v0.2.1, sha256 7048fbb545172052)
+// Source: ../dsh-delete-turn/src/client.js  (v0.2.2, sha256 845d26cdfbb0cfbf)
 // Regenerate with `npm run vendor`; test/vendor-sync.test.js fails when this is stale.
 //
 // The component registers its factory with the host module loader; inside this
@@ -1445,7 +1445,7 @@ export default (require) => {
     }
 
     // The plugin page entry (the component row's "configure" arrow, slot
-    // `plugins.row.config`, key `<bundle>#<row id>`). It renders the row's
+    // `plugins.bundle.config`, key `<bundle>`). It renders the bundle page's
     // one-liner for the manager's summary slot and the toggle card for the page.
     function AskBeforeDeleteOption({ view, t }) {
       const tr = typeof t === 'function' ? t : (key) => key
@@ -1578,20 +1578,6 @@ export default (require) => {
         ),
       )
 
-      // The plugin's own page in the manager: the row this bundle inserts
-      // (`cordis.patch.yml`, id `dsh-delete-turn`) gains a configure arrow that
-      // opens this card. The key is `<bundle package>#<row id>`, the contract of
-      // ui-plugin-manager's rowConfigKey.
-      ctx.slots.inject('plugins.row.config', () =>
-        ctx.slots.register(
-          {
-            name: 'plugins.row.config',
-            key: 'dsh-delete-turn#dsh-delete-turn',
-            locale: NS,
-          },
-          AskBeforeDeleteOption,
-        ),
-      )
 
       // 同一张卡也挂在包自己的页面上（`#/panel/plugins/dsh-delete-turn`），
       // 而不是只藏在 `…/dsh-delete-turn/dsh-delete-turn` 那一层。

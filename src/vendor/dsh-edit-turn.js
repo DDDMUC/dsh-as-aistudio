@@ -1,6 +1,6 @@
 // dsh-edit-turn browser half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-edit-turn/lib/client.js  (v0.5.15, sha256 df2c9366b140bd33)
+// Source: ../dsh-edit-turn/lib/client.js  (v0.5.16, sha256 68d8221f45f9d894)
 // Regenerate with `npm run vendor`; test/vendor-sync.test.js fails when this is stale.
 //
 // The component registers its factory with the host module loader; inside this
@@ -35,7 +35,7 @@ export default (require) => {
     const RERUN_PREFIX = '/dsh-rerun-turn'
 
     /** Keep in sync with package.json and lib/index.js. */
-    const PLUGIN_VERSION = '0.5.15'
+    const PLUGIN_VERSION = '0.5.16'
 
     // --- copy -----------------------------------------------------------------
 
@@ -5294,7 +5294,7 @@ export default (require) => {
     }
 
     /**
-     * The component row's configure page (`plugins.row.config`), the same slot
+     * The package page's configure slot (`plugins.bundle.config`), the same slot
      * dsh-delete-turn uses. The manager's summary asks for a one-liner; the page
      * itself renders the three-way picker.
      */
@@ -5469,16 +5469,6 @@ export default (require) => {
         ),
       )
 
-      ctx.slots.inject('plugins.row.config', () =>
-        ctx.slots.register(
-          {
-            name: 'plugins.row.config',
-            key: 'dsh-edit-turn#dsh-edit-turn',
-            locale: NS,
-          },
-          EditorStyleOption,
-        ),
-      )
 
       // 同一张卡也挂在包自己的页面上（`#/panel/plugins/dsh-edit-turn`），
       // 而不是只藏在 `…/dsh-edit-turn/dsh-edit-turn` 那一层。

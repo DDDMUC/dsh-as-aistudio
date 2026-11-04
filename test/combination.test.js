@@ -795,20 +795,11 @@ test('with all four loaded the registrations match the section-2 allocation tabl
     // dsh-delete-turn 0.1.16 puts the multi-select door in the Session header,
     // beside the shipped utilities (open-in-app -10, schedule -5, log 0, export 10).
     'conversation.session.header.utilities | delete-turn | 10',
-    // dsh-delete-turn 0.1.10 added the "ask before deleting" toggle on the
-    // plugin page, so the bundle also registers this key-based entry. It has no
-    // order (the row-config slot is keyed, not ordered), so §2 stays unique.
-    // 三个动作组件现在也把同一张卡挂到「包自己的页面」上（黑洞名的 bundle.config），
-    // 于是 `#/panel/plugins/<包名>` 直接能看到设置，不必再进 …/<包名>/<包名> 那一层。
+    // 三个动作组件只把设置卡挂到「包自己的页面」上（bundle.config，key 是裸包名）：
+    // `#/panel/plugins/<包名>` 直接能看到设置，不再有行级入口。
     'plugins.bundle.config | dsh-delete-turn | priority null',
     'plugins.bundle.config | dsh-edit-turn | priority null',
     'plugins.bundle.config | dsh-rerun-turn | priority null',
-    'plugins.row.config | dsh-delete-turn#dsh-delete-turn | priority null',
-    // dsh-edit-turn 0.5.x and dsh-rerun-turn 0.2.x grew their own settings rows
-    // on the plugin page the same way, so each bundle now registers one more
-    // key-based entry. Same slot, same "no order" rule.
-    'plugins.row.config | dsh-edit-turn#dsh-edit-turn | priority null',
-    'plugins.row.config | dsh-rerun-turn#dsh-rerun-turn | priority null',
   ])
   assert.deepEqual(runtime.records.locales.map((item) => item.ns).sort(), [
     'dsh-delete-turn',

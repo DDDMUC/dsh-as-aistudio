@@ -4,6 +4,12 @@
 
 ## 中文
 
+**0.5.3** —— 跟进四个组件：设置卡只挂在包自己的页面上。
+
+- edit 0.5.16 / rerun 0.2.9 / delete 0.2.2 / log-trim 0.5.2：去掉 `plugins.row.config`，只保留 `plugins.bundle.config`。
+  于是 `#/panel/plugins/<包名>` 直接看到设置，行上不再有「配置」按钮，也没有两份入口。
+- 契约表随之减少三条 `plugins.row.config` 记录。
+
 **0.5.2** —— 跟进三个动作组件：设置卡片同时挂到包自己的页面。
 
 - dsh-edit-turn 0.5.15 / dsh-rerun-turn 0.2.8 / dsh-delete-turn 0.2.1：新增 `plugins.bundle.config`（key 是裸包名），

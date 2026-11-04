@@ -43,7 +43,7 @@ window.__ModuleLoader__.load({
     const RERUN_PREFIX = '/dsh-rerun-turn'
 
     /** Keep in sync with package.json and lib/index.js. */
-    const PLUGIN_VERSION = '0.5.15'
+    const PLUGIN_VERSION = '0.5.16'
 
     // --- copy -----------------------------------------------------------------
 
@@ -5302,7 +5302,7 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * The component row's configure page (`plugins.row.config`), the same slot
+     * The package page's configure slot (`plugins.bundle.config`), the same slot
      * dsh-delete-turn uses. The manager's summary asks for a one-liner; the page
      * itself renders the three-way picker.
      */
@@ -5477,16 +5477,6 @@ window.__ModuleLoader__.load({
         ),
       )
 
-      ctx.slots.inject('plugins.row.config', () =>
-        ctx.slots.register(
-          {
-            name: 'plugins.row.config',
-            key: 'dsh-edit-turn#dsh-edit-turn',
-            locale: NS,
-          },
-          EditorStyleOption,
-        ),
-      )
 
       // 同一张卡也挂在包自己的页面上（`#/panel/plugins/dsh-edit-turn`），
       // 而不是只藏在 `…/dsh-edit-turn/dsh-edit-turn` 那一层。
@@ -5540,7 +5530,7 @@ window.__ModuleLoader__.load({
     const ROUTE_PREFIX = '/dsh-rerun-turn'
 
     /** Keep in sync with package.json and lib/index.js. */
-    const PLUGIN_VERSION = '0.2.8'
+    const PLUGIN_VERSION = '0.2.9'
 
     // --- copy -----------------------------------------------------------------
 
@@ -7030,19 +7020,6 @@ window.__ModuleLoader__.load({
         ),
       )
 
-      // The plugin's own page in the manager. The key is the manager's
-      // `<bundle package>#<row id>` contract (the row this bundle inserts in
-      // cordis.patch.yml), exactly as the sibling plugins declare it.
-      ctx.slots.inject('plugins.row.config', () =>
-        ctx.slots.register(
-          {
-            name: 'plugins.row.config',
-            key: 'dsh-rerun-turn#dsh-rerun-turn',
-            locale: NS,
-          },
-          AskBeforeRerunOption,
-        ),
-      )
 
       // 同一张卡也挂在包自己的页面上（`#/panel/plugins/dsh-rerun-turn`），
       // 而不是只藏在 `…/dsh-rerun-turn/dsh-rerun-turn` 那一层。
@@ -8508,7 +8485,7 @@ window.__ModuleLoader__.load({
     }
 
     // The plugin page entry (the component row's "configure" arrow, slot
-    // `plugins.row.config`, key `<bundle>#<row id>`). It renders the row's
+    // `plugins.bundle.config`, key `<bundle>`). It renders the bundle page's
     // one-liner for the manager's summary slot and the toggle card for the page.
     function AskBeforeDeleteOption({ view, t }) {
       const tr = typeof t === 'function' ? t : (key) => key
@@ -8641,20 +8618,6 @@ window.__ModuleLoader__.load({
         ),
       )
 
-      // The plugin's own page in the manager: the row this bundle inserts
-      // (`cordis.patch.yml`, id `dsh-delete-turn`) gains a configure arrow that
-      // opens this card. The key is `<bundle package>#<row id>`, the contract of
-      // ui-plugin-manager's rowConfigKey.
-      ctx.slots.inject('plugins.row.config', () =>
-        ctx.slots.register(
-          {
-            name: 'plugins.row.config',
-            key: 'dsh-delete-turn#dsh-delete-turn',
-            locale: NS,
-          },
-          AskBeforeDeleteOption,
-        ),
-      )
 
       // 同一张卡也挂在包自己的页面上（`#/panel/plugins/dsh-delete-turn`），
       // 而不是只藏在 `…/dsh-delete-turn/dsh-delete-turn` 那一层。
@@ -9614,7 +9577,7 @@ window.__ModuleLoader__.load({
     const react = require('react')
     const { jsx, jsxs } = require('react/jsx-runtime')
 
-    const PLUGIN_VERSION = '0.5.1'
+    const PLUGIN_VERSION = '0.5.2'
     const ROUTE_PREFIX = '/api/dsh-log-trim'
 
     /** The knobs this card edits, in the order they are drawn. */
@@ -10091,8 +10054,6 @@ window.__ModuleLoader__.load({
     function apply(ctx) {
       const render = (slotProps) =>
         slotProps && slotProps.view === 'summary' ? summaryText() : jsx(CompactCard, { page: true })
-      ctx.slots.inject('plugins.row.config', () =>
-        ctx.slots.register({ name: 'plugins.row.config', key: 'dsh-log-trim#dsh-log-trim' }, render))
       ctx.slots.inject('plugins.bundle.config', () =>
         ctx.slots.register({ name: 'plugins.bundle.config', key: 'dsh-log-trim' }, render))
     }
@@ -10121,7 +10082,7 @@ window.__ModuleLoader__.load({
     const NS = 'dsh-as-aistudio'
 
     /** Keep in sync with package.json and src/components.js. */
-    const PLUGIN_VERSION = '0.5.2'
+    const PLUGIN_VERSION = '0.5.3'
 
     /** Presence marker the live verifier reads. */
     const DEBUG_KEY = '__DSH_AS_AISTUDIO__'
