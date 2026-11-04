@@ -1,6 +1,6 @@
 // dsh-delete-turn browser half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-delete-turn/src/client.js  (v0.2.2, sha256 845d26cdfbb0cfbf)
+// Source: ../dsh-delete-turn/src/client.js  (v0.2.3, sha256 3cba30fcc339c776)
 // Regenerate with `npm run vendor`; test/vendor-sync.test.js fails when this is stale.
 //
 // The component registers its factory with the host module loader; inside this
@@ -233,8 +233,8 @@ export default (require) => {
       '.dshdt-header-select:disabled{color:var(--dsw-alias-label-dimmed,#9aa0aa);cursor:wait}',
       '.dshdt-header-select svg{flex:none}',
       '.dshdt-header-select-on{color:var(--dsw-alias-button-primary-fill,#4d6bfe);border-color:var(--dsw-alias-button-primary-fill,#4d6bfe);background:var(--dsw-alias-button-primary-ghost-fill,rgba(77,107,254,.08))}',
-      '.dshdt-selectbar{position:fixed;left:50%;bottom:104px;transform:translateX(-50%);z-index:60;display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:999px;background:var(--dsw-alias-bg-elevated,#fff);color:var(--dsw-alias-label-primary,inherit);border:1px solid var(--dsw-alias-border-secondary,rgba(127,127,127,.2));box-shadow:0 8px 28px rgba(0,0,0,.18);font-size:13px}',
-      '.dshdt-selectbar-count{min-width:56px;text-align:center;color:var(--dsw-alias-label-secondary,#5c6270)}',
+      '.dshdt-selectbar{position:fixed;right:24px;bottom:150px;z-index:60;display:flex;align-items:center;gap:8px;padding:5px 10px;border-radius:999px;background:var(--dsw-alias-bg-elevated,#fff);color:var(--dsw-alias-label-primary,inherit);border:1px solid var(--dsw-alias-border-secondary,rgba(127,127,127,.2));box-shadow:0 4px 14px rgba(0,0,0,.12);font-size:12px}',
+      '.dshdt-selectbar-count{color:var(--dsw-alias-label-secondary,#5c6270);font-size:12px;white-space:nowrap}',
       '.dshdt-dialog-text{margin:0;color:var(--dsw-alias-label-primary,inherit);font-size:14px;line-height:22px}',
       '.dshdt-dialog-note{margin:10px 0 0;color:var(--dsw-alias-label-tertiary,#8a8f98);font-size:13px;line-height:20px}',
       '.dshdt-dialog-warn{margin:10px 0 0;color:var(--dsw-alias-state-warn-primary,#a15c00);font-size:13px;line-height:20px}',
@@ -1370,14 +1370,14 @@ export default (require) => {
           }),
           jsx(primitives.Button, {
             variant: 'ghost',
-            size: 'md',
+            size: 'sm',
             disabled: view.pending,
             onClick: () => controller.setSelecting(false),
             children: t('select.cancel'),
           }),
           jsx(primitives.Button, {
             variant: 'primary',
-            size: 'md',
+            size: 'sm',
             className: 'dshdt-danger',
             disabled: view.pending || count === 0,
             onClick: () => controller.requestBatch(),
@@ -1564,6 +1564,7 @@ export default (require) => {
           SelectToggle,
         ),
       )
+
 
       ctx.slots.inject('conversation.input.overlay', () =>
         ctx.slots.register(
