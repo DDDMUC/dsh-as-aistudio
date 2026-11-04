@@ -4,6 +4,12 @@
 
 ## 中文
 
+**0.5.2** —— 跟进三个动作组件：设置卡片同时挂到包自己的页面。
+
+- dsh-edit-turn 0.5.15 / dsh-rerun-turn 0.2.8 / dsh-delete-turn 0.2.1：新增 `plugins.bundle.config`（key 是裸包名），
+  于是 `#/panel/plugins/<包名>` 直接能看到设置，不再只能从 `…/<包名>/<包名>` 那一层进去。
+- 内嵌浏览器半部随重新 vendor 更新。
+
 **0.5.1** —— 组件行标出「动作 / 维护」；跟进内嵌组件。
 
 - 面板里每个组件行在名字后多一个徽章：`动作`（edit/rerun/delete/markdown）或 `维护`（log-trim）。

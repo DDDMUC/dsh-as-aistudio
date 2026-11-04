@@ -1,6 +1,6 @@
 // dsh-delete-turn browser half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-delete-turn/src/client.js  (v0.2.0, sha256 194f739c2c5aba1c)
+// Source: ../dsh-delete-turn/src/client.js  (v0.2.1, sha256 7048fbb545172052)
 // Regenerate with `npm run vendor`; test/vendor-sync.test.js fails when this is stale.
 //
 // The component registers its factory with the host module loader; inside this
@@ -1587,6 +1587,19 @@ export default (require) => {
           {
             name: 'plugins.row.config',
             key: 'dsh-delete-turn#dsh-delete-turn',
+            locale: NS,
+          },
+          AskBeforeDeleteOption,
+        ),
+      )
+
+      // 同一张卡也挂在包自己的页面上（`#/panel/plugins/dsh-delete-turn`），
+      // 而不是只藏在 `…/dsh-delete-turn/dsh-delete-turn` 那一层。
+      ctx.slots.inject('plugins.bundle.config', () =>
+        ctx.slots.register(
+          {
+            name: 'plugins.bundle.config',
+            key: 'dsh-delete-turn',
             locale: NS,
           },
           AskBeforeDeleteOption,

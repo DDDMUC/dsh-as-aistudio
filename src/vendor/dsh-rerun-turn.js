@@ -1,6 +1,6 @@
 // dsh-rerun-turn browser half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-rerun-turn/lib/client.js  (v0.2.7, sha256 843275c5000ca715)
+// Source: ../dsh-rerun-turn/lib/client.js  (v0.2.8, sha256 a03ea82406886111)
 // Regenerate with `npm run vendor`; test/vendor-sync.test.js fails when this is stale.
 //
 // The component registers its factory with the host module loader; inside this
@@ -20,7 +20,7 @@ export default (require) => {
     const ROUTE_PREFIX = '/dsh-rerun-turn'
 
     /** Keep in sync with package.json and lib/index.js. */
-    const PLUGIN_VERSION = '0.2.7'
+    const PLUGIN_VERSION = '0.2.8'
 
     // --- copy -----------------------------------------------------------------
 
@@ -1518,6 +1518,19 @@ export default (require) => {
           {
             name: 'plugins.row.config',
             key: 'dsh-rerun-turn#dsh-rerun-turn',
+            locale: NS,
+          },
+          AskBeforeRerunOption,
+        ),
+      )
+
+      // 同一张卡也挂在包自己的页面上（`#/panel/plugins/dsh-rerun-turn`），
+      // 而不是只藏在 `…/dsh-rerun-turn/dsh-rerun-turn` 那一层。
+      ctx.slots.inject('plugins.bundle.config', () =>
+        ctx.slots.register(
+          {
+            name: 'plugins.bundle.config',
+            key: 'dsh-rerun-turn',
             locale: NS,
           },
           AskBeforeRerunOption,

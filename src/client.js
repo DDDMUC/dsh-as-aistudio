@@ -43,7 +43,7 @@ window.__ModuleLoader__.load({
     const RERUN_PREFIX = '/dsh-rerun-turn'
 
     /** Keep in sync with package.json and lib/index.js. */
-    const PLUGIN_VERSION = '0.5.14'
+    const PLUGIN_VERSION = '0.5.15'
 
     // --- copy -----------------------------------------------------------------
 
@@ -5488,6 +5488,19 @@ window.__ModuleLoader__.load({
         ),
       )
 
+      // 同一张卡也挂在包自己的页面上（`#/panel/plugins/dsh-edit-turn`），
+      // 而不是只藏在 `…/dsh-edit-turn/dsh-edit-turn` 那一层。
+      ctx.slots.inject('plugins.bundle.config', () =>
+        ctx.slots.register(
+          {
+            name: 'plugins.bundle.config',
+            key: 'dsh-edit-turn',
+            locale: NS,
+          },
+          EditorStyleOption,
+        ),
+      )
+
       ctx.slots.inject('conversation.input.overlay', () =>
         ctx.slots.register(
           {
@@ -5527,7 +5540,7 @@ window.__ModuleLoader__.load({
     const ROUTE_PREFIX = '/dsh-rerun-turn'
 
     /** Keep in sync with package.json and lib/index.js. */
-    const PLUGIN_VERSION = '0.2.7'
+    const PLUGIN_VERSION = '0.2.8'
 
     // --- copy -----------------------------------------------------------------
 
@@ -7025,6 +7038,19 @@ window.__ModuleLoader__.load({
           {
             name: 'plugins.row.config',
             key: 'dsh-rerun-turn#dsh-rerun-turn',
+            locale: NS,
+          },
+          AskBeforeRerunOption,
+        ),
+      )
+
+      // 同一张卡也挂在包自己的页面上（`#/panel/plugins/dsh-rerun-turn`），
+      // 而不是只藏在 `…/dsh-rerun-turn/dsh-rerun-turn` 那一层。
+      ctx.slots.inject('plugins.bundle.config', () =>
+        ctx.slots.register(
+          {
+            name: 'plugins.bundle.config',
+            key: 'dsh-rerun-turn',
             locale: NS,
           },
           AskBeforeRerunOption,
@@ -8629,6 +8655,19 @@ window.__ModuleLoader__.load({
           AskBeforeDeleteOption,
         ),
       )
+
+      // 同一张卡也挂在包自己的页面上（`#/panel/plugins/dsh-delete-turn`），
+      // 而不是只藏在 `…/dsh-delete-turn/dsh-delete-turn` 那一层。
+      ctx.slots.inject('plugins.bundle.config', () =>
+        ctx.slots.register(
+          {
+            name: 'plugins.bundle.config',
+            key: 'dsh-delete-turn',
+            locale: NS,
+          },
+          AskBeforeDeleteOption,
+        ),
+      )
     }
 
     exports.apply = apply
@@ -10082,7 +10121,7 @@ window.__ModuleLoader__.load({
     const NS = 'dsh-as-aistudio'
 
     /** Keep in sync with package.json and src/components.js. */
-    const PLUGIN_VERSION = '0.5.1'
+    const PLUGIN_VERSION = '0.5.2'
 
     /** Presence marker the live verifier reads. */
     const DEBUG_KEY = '__DSH_AS_AISTUDIO__'
