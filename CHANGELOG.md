@@ -4,6 +4,11 @@
 
 ## 中文
 
+**0.5.12** —— 跟进 dsh-rerun-turn 0.2.10（行增长节流 + 传输层重试）。
+
+- 内嵌 rerun 半部：行数增长改成 20 秒节流的尾随刷新，`Failed to fetch` 静默重试 3 次；
+  大会话里不再一次回答就排队几十次 `/state`。
+
 **0.5.11** —— 跟进 dsh-log-trim 0.7.0（worker 扫描 + 异步裁剪 + 用量账本）。
 
 - 内嵌 log-trim 升到 0.7.0：开机扫描在 worker 里跑（`src/vendor/host/dsh-log-trim.worker.mjs`），

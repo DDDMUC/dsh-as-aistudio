@@ -1,6 +1,6 @@
 // dsh-rerun-turn browser half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-rerun-turn/lib/client.js  (v0.2.9, sha256 2884e6bfd0e1e122)
+// Source: ../dsh-rerun-turn/lib/client.js  (v0.2.10, sha256 c037ba19a2668e15)
 // Regenerate with `npm run vendor`; test/vendor-sync.test.js fails when this is stale.
 //
 // The component registers its factory with the host module loader; inside this
@@ -20,7 +20,7 @@ export default (require) => {
     const ROUTE_PREFIX = '/dsh-rerun-turn'
 
     /** Keep in sync with package.json and lib/index.js. */
-    const PLUGIN_VERSION = '0.2.9'
+    const PLUGIN_VERSION = '0.2.10'
 
     // --- copy -----------------------------------------------------------------
 
@@ -325,6 +325,17 @@ export default (require) => {
       })
     }
 
+    // 行增长触发的最短刷新间隔。20 秒足够跟上一次回答的节奏，又不会把
+    // 大会话的 /state 请求排成一串（单次要 35 s 的那种会话尤其明显）。
+    const ROW_REFRESH_MIN_MS = (typeof process !== 'undefined' && process.env && process.env.DSH_RERUN_ROW_REFRESH_MS)
+      ? Math.max(1, Number(process.env.DSH_RERUN_ROW_REFRESH_MS))
+      : 20000
+    // 传输层失败最多试几次（1 s / 2 s / 4 s），之后才把错误显示出来。
+    const LOAD_RETRIES = 3
+    const RETRY_BASE_MS = (typeof process !== 'undefined' && process.env && process.env.DSH_RERUN_RETRY_MS)
+      ? Math.max(1, Number(process.env.DSH_RERUN_RETRY_MS))
+      : 1000
+
     // --- controller -----------------------------------------------------------
 
     class RerunController {
@@ -334,6 +345,13 @@ export default (require) => {
         this.inflight = null
         this.pollTimer = null
         this.rowCount = -1
+        // 行数增长不再“每加一行就重拉一次”：大会话的 /state 要几十秒，
+        // 一次回答里能看到几十次增长，旧逻辑等于把宿主按死。
+        this.rowTimer = null
+        this.lastRowRefreshAt = 0
+        // 传输层失败（Failed to fetch）：静默重试几次，别一断就把错误钉在界面上。
+        this.loadAttempts = 0
+        this.retryTimer = null
         this.confirmTarget = null
         // Set by dispose(): a listener that outlives the apply (an adopted
         // button still carries the previous instance's click handler) must not
@@ -391,6 +409,36 @@ export default (require) => {
           window.clearInterval(this.pollTimer)
           this.pollTimer = null
         }
+        if (this.rowTimer !== null) {
+          window.clearTimeout(this.rowTimer)
+          this.rowTimer = null
+        }
+        if (this.retryTimer !== null) {
+          window.clearTimeout(this.retryTimer)
+          this.retryTimer = null
+        }
+      }
+
+      /**
+       * 行数增长后请求一次刷新，但两次之间至少隔 `ROW_REFRESH_MIN_MS`。
+       * 增长本身不重要，重要的是“这轮回答结束后要有一条新数据”。
+       */
+      requestRowRefresh() {
+        if (this.disposed === true) return
+        if (this.rowTimer !== null) return
+        const now = Date.now()
+        const wait = ROW_REFRESH_MIN_MS - (now - this.lastRowRefreshAt)
+        if (wait <= 0) {
+          this.lastRowRefreshAt = now
+          this.load(true)
+          return
+        }
+        this.rowTimer = setTimeout(() => {
+          this.rowTimer = null
+          if (this.disposed === true) return
+          this.lastRowRefreshAt = Date.now()
+          this.load(true)
+        }, wait)
       }
 
       load(force) {
@@ -471,6 +519,7 @@ export default (require) => {
               }
             }
             hostConfirm = Boolean(data.config && data.config.confirm)
+            this.loadAttempts = 0
             this.publish({
               hidden,
               replies,
@@ -493,6 +542,17 @@ export default (require) => {
             else this.stopPolling()
           })
           .catch((error) => {
+            // 传输层失败（断网、宿主重启、请求被掐）不该一断就钉死错误：
+            // 先静默重试 1 s / 2 s / 4 s，仍失败才把原因显示出来。
+            this.loadAttempts = (this.loadAttempts || 0) + 1
+            if (this.loadAttempts <= LOAD_RETRIES) {
+              const delay = RETRY_BASE_MS * 2 ** (this.loadAttempts - 1)
+              this.retryTimer = setTimeout(() => {
+                this.retryTimer = null
+                if (this.disposed !== true) this.load(true)
+              }, delay)
+              return
+            }
             // The host says WHY (`invalid session id`, `no session log for this
             // id`, a 500, a network failure). Swallowing it left the panel with
             // "状态加载失败，稍后重试。" for every cause alike - including the
@@ -776,7 +836,11 @@ export default (require) => {
       controller.rowCount = rowCount
       // Only new rows can add edit targets / a fresh turn; shrink churn (the
       // host rebuilding its list) does not need a refresh.
-      if (grew) controller.load(true)
+      if (grew) {
+        // 真实控制器有节流；测试里的轻量替身只有 load()，退回旧行为。
+        if (typeof controller.requestRowRefresh === 'function') controller.requestRowRefresh()
+        else controller.load(true)
+      }
     }
 
     function applyDom(snapshot, view, controller, t) {

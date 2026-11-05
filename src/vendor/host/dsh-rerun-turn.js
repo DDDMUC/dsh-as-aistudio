@@ -1,6 +1,6 @@
 // dsh-rerun-turn host half (dsh-rerun-turn.js), VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-rerun-turn/lib/index.js  (v0.2.9, sha256 60fce2958ddc3d13)
+// Source: ../dsh-rerun-turn/lib/index.js  (v0.2.10, sha256 60fce2958ddc3d13)
 // Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.
 //
 // src/shell.js imports the copy named after the component, which is why the
