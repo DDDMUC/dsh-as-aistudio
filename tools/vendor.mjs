@@ -84,6 +84,19 @@ function vendorHostHalf(component, hostPath) {
   const extra = []
   // 已经抄过的绝对路径 → 包内名字；模块互相引用（校验器 ↔ 裁剪器），没有这张表会无限递归。
   const visited = new Map([[hostPath, component.id + '.js']])
+  // 一个相对模块在包内叫什么：入口自己叫 `<id>.js`（那正是 shell.js 要 import 的名字），
+  // 其余按目录压平。查表优先，否则「worker 反过来 import 入口」会得到一个多出来的
+  // `<id>.index.js`，而那个文件根本不存在。
+  const flattenName = (abs, rel) => {
+    const known = visited.get(abs)
+    if (known !== undefined) return known
+    // 名字沿用「第一次 import 它时写的相对路径」：同一个文件被两条路径引用时，
+    // 后来那条复用先注册的名字，包内只留一份（原来是两份，其中一份还漏过）。
+    const flat = component.id + '.' + rel.slice(2).replace(/\//g, '.')
+    visited.set(abs, flat)
+    extra.push({ name: flat, text: rewrite(readFileSync(abs, 'utf8'), abs, dirname(abs)) })
+    return flat
+  }
 
   const rewrite = (source, file, dir = dirname(file)) => {
     const destructures = []
@@ -116,11 +129,7 @@ function vendorHostHalf(component, hostPath) {
         console.error(component.id + ': ' + file + ' imports ' + rel + ', which does not exist')
         process.exit(3)
       }
-      const flat = component.id + '.' + rel.slice(2).replace(/\//g, '.')
-      if (!visited.has(abs)) {
-        visited.set(abs, flat)
-        extra.push({ name: flat, text: rewrite(readFileSync(abs, 'utf8'), abs, dirname(abs)) })
-      }
+      const flat = flattenName(abs, rel)
       return "from './" + flat + "'"
     })
     // 动态导入：宿主半部会在用到校验器时才 `await import('./vendor/verify-session-log.mjs')`，
@@ -131,12 +140,21 @@ function vendorHostHalf(component, hostPath) {
         console.error(component.id + ': ' + file + ' dynamically imports ' + rel + ', which does not exist')
         process.exit(3)
       }
-      const flat = component.id + '.' + rel.slice(2).replace(/\//g, '.')
-      if (!visited.has(abs)) {
-        visited.set(abs, flat)
-        extra.push({ name: flat, text: rewrite(readFileSync(abs, 'utf8'), abs, dirname(abs)) })
-      }
+      const flat = flattenName(abs, rel)
       return "import('./" + flat + "')"
+    })
+    // `new Worker(new URL('./worker.mjs', import.meta.url))` 是宿主半部在运行时
+    // 拉起的第二个模块。它不是 import，静态扫描看不见，但同样要跟过来改名——
+    // 少抄一份就是开机扫描直接报 MODULE_NOT_FOUND。
+    out = out.replace(/new URL\('(\.\/[^']+\.(?:m?js))', import\.meta\.url\)/g, (whole, rel) => {
+      if (rel === './_platform.js') return whole
+      const abs = join(dir, rel)
+      if (!existsSync(abs)) {
+        console.error(component.id + ': ' + file + ' references ' + rel + ' at runtime, which does not exist')
+        process.exit(3)
+      }
+      const flat = flattenName(abs, rel)
+      return "new URL('./" + flat + "', import.meta.url)"
     })
     if (destructures.length > 0) {
       // Hoisted bindings read from the resolved namespace, placed after the
