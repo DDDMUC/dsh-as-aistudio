@@ -1,6 +1,6 @@
 // dsh-log-trim host half (dsh-log-trim.js), VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-log-trim/lib/index.js  (v0.6.1, sha256 6716b35e8747d594)
+// Source: ../dsh-log-trim/lib/index.js  (v0.7.0, sha256 49dcb38f01b7c751)
 // Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.
 //
 // src/shell.js imports the copy named after the component, which is why the
@@ -43,7 +43,7 @@ import { readLedger, recordFor } from './dsh-log-trim.ledger.js'
 
 export const name = 'dsh-log-trim'
 export const PLUGIN_ID = name
-export const PLUGIN_VERSION = '0.6.1'
+export const PLUGIN_VERSION = '0.7.0'
 export const ROUTE_PREFIX = '/api/dsh-log-trim'
 
 /**
@@ -129,16 +129,26 @@ export function writeSavedConfig(config) {
  * @param {object} result - `applyTrim` 的返回。
  * @param {boolean} record - 是否记录（配置项）。
  */
-async function noteWindowTrim(logFile, result, record) {
+
+/** 记账用：异步读一份日志的事件；读不出来就给空数组。 */
+async function safeEvents(logFile) {
+  try {
+    return (await readLogAsync(logFile)).events
+  } catch {
+    return []
+  }
+}
+
+async function noteWindowTrim(logFile, result, record, beforeEvents = [], afterEvents = []) {
   if (record === false) return
   try {
     let windowsAfter = null
     try {
-      windowsAfter = windowsOf((await readLogAsync(logFile)).events).length
+      windowsAfter = windowsOf(afterEvents.length > 0 ? afterEvents : (await readLogAsync(logFile)).events).length
     } catch {
       windowsAfter = null
     }
-    recordFor(logFile, 'window', [], [], {
+    recordFor(logFile, 'window', beforeEvents, afterEvents, {
       windowsBefore: result?.before?.windows,
       windowsAfter: windowsAfter === null ? undefined : windowsAfter,
       eventsBefore: result?.before?.events,
@@ -162,8 +172,9 @@ export async function trimOne(logFile, config) {
   } else if (config.mode === 'flatten') {
     result = await applyFlatten(logFile, config)
   } else if (config.mode === 'window') {
+    const beforeEvents = config.recordLedger === false ? [] : await safeEvents(logFile)
     result = await applyTrim(logFile, config.keepWindows, { streamKeepTurns: 0 })
-    await noteWindowTrim(logFile, result, config.recordLedger)
+    await noteWindowTrim(logFile, result, config.recordLedger, beforeEvents, config.recordLedger === false ? [] : await safeEvents(logFile))
   } else {
     const plan = await planLossless(logFile, config)
     if (!plan.should) throw new Error(plan.reason)
@@ -280,7 +291,7 @@ export async function restoreFromBackup(logFile, backupPath, config) {
     return { ok: false, error: '这个备份不属于该会话' }
   }
   if (!fs.existsSync(backupPath)) return { ok: false, error: '备份文件已经不在' }
-  const { verifyLog } = await import('./dsh-log-trim.vendor.verify-session-log.mjs')
+  const { verifyLog } = await import('./dsh-log-trim.verify-session-log.mjs')
   const backupCheck = await verifyLog(backupPath)
   if (!backupCheck.ok) {
     const failed = (backupCheck.checks || []).filter((check) => !check.ok).slice(0, 2)
@@ -311,7 +322,7 @@ export async function restoreFromBackup(logFile, backupPath, config) {
  * @returns {Promise<object|null>} a repaired record, or null when nothing was wrong.
  */
 export async function repairIfCorrupt(logFile, config) {
-  const { verifyLog } = await import('./dsh-log-trim.vendor.verify-session-log.mjs')
+  const { verifyLog } = await import('./dsh-log-trim.verify-session-log.mjs')
   let failed
   try {
     failed = await verifyLog(logFile)
@@ -1035,8 +1046,9 @@ export async function runScan(config, logger = {}) {
       continue
     }
     try {
+      const beforeEvents = config.mode === 'window' && config.recordLedger !== false ? await safeEvents(logFile) : []
       const result = config.mode === 'window' ? await applyTrim(logFile, config.keepWindows) : await applyLossless(logFile, config, lossless)
-      if (config.mode === 'window') await noteWindowTrim(logFile, result, config.recordLedger)
+      if (config.mode === 'window') await noteWindowTrim(logFile, result, config.recordLedger, beforeEvents, await safeEvents(logFile))
       const pruned = pruneBackups(logFile, config.backupKeep)
       summary.savedBytes += Math.max(0, result.before.bytes - result.after.bytes)
       summary.trimmed.push({
@@ -1141,8 +1153,9 @@ export function apply(ctx, config = {}) {
         if (live.mode === 'window') {
           const plan = planTrim(report, live)
           if (plan.should) {
+            const beforeEvents = live.recordLedger === false ? [] : await safeEvents(logFile)
             const done = await applyTrim(logFile, live.keepWindows, { streamKeepTurns: 0 })
-            await noteWindowTrim(logFile, done, live.recordLedger)
+            await noteWindowTrim(logFile, done, live.recordLedger, beforeEvents, await safeEvents(logFile))
           }
           else await applyRebuild(logFile, live)
           return

@@ -1,6 +1,6 @@
 // dsh-log-trim host half (dsh-log-trim.lossless.js), VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-log-trim/lib/lossless.js  (v0.6.1, sha256 a35a99d4fe824689)
+// Source: ../dsh-log-trim/lib/lossless.js  (v0.7.0, sha256 8b5c75ec49d48981)
 // Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.
 //
 // src/shell.js imports the copy named after the component, which is why the
@@ -210,7 +210,7 @@ export async function applyLossless(logFile, config, plan, options = {}) {
   if (options.verify !== false) {
     let verified
     try {
-      const { verifyLog } = await import('./dsh-log-trim.vendor.verify-session-log.mjs')
+      const { verifyLog } = await import('./dsh-log-trim.verify-session-log.mjs')
       verified = await verifyLog(staging)
     } catch (error) {
       await fs.promises.rm(staging, { force: true })
@@ -247,7 +247,7 @@ export async function applyRebuild(logFile, config) {
   const backup = `${logFile}.precompact-${stamp}`
   const staging = `${logFile}.staging-${stamp}`
   await fs.promises.writeFile(staging, await encodeLogAsync(seededHeaderFor(original.header, rebuilt), rebuilt))
-  const { verifyLog } = await import('./dsh-log-trim.vendor.verify-session-log.mjs')
+  const { verifyLog } = await import('./dsh-log-trim.verify-session-log.mjs')
   const verified = await verifyLog(staging)
   if (!verified.ok) {
     await fs.promises.rm(staging, { force: true })
@@ -283,7 +283,7 @@ export async function applyStreamOnly(logFile, keepTurns, options = {}) {
   const backup = `${logFile}.precompact-${stamp}`
   const staging = `${logFile}.staging-${stamp}`
   await fs.promises.writeFile(staging, await encodeLogAsync(seededHeaderFor(original.header, stripped.events), stripped.events))
-  const { verifyLog } = await import('./dsh-log-trim.vendor.verify-session-log.mjs')
+  const { verifyLog } = await import('./dsh-log-trim.verify-session-log.mjs')
   const verified = await verifyLog(staging)
   if (!verified.ok) {
     await fs.promises.rm(staging, { force: true })
@@ -326,7 +326,7 @@ export async function applyFlatten(logFile, config) {
   const backup = `${logFile}.precompact-${stamp}`
   const staging = `${logFile}.staging-${stamp}`
   await fs.promises.writeFile(staging, await encodeLogAsync(seededHeaderFor(original.header, folded), folded))
-  const { verifyLog } = await import('./dsh-log-trim.vendor.verify-session-log.mjs')
+  const { verifyLog } = await import('./dsh-log-trim.verify-session-log.mjs')
   const verified = await verifyLog(staging)
   if (!verified.ok) {
     await fs.promises.rm(staging, { force: true })

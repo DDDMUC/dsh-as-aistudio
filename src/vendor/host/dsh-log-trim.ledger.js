@@ -1,6 +1,6 @@
 // dsh-log-trim host half (dsh-log-trim.ledger.js), VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-log-trim/lib/ledger.js  (v0.6.1, sha256 1b391592e0cc0fbf)
+// Source: ../dsh-log-trim/lib/ledger.js  (v0.7.0, sha256 5ca2460b42a3a776)
 // Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.
 //
 // src/shell.js imports the copy named after the component, which is why the
@@ -52,6 +52,48 @@ export function readLedger(home = os.homedir()) {
   }
 }
 
+
+/** 一条事件的 usage 四项之和（缺项按 0 算）。 */
+const USAGE_KEYS = ['inputTokens', 'outputTokens', 'totalTokens', 'cacheReadTokens']
+
+/**
+ * 汇总一组事件的 usage。
+ *
+ * @param {object[]} events - 事件数组。
+ * @returns {{ inputTokens: number, outputTokens: number, totalTokens: number, cacheReadTokens: number }} 四项合计。
+ */
+export function sumUsage(events) {
+  const out = { inputTokens: 0, outputTokens: 0, totalTokens: 0, cacheReadTokens: 0 }
+  for (const event of Array.isArray(events) ? events : []) {
+    const usage = event?.data?.usage
+    if (usage === null || typeof usage !== 'object') continue
+    for (const key of USAGE_KEYS) {
+      const value = usage[key]
+      if (typeof value === 'number' && Number.isFinite(value)) out[key] += value
+    }
+  }
+  return out
+}
+
+/** 两组事件 usage 之差：被删掉的那部分。 */
+export function diffUsage(before, after) {
+  const a = sumUsage(before)
+  const b = sumUsage(after)
+  const out = {}
+  for (const key of USAGE_KEYS) out[key] = Math.max(0, a[key] - b[key])
+  return out
+}
+
+/** 事件流里出现过几个不同的轮次。 */
+export function turnsOf(events) {
+  const turns = new Set()
+  for (const event of Array.isArray(events) ? events : []) {
+    const turn = event?.data?.turn
+    if (Number.isSafeInteger(turn) && turn > 0) turns.add(turn)
+  }
+  return turns.size
+}
+
 /**
  * 把一次改写记进账本。
  *
@@ -83,6 +125,14 @@ export function recordTrim(entry, home = os.homedir()) {
     eventsRemoved: Math.max(0, (Number.isSafeInteger(entry.eventsBefore) ? entry.eventsBefore : before.length) - (Number.isSafeInteger(entry.eventsAfter) ? entry.eventsAfter : after.length)),
     bytesBefore: typeof entry.bytesBefore === 'number' ? entry.bytesBefore : null,
     bytesAfter: typeof entry.bytesAfter === 'number' ? entry.bytesAfter : null,
+    // 被删掉那部分的用量：账本可加，读者用“现存 + 已裁”还原真实总量。
+    usageBefore: before.length > 0 ? sumUsage(before) : null,
+    usageAfter: after.length > 0 ? sumUsage(after) : null,
+    dropped: {
+      events: Math.max(0, (Number.isSafeInteger(entry.eventsBefore) ? entry.eventsBefore : before.length) - (Number.isSafeInteger(entry.eventsAfter) ? entry.eventsAfter : after.length)),
+      turns: Math.max(0, (Number.isSafeInteger(entry.turnsBefore) ? entry.turnsBefore : turnsOf(before)) - (Number.isSafeInteger(entry.turnsAfter) ? entry.turnsAfter : turnsOf(after))),
+      usage: diffUsage(before, after),
+    },
   }
   const current = ledger.sessions[entry.sessionId] ?? { trims: [], totals: { trims: 0, windowsRemoved: 0, eventsRemoved: 0, bytesSaved: 0, lastAt: null } }
   const trims = [...(Array.isArray(current.trims) ? current.trims : []), record].slice(-200)
@@ -91,6 +141,13 @@ export function recordTrim(entry, home = os.homedir()) {
     windowsRemoved: (current.totals?.windowsRemoved ?? 0) + record.windowsRemoved,
     eventsRemoved: (current.totals?.eventsRemoved ?? 0) + record.eventsRemoved,
     bytesSaved: (current.totals?.bytesSaved ?? 0) + Math.max(0, (record.bytesBefore ?? 0) - (record.bytesAfter ?? 0)),
+    turnsRemoved: (current.totals?.turnsRemoved ?? 0) + record.dropped.turns,
+    usage: {
+      inputTokens: (current.totals?.usage?.inputTokens ?? 0) + record.dropped.usage.inputTokens,
+      outputTokens: (current.totals?.usage?.outputTokens ?? 0) + record.dropped.usage.outputTokens,
+      totalTokens: (current.totals?.usage?.totalTokens ?? 0) + record.dropped.usage.totalTokens,
+      cacheReadTokens: (current.totals?.usage?.cacheReadTokens ?? 0) + record.dropped.usage.cacheReadTokens,
+    },
     lastAt: record.at,
   }
   ledger.sessions[entry.sessionId] = { trims, totals }

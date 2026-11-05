@@ -4,6 +4,13 @@
 
 ## 中文
 
+**0.5.11** —— 跟进 dsh-log-trim 0.7.0（worker 扫描 + 异步裁剪 + 用量账本）。
+
+- 内嵌 log-trim 升到 0.7.0：开机扫描在 worker 里跑（`src/vendor/host/dsh-log-trim.worker.mjs`），
+  裁剪内核改异步，账本记录被裁部分的 usage 差额。
+- 重新 vendor（含运行时引用的 worker 模块）；删掉 0.5.9 手工补的那份重复校验器副本。
+- 包描述与 README 改成五个组件（四个动作 + 一个维护），与内嵌数量一致。
+
 **0.5.10** —— 开机扫描不再把宿主按住（会话列表变空的那个 bug）。
 
 - 整轮扫描搬进 worker（`src/vendor/host/dsh-log-trim.worker.mjs`），主线程只等一份摘要。本机实测：162 个会话、12 个大会话，旧版按住事件循环 **117 秒**，新版全程最大停顿 **43 ms**。
