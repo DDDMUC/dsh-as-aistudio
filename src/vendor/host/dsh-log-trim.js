@@ -1,6 +1,6 @@
 // dsh-log-trim host half (dsh-log-trim.js), VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-log-trim/lib/index.js  (v0.7.3, sha256 e35a3a2d18c9a4fa)
+// Source: ../dsh-log-trim/lib/index.js  (v0.7.4, sha256 3073f59d273e8507)
 // Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.
 //
 // src/shell.js imports the copy named after the component, which is why the
@@ -44,7 +44,7 @@ import { readLedger, recordFor } from './dsh-log-trim.ledger.js'
 
 export const name = 'dsh-log-trim'
 export const PLUGIN_ID = name
-export const PLUGIN_VERSION = '0.7.3'
+export const PLUGIN_VERSION = '0.7.4'
 export const ROUTE_PREFIX = '/api/dsh-log-trim'
 
 /**
@@ -62,7 +62,12 @@ const LEGACY_MEMORY_FILE = 'dsh-session-compact/scan-memory.json'
 /** Where the settings card's values are kept. */
 const CONFIG_FILE = 'dsh-log-trim/config.json'
 /** 开机扫描先等一下界面：第一屏还没拿到会话列表时不该跟它抢线程池。 */
-const BOOT_SCAN_DELAY_MS = 3000
+// 启动扫描的延迟。worker 扫描不占主线程，所以越早越好：宿主会在启动后很快
+// 打开上次的会话并持有 session.lock，晚一步就永远轮不到那个会话。
+const BOOT_SCAN_DELAY_MS = 0
+// 被锁住的会话多久后再试一次；试满 20 次（10 分钟）就放弃，等下次启动。
+const LOCKED_RETRY_MS = 30000
+const LOCKED_RETRIES = 20
 /** 重命名前的目录，只读兜底。 */
 const LEGACY_CONFIG_FILE = 'dsh-session-compact/config.json'
 
@@ -160,6 +165,50 @@ async function noteWindowTrim(logFile, result, record, beforeEvents = [], afterE
   } catch {
     // 记账失败不影响裁剪本身。
   }
+}
+
+
+/**
+ * 被宿主打开的会话先记下来，每隔 30 秒看一次锁还在不在；一解锁就单独裁它。
+ *
+ * 启动扫描唯一的空窗是「宿主还没打开会话」，而 DSH 会在启动后很快恢复上次的会话。
+ * 赶不上就退而求其次：等用户切走、宿主释放 session.lock 之后再补一刀。
+ *
+ * @param {object[]} locked - 带 logFile 的被锁会话。
+ * @param {object} config - 解析后的配置。
+ * @param {object} ctx - 插件上下文（只用 logger）。
+ * @param {boolean} cancelled - 启动扫描是否已被取消。
+ * @param {() => boolean} isCancelled - 重新读取取消状态。
+ */
+function watchUnlocked(locked, config, ctx, cancelled, isCancelled) {
+  let remaining = [...locked]
+  let attempts = 0
+  const timer = setInterval(() => {
+    attempts += 1
+    if (cancelled === true || isCancelled() === true || attempts > LOCKED_RETRIES) {
+      clearInterval(timer)
+      return
+    }
+    void (async () => {
+      const next = []
+      for (const item of remaining) {
+        if (isSessionLocked(item.logFile)) {
+          next.push(item)
+          continue
+        }
+        try {
+          await trimOne(item.logFile, config)
+        } catch (error) {
+          if (typeof ctx.logger?.warn === 'function') {
+            ctx.logger.warn(`[dsh-log-trim] 解锁后裁剪失败（${item.sessionId}）：${error instanceof Error ? error.message : String(error)}`)
+          }
+        }
+      }
+      remaining = next
+      if (remaining.length === 0) clearInterval(timer)
+    })()
+  }, LOCKED_RETRY_MS)
+  if (typeof timer.unref === 'function') timer.unref()
 }
 
 export async function trimOne(logFile, config) {
@@ -921,7 +970,15 @@ export async function runScan(config, logger = {}) {
   summary.roots = roots
   const legacy = roots.flatMap((root) => listLegacy(root))
   summary.legacy = { files: legacy.length, bytes: legacy.reduce((sum, item) => sum + item.bytes, 0) }
-  const allLogs = roots.flatMap((root) => listLogs(root))
+  // 最近改过的日志先扫：宿主启动后最先打开的正是它们，早一步就有机会在
+  // session.lock 出现之前把窗口裁掉。
+  const allLogs = roots.flatMap((root) => listLogs(root)).sort((left, right) => {
+    try {
+      return fs.statSync(right).mtimeMs - fs.statSync(left).mtimeMs
+    } catch {
+      return 0
+    }
+  })
   for (const logFile of allLogs) {
     // 每个会话之间让出一次事件循环：宿主还要应答界面和工具调用，
     // 一轮扫描（162 个会话）不该把它按住。
@@ -929,7 +986,7 @@ export async function runScan(config, logger = {}) {
     summary.scanned += 1
     const sessionId = path.basename(path.dirname(logFile))
     if (isSessionLocked(logFile)) {
-      summary.skipped.push({ sessionId, reason: '正被宿主打开（session.lock）' })
+      summary.skipped.push({ sessionId, logFile, reason: '正被宿主打开（session.lock）' })
       continue
     }
     // A log the host cannot load is worse than a big log: the session vanishes
@@ -1374,7 +1431,11 @@ export function apply(ctx, config = {}) {
           // 先等界面第一屏拿完数据再干活：开机那几秒是宿主最要紧的窗口。
           await new Promise((resolve) => setTimeout(resolve, BOOT_SCAN_DELAY_MS))
           if (cancelled) return
-          await run()
+          const summary = await run()
+          if (!cancelled && summary && Array.isArray(summary.skipped)) {
+            const locked = summary.skipped.filter((item) => typeof item?.logFile === 'string' && String(item.reason ?? '').includes('session.lock'))
+            if (locked.length > 0) watchUnlocked(locked, resolved, ctx, cancelled, () => cancelled)
+          }
         } catch (error) {
           if (!cancelled && typeof ctx.logger?.warn === 'function') {
             ctx.logger.warn(`[dsh-log-trim] 扫描失败：${error instanceof Error ? error.message : String(error)}`)
