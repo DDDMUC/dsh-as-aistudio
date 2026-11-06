@@ -1,6 +1,6 @@
 // dsh-log-trim host half (dsh-log-trim.js), VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-log-trim/lib/index.js  (v0.7.5, sha256 a32940b526c93896)
+// Source: ../dsh-log-trim/lib/index.js  (v0.7.6, sha256 78ee6ff182ff4b93)
 // Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.
 //
 // src/shell.js imports the copy named after the component, which is why the
@@ -37,14 +37,14 @@ import { discoverRoots, isCurrentLog, listLegacy } from './dsh-log-trim.roots.js
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { applyTrim, commitTrim, encodeLogAsync, foldSurface, isSessionLocked, keepLastWindows, readLogAsync, renumber, windowsOf } from './dsh-log-trim.vendor.compact-session.mjs'
+import { applyTrim, commitTrim, dropShadowedPrefix, encodeLogAsync, foldSurface, isSessionLocked, keepLastWindows, readLogAsync, renumber, windowsOf } from './dsh-log-trim.vendor.compact-session.mjs'
 import { applyFlatten, applyLossless, applyStreamOnly, planLossless, applyRebuild } from './dsh-log-trim.lossless.js'
 import { orphanGoalRounds, stripOrphanGoalSources } from './dsh-log-trim.goal-repair.js'
 import { readLedger, recordFor } from './dsh-log-trim.ledger.js'
 
 export const name = 'dsh-log-trim'
 export const PLUGIN_ID = name
-export const PLUGIN_VERSION = '0.7.5'
+export const PLUGIN_VERSION = '0.7.6'
 export const ROUTE_PREFIX = '/api/dsh-log-trim'
 
 /**
@@ -893,13 +893,17 @@ export async function estimate(logFile, keepWindows) {
   // that the host then accepted verbatim.
   const after =
     trimmed.cutSeq === null ? before : foldSurface(renumber(trimmed.events).events).visible.length
+  // 只丢被遮蔽的前缀不改表面，模型视图必须逐条不变。
+  // 「窗口不用裁」不等于「没活干」：最后一窗的 checkpoint 会把前面一整段历史遮蔽掉，
+  // 那些行模型和界面都看不到，丢掉它们同样是裁剪（窗口页还会把它算成一窗）。
+  const shadowed = trimmed.cutSeq === null ? dropShadowedPrefix(trimmed.events) : { dropped: 0 }
   return {
     title: titleOf(log.events),
     events: log.events.length,
     bytes: log.compressedBytes,
     windows: trimmed.windows,
     cutSeq: trimmed.cutSeq,
-    droppable: trimmed.dropped,
+    droppable: trimmed.dropped + shadowed.dropped,
     modelBefore: before,
     modelAfter: after,
     sessionId: log.header?.id ?? path.basename(path.dirname(logFile)),

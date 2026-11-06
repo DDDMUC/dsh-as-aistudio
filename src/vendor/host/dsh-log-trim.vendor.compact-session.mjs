@@ -1,6 +1,6 @@
 // dsh-log-trim host half (dsh-log-trim.vendor.compact-session.mjs), VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-log-trim/lib/vendor.compact-session.mjs  (v0.7.5, sha256 f0c5dcc018253ea4)
+// Source: ../dsh-log-trim/lib/vendor.compact-session.mjs  (v0.7.6, sha256 3df242c4e94bd6d9)
 // Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.
 //
 // src/shell.js imports the copy named after the component, which is why the
@@ -2154,7 +2154,7 @@ export function repairLateToolResults(events) {
  * @param {object[]} events - 候选保留事件（keepLastWindows 的结果）。
  * @returns {{ events: object[], dropped: number }} 结果。
  */
-function dropShadowedPrefix(events) {
+export function dropShadowedPrefix(events) {
   const checkpoints = events.filter((event) => event.type === 'user/message' && event.data?.source?.kind === 'compact-checkpoint')
   const last = checkpoints[checkpoints.length - 1]
   const shadowEnd = last !== undefined && typeof last.surfaceOp?.endSeq === 'number' ? last.surfaceOp.endSeq : null

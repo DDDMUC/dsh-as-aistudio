@@ -1,6 +1,6 @@
 // dsh-log-trim host half (dsh-log-trim.flatten.js), VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-log-trim/lib/flatten.js  (v0.7.5, sha256 3aa1fdcbb120ab06)
+// Source: ../dsh-log-trim/lib/flatten.js  (v0.7.6, sha256 3aa1fdcbb120ab06)
 // Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.
 //
 // src/shell.js imports the copy named after the component, which is why the
