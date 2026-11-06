@@ -1,6 +1,6 @@
 // dsh-edit-turn browser half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-edit-turn/lib/client.js  (v0.5.20, sha256 68d8221f45f9d894)
+// Source: ../dsh-edit-turn/lib/client.js  (v0.5.21, sha256 68d8221f45f9d894)
 // Regenerate with `npm run vendor`; test/vendor-sync.test.js fails when this is stale.
 //
 // The component registers its factory with the host module loader; inside this
