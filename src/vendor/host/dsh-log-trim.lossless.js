@@ -1,6 +1,6 @@
 // dsh-log-trim host half (dsh-log-trim.lossless.js), VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-log-trim/lib/lossless.js  (v0.7.0, sha256 8b5c75ec49d48981)
+// Source: ../dsh-log-trim/lib/lossless.js  (v0.7.1, sha256 1b98a61bbad8ef87)
 // Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.
 //
 // src/shell.js imports the copy named after the component, which is why the
@@ -24,6 +24,7 @@
  */
 
 import fs from 'node:fs'
+import { assertGoalEventsKept } from './dsh-log-trim.goal-repair.js'
 import { recordFor } from './dsh-log-trim.ledger.js'
 import { commitTrim, derivedHistory, dropOrphanCompactions, encodeLogAsync, foldSurface, readLogAsync, renumber, seededHeaderFor, textLengthOf } from './dsh-log-trim.vendor.compact-session.mjs'
 
@@ -123,6 +124,11 @@ export async function planLossless(logFile, config) {
   const original = await readLogAsync(logFile)
   const before = modelView(original.events)
   const cut = selectLossless(original.events)
+  try {
+    assertGoalEventsKept(original.events, cut.events)
+  } catch (error) {
+    return { should: false, reason: error instanceof Error ? error.message : String(error), report: { title: '', events: original.events.length, windows: 0, droppable: 0, modelBefore: 0, modelAfter: 0, modelSame: false, bytes: original.compressedBytes, afterBytes: original.compressedBytes }, cut }
+  }
   const after = modelView(cut.events)
   const bytes = (await encodeLogAsync(original.header, cut.events)).length
   const same = sameView(before, after)
@@ -189,6 +195,7 @@ export async function planLossless(logFile, config) {
  */
 export async function applyLossless(logFile, config, plan, options = {}) {
   const original = await readLogAsync(logFile)
+  assertGoalEventsKept(original.events, plan.cut.events)
   const renamed = renumber(plan.cut.events)
   const seqs = new Set(renamed.events.map((event) => event.seq))
   for (let index = 0; index < renamed.events.length; index += 1) {
@@ -206,6 +213,7 @@ export async function applyLossless(logFile, config, plan, options = {}) {
   const backup = `${logFile}.precompact-${stamp}`
   const staging = `${logFile}.staging-${stamp}`
   await fs.promises.writeFile(staging, await encodeLogAsync(original.header, renamed.events))
+  const afterBytes = fs.statSync(staging).size
 
   if (options.verify !== false) {
     let verified
@@ -224,7 +232,16 @@ export async function applyLossless(logFile, config, plan, options = {}) {
     }
   }
 
-  const summary = await commitTrim({ staging, backup }, logFile)
+  const summary = await commitTrim({
+    staging,
+    backup,
+    summary: {
+      backup,
+      before: { events: original.events.length, bytes: original.compressedBytes },
+      after: { events: renamed.events.length, bytes: afterBytes },
+      dropped: original.events.length - renamed.events.length,
+    },
+  }, logFile)
   recordFor(logFile, 'lossless', original.events, renamed.events, { bytesBefore: original.compressedBytes, bytesAfter: summary.after.bytes, record: config?.recordLedger !== false })
   return {
     ...summary,
@@ -243,6 +260,7 @@ export async function applyLossless(logFile, config, plan, options = {}) {
 export async function applyRebuild(logFile, config) {
   const original = await readLogAsync(logFile)
   const rebuilt = rebuildSurface(original.events)
+  assertGoalEventsKept(original.events, rebuilt)
   const stamp = new Date().toISOString().replace(/[:.]/g, '-')
   const backup = `${logFile}.precompact-${stamp}`
   const staging = `${logFile}.staging-${stamp}`
@@ -255,7 +273,16 @@ export async function applyRebuild(logFile, config) {
     throw new Error('重写结果没通过宿主校验，未写入：' + failed.map((check) => check.name + '：' + check.detail).join('；'))
   }
   const beforeBytes = fs.statSync(staging).size
-  await commitTrim({ staging, backup }, logFile)
+  await commitTrim({
+    staging,
+    backup,
+    summary: {
+      backup,
+      before: { events: original.events.length, bytes: original.compressedBytes },
+      after: { events: rebuilt.length, bytes: beforeBytes },
+      dropped: original.events.length - rebuilt.length,
+    },
+  }, logFile)
   recordFor(logFile, 'rebuild', original.events, rebuilt, { bytesBefore: original.compressedBytes, bytesAfter: beforeBytes, record: config?.recordLedger !== false })
   return {
     mode: 'rebuild',
@@ -319,6 +346,7 @@ export async function applyFlatten(logFile, config) {
   // 与窗口裁剪同一条规则：只留最近几轮的流式回放记录，更早的删掉。
   const stripped = stripOldStreams(flattened.events, 0)
   const folded = stripped.events
+  assertGoalEventsKept(original.events, folded)
   if (stats.edits + stats.reruns + stats.deletes === 0) {
     throw new Error('没有需要折叠的编辑/重跑/删除记录')
   }
@@ -334,7 +362,16 @@ export async function applyFlatten(logFile, config) {
     throw new Error('折叠结果没通过宿主校验，未写入：' + failed.map((check) => check.name + '：' + check.detail).join('；'))
   }
   const beforeBytes = fs.statSync(staging).size
-  await commitTrim({ staging, backup }, logFile)
+  await commitTrim({
+    staging,
+    backup,
+    summary: {
+      backup,
+      before: { events: original.events.length, bytes: original.compressedBytes },
+      after: { events: folded.length, bytes: beforeBytes },
+      dropped: original.events.length - folded.length,
+    },
+  }, logFile)
   recordFor(logFile, 'flatten', original.events, folded, { bytesBefore: original.compressedBytes, bytesAfter: beforeBytes, record: config?.recordLedger !== false })
   return {
     mode: 'flatten',
@@ -347,6 +384,86 @@ export async function applyFlatten(logFile, config) {
 }
 
 /**
+ * Log events that are not part of the dialogue surface but that a host
+ * projection still folds from the log.
+ *
+ * The rebuild replays the visible messages and used to discard everything else,
+ * which silently deleted durable state:
+ *
+ * - `goal/change` carries the goal snapshot. Losing it while the goal's rounds
+ *   (ordinary surface `user/message` events) survive makes the goal projection
+ *   refuse the whole log: "goal round at session event N is not the next
+ *   admitted round of the active goal", and `/goal` stays broken forever.
+ * - `todo/write`, `plan/mode`, `schedule/change`, `team/*`, `feedback/*` and
+ *   `working-directory/change` are the same kind of snapshot state: the UI and
+ *   the projections read the last one, and dropping them looks like the user's
+ *   todos / plan mode / team board / schedules vanished.
+ *
+ * The six settings event types already re-emitted at the head of the rebuild
+ * (`agent-preset/selected`, `permission/preset`, `sandbox/mode`,
+ * `approval/policy`, `session/title`, `model/selection`) are deliberately not
+ * listed here: the rebuild regenerates each from its own last event.
+ */
+const PRESERVED_STATE_TYPES = new Set([
+  'goal/change',
+  'plan/mode',
+  'todo/write',
+  'schedule/change',
+  'working-directory/change',
+  'team/member',
+  'team/task',
+  'team/message/queued',
+  'team/message/delivered',
+  'feedback/record',
+  'feedback/message-put',
+  'feedback/message-delete',
+])
+
+/**
+ * Re-insert preserved state events just before the first surface block whose
+ * source event originally came after them.
+ *
+ * `out` is already the rebuilt surface; `marks` maps each copied source seq to
+ * the index at which its block starts. A state event that originally sat
+ * between two messages therefore lands back between them, which is what keeps a
+ * goal's create/edit snapshot ahead of the rounds it admits.
+ *
+ * @param {object[]} out - the rebuilt surface entries.
+ * @param {Map<number, number>} marks - source seq → output index.
+ * @param {object[]} preserved - state events to keep, in original seq order.
+ * @returns {object[]} the surface with state events merged back in.
+ */
+function mergeStateEvents(out, marks, preserved) {
+  if (preserved.length === 0) return out
+  const boundaries = [...marks.entries()].sort((left, right) => left[0] - right[0])
+  const buckets = new Map()
+  for (const event of preserved) {
+    let at = out.length
+    for (const [seq, index] of boundaries) {
+      if (seq > event.seq) {
+        at = index
+        break
+      }
+    }
+    const bucket = buckets.get(at)
+    if (bucket === undefined) buckets.set(at, [event])
+    else bucket.push(event)
+  }
+  const merged = []
+  const pushBucket = (index) => {
+    const bucket = buckets.get(index)
+    if (bucket === undefined) return
+    for (const event of bucket) merged.push({ seq: 0, type: event.type, time: event.time, data: event.data })
+  }
+  for (let index = 0; index < out.length; index += 1) {
+    pushBucket(index)
+    merged.push(out[index])
+  }
+  pushBucket(out.length)
+  return merged
+}
+
+/**
  * Rebuild a log from the surface the model reads.
  *
  * Picking events out of the old log is what kept failing: every repair exposed
@@ -356,12 +473,21 @@ export async function applyFlatten(logFile, config) {
  * every tool result sits in the turn of its call, and no replace or compaction
  * record survives.
  *
+ * Events in {@link PRESERVED_STATE_TYPES} are re-inserted at their original
+ * position relative to the surface, so a goal snapshot still precedes the round
+ * it admits (and a later edit/clear still follows the rounds it follows today).
+ *
  * @param {object[]} events - the session's events.
  * @returns {object[]} the rebuilt events, seqs assigned from 0.
  */
 export function rebuildSurface(events) {
   const visible = foldSurface(events).visible ?? []
   const bySeq = new Map(events.map((event) => [event.seq, event]))
+  const preserved = events.filter((event) => PRESERVED_STATE_TYPES.has(String(event.type ?? '')))
+  // Output index at which each visible source event starts; state events are
+  // merged back in front of the first visible event that originally followed
+  // them.
+  const marks = new Map()
   const headers = events.filter((event) => event.type === 'request/header')
   const headerBefore = (seq) => {
     let found = null
@@ -466,6 +592,7 @@ export function rebuildSurface(events) {
     if (consumed.has(seq)) continue
     const event = bySeq.get(seq)
     if (event === undefined) continue
+    marks.set(seq, out.length)
     advance(event)
     const data = event.data ?? {}
     const message = data.message ?? data
@@ -484,12 +611,12 @@ export function rebuildSurface(events) {
         out.push({ seq: 0, type: 'request/header', time: clock, data: header.data })
         next.headerSeq = headerIndex
       }
-      out.push({ seq: 0, type: event.type, time: clock, data: next, surfaceOp: 'append' })
+      out.push({ seq: 0, type: event.type, time: ownTime(event), data: next, surfaceOp: 'append' })
       continue
     }
     if (role === 'user' || event.type === 'user/message') {
       openTurn(header)
-      out.push({ seq: 0, type: event.type, time: clock, data: { ...message, turn }, surfaceOp: 'append' })
+      out.push({ seq: 0, type: event.type, time: ownTime(event), data: { ...message, turn }, surfaceOp: 'append' })
       continue
     }
     if (!open) openTurn(header)
@@ -517,14 +644,14 @@ export function rebuildSurface(events) {
     // without it the format layer reads the row as a fork result and refuses it.
     if (data.error !== undefined) payload.error = data.error
     if (event.type === 'tool/call') payload.callId = data.callId
-    out.push({ seq: 0, type: event.type, time: clock, data: payload, surfaceOp: 'append' })
+    out.push({ seq: 0, type: event.type, time: ownTime(event), data: payload, surfaceOp: 'append' })
     // A tool call is announced by its assistant message and "started" by a
     // tool/call event; without that event the result looks like a tool that
     // never ran, and the format layer demands the TOOL_NOT_STARTED repair.
     if (event.type === 'assistant/message' && Array.isArray(message?.content)) {
       for (const block of message.content) {
         if (block === null || block === undefined || block.type !== 'tool-call' || !answered.has(block.id)) continue
-        out.push({ seq: 0, type: 'tool/call', time: clock, data: { turn, step, callId: block.id, name: block.name, arguments: block.arguments } })
+        out.push({ seq: 0, type: 'tool/call', time: ownTime(event), data: { turn, step, callId: block.id, name: block.name, arguments: block.arguments } })
         // The model reads a call and its result together; a result that arrived
         // many steps later would otherwise leave the step that advertised the
         // call unresolved, which the format layer refuses.
@@ -540,7 +667,8 @@ export function rebuildSurface(events) {
     }
   }
   closeTurn()
-  const rebuilt = out.map((event, index) => ({ ...event, seq: index }))
+  const merged = mergeStateEvents(out, marks, preserved)
+  const rebuilt = merged.map((event, index) => ({ ...event, seq: index }))
   // A fork result encodes the sequence it was appended at inside its identity
   // (`forked-tool-result-<callId>-<seq>`); renumbering has to follow, or the host
   // reads the row as a replacement that names a sequence it does not have.

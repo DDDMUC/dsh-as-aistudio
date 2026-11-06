@@ -1,6 +1,6 @@
 // dsh-log-trim host half (dsh-log-trim.js), VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-log-trim/lib/index.js  (v0.7.0, sha256 49dcb38f01b7c751)
+// Source: ../dsh-log-trim/lib/index.js  (v0.7.1, sha256 906bd2b437e569b4)
 // Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.
 //
 // src/shell.js imports the copy named after the component, which is why the
@@ -37,13 +37,14 @@ import { discoverRoots, isCurrentLog, listLegacy } from './dsh-log-trim.roots.js
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { applyTrim, foldSurface, isSessionLocked, keepLastWindows, readLogAsync, renumber, windowsOf } from './dsh-log-trim.vendor.compact-session.mjs'
+import { applyTrim, commitTrim, encodeLogAsync, foldSurface, isSessionLocked, keepLastWindows, readLogAsync, renumber, windowsOf } from './dsh-log-trim.vendor.compact-session.mjs'
 import { applyFlatten, applyLossless, applyStreamOnly, planLossless, applyRebuild } from './dsh-log-trim.lossless.js'
+import { orphanGoalRounds, stripOrphanGoalSources } from './dsh-log-trim.goal-repair.js'
 import { readLedger, recordFor } from './dsh-log-trim.ledger.js'
 
 export const name = 'dsh-log-trim'
 export const PLUGIN_ID = name
-export const PLUGIN_VERSION = '0.7.0'
+export const PLUGIN_VERSION = '0.7.1'
 export const ROUTE_PREFIX = '/api/dsh-log-trim'
 
 /**
@@ -343,6 +344,125 @@ export async function repairIfCorrupt(logFile, config) {
     }
   }
   return { sessionId: path.basename(path.dirname(logFile)), reason: detail, failed: true }
+}
+
+/**
+ * `<DSH_HOME>` for one session log, so the projection cache can be addressed.
+ *
+ * @param {string} logFile - the session's log.
+ * @param {object} config - resolved config (`sessionsRoot`).
+ * @returns {string} the DSH home directory.
+ */
+function dshHomeOf(logFile, config) {
+  const root = typeof config?.sessionsRoot === 'string' ? path.resolve(config.sessionsRoot) : null
+  const file = path.resolve(logFile)
+  if (root !== null && file.startsWith(root + path.sep)) return path.dirname(root)
+  // <home>/sessions/<workspace>/<session>/<log>
+  return path.dirname(path.dirname(path.dirname(path.dirname(file))))
+}
+
+/**
+ * Forget one session's durable projection cache record.
+ *
+ * The record's identity is the session header, not the log bytes, and its rows
+ * keep a checkpoint seq plus the values folded from it. A cached `goal` row that
+ * already carries the replay failure would therefore be restored verbatim after
+ * the log was repaired — the failure would outlive the fix. Deleting the record
+ * makes the next load fold from seq 0.
+ *
+ * @param {string} logFile - the session's log.
+ * @param {object} config - resolved config.
+ * @returns {string[]|null} removed cache file names, or null when there was none.
+ */
+export function dropProjectionCache(logFile, config) {
+  const sessionId = path.basename(path.dirname(path.resolve(logFile)))
+  const dir = path.join(dshHomeOf(logFile, config), 'storages', 'session_projcache', 'sessions')
+  let names
+  try {
+    names = fs.readdirSync(dir)
+  } catch {
+    return null
+  }
+  const bare = sessionId.replace(/^session-/, '')
+  const doomed = names.filter(
+    (name) => name.endsWith('.json') && (name === `${sessionId}.json` || name === `${bare}.json`),
+  )
+  const removed = []
+  for (const name of doomed) {
+    try {
+      fs.rmSync(path.join(dir, name), { force: true })
+      removed.push(name)
+    } catch {
+      // 删不掉就留着：下次启动还会再试一次。
+    }
+  }
+  return removed.length === 0 ? null : removed
+}
+
+/**
+ * 修好被重写路径弄丢目标的会话。
+ *
+ * `goal/change` 不是表面事件：它没有 surfaceOp，只是恰好落在某次 replace 的
+ * 区间里（或整份日志按表面重建时），就会被裁剪/重写顺手删掉；而目标轮次是普通
+ * 的 `user/message`，作为表面节点留了下来。这种日志能通过宿主的格式校验（格式层
+ * 不懂目标语义），但目标投影回放时会整份报错：
+ *
+ *   goal replay failed at session event N: goal round at session event N is not
+ *   the next admitted round of the active goal
+ *
+ * 之后 `/goal` 在该会话里永久失败（`command.execute failed`）。删掉的快照找不
+ * 回来，所以修复只做一件不发明任何东西的事：把这些已经指向不存在目标的轮次改回
+ * 普通用户消息（内容、seq 都不动），目标投影随之清空，`/goal` 可以重新开。顺带
+ * 删掉该会话的投影缓存，否则缓存里的 failure 行会被当成检查点继续复用。
+ *
+ * @param {string} logFile - 会话日志。
+ * @param {object} config - 生效配置。
+ * @returns {Promise<object|null>} 修了什么；没有孤儿轮次时返回 null。
+ */
+export async function repairOrphanGoalRounds(logFile, config) {
+  if (isSessionLocked(logFile)) return null
+  const original = await readLogAsync(logFile)
+  const orphans = orphanGoalRounds(original.events)
+  if (orphans.length === 0) return null
+  const repaired = stripOrphanGoalSources(original.events, orphans)
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+  const backup = `${logFile}.precompact-${stamp}`
+  const staging = `${logFile}.staging-${stamp}`
+  await fs.promises.writeFile(staging, await encodeLogAsync(original.header, repaired))
+  const { verifyLog } = await import('./dsh-log-trim.verify-session-log.mjs')
+  const verified = await verifyLog(staging)
+  if (!verified.ok) {
+    await fs.promises.rm(staging, { force: true })
+    const failed = (verified.checks || []).filter((check) => !check.ok).slice(0, 3)
+    throw new Error(
+      '目标轮次修复结果没通过宿主校验，未写入：' +
+        failed.map((check) => check.name + '：' + check.detail).join('；'),
+    )
+  }
+  const afterBytes = fs.statSync(staging).size
+  const summary = await commitTrim({
+    staging,
+    backup,
+    summary: {
+      backup,
+      before: { events: original.events.length, bytes: original.compressedBytes },
+      after: { events: repaired.length, bytes: afterBytes },
+      dropped: 0,
+    },
+  }, logFile)
+  const cache = dropProjectionCache(logFile, config)
+  recordFor(logFile, 'goal-repair', original.events, repaired, {
+    bytesBefore: original.compressedBytes,
+    bytesAfter: summary.after.bytes,
+    record: config?.recordLedger !== false,
+  })
+  return {
+    sessionId: path.basename(path.dirname(logFile)),
+    reason: `丢掉目标快照的轮次改回普通消息（${orphans.length} 条）`,
+    orphans: orphans.length,
+    backup: backup.slice(backup.lastIndexOf('.precompact-') + 1),
+    cache,
+  }
 }
 
 export function listBackups(root, limit = 40) {
@@ -851,14 +971,39 @@ export async function runScan(config, logger = {}) {
       known.size === bytes &&
       known.mtimeMs === mtimeMs
     ) {
-      // Same bytes, same mtime: the answer cannot have changed.
+      // Same bytes, same mtime: the answer cannot have changed — except the goal
+      // repair, which older verdicts never ran. Do it once per file revision.
       remember[logFile] = known
+      if (known.goalChecked !== true && config.repairOnBoot !== false && bytes >= 64 * 1024) {
+        try {
+          const goalFixed = await repairOrphanGoalRounds(logFile, config)
+          if (goalFixed !== null) {
+            summary.repaired.push(goalFixed)
+            // 日志变了，旧判定作废；下一轮扫描按新文件重来。
+            continue
+          }
+        } catch (error) {
+          summary.failed.push({ sessionId, reason: `目标轮次修复失败：${error instanceof Error ? error.message : String(error)}` })
+        }
+        known.goalChecked = true
+      }
       if (known.verdict === 'skip') {
         summary.skipped.push({ sessionId, reason: known.reason })
       } else if (known.verdict === 'fail') {
         summary.failed.push({ sessionId, reason: known.reason })
       }
       continue
+    }
+    // 宿主的格式校验管不到目标语义：被重写过的日志能正常打开，却可能只剩目标轮次
+    // 而没有 goal/change，于是 /goal 永远报 "goal replay failed ... not the next
+    // admitted round"。这一步先把它修好；小日志不可能积累出一整段目标轮次，跳过。
+    if (config.repairOnBoot !== false && bytes >= 64 * 1024) {
+      try {
+        const goalFixed = await repairOrphanGoalRounds(logFile, config)
+        if (goalFixed !== null) summary.repaired.push(goalFixed)
+      } catch (error) {
+        summary.failed.push({ sessionId, reason: `目标轮次修复失败：${error instanceof Error ? error.message : String(error)}` })
+      }
     }
     // 先折叠：edit/rerun/delete 的载体是“注释行”，落成正文后日志才是“本来如此”。
     // 折叠完继续往下走，于是同一份日志还能顺带被裁窗口（两步都各自验过才写）。
