@@ -1,6 +1,6 @@
 // dsh-log-trim host half (dsh-log-trim.vendor.compact-session.mjs), VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-log-trim/lib/vendor.compact-session.mjs  (v0.7.1, sha256 0f27c0d30c2c8215)
+// Source: ../dsh-log-trim/lib/vendor.compact-session.mjs  (v0.7.2, sha256 0f27c0d30c2c8215)
 // Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.
 //
 // src/shell.js imports the copy named after the component, which is why the

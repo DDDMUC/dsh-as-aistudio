@@ -1,6 +1,6 @@
 // dsh-log-trim host half (dsh-log-trim.lossless.js), VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-log-trim/lib/lossless.js  (v0.7.1, sha256 1b98a61bbad8ef87)
+// Source: ../dsh-log-trim/lib/lossless.js  (v0.7.2, sha256 7e8478a2fd2ec10b)
 // Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.
 //
 // src/shell.js imports the copy named after the component, which is why the
@@ -488,6 +488,9 @@ export function rebuildSurface(events) {
   // merged back in front of the first visible event that originally followed
   // them.
   const marks = new Map()
+  // 每条源事件真正的消息行下标：marks 指向“块起点”（turn/start 等），引用类字段
+  // （promptSeq / logFrom / 标题 messageSeqs）必须指向消息行本身。
+  const rowIndexBySeq = new Map()
   const headers = events.filter((event) => event.type === 'request/header')
   const headerBefore = (seq) => {
     let found = null
@@ -536,10 +539,26 @@ export function rebuildSurface(events) {
     return clock
   }
   const ownTime = (event) => (Number.isSafeInteger(event?.time) ? event.time : clock)
-  for (const type of ['agent-preset/selected', 'permission/preset', 'sandbox/mode', 'approval/policy', 'session/title', 'model/selection']) {
+  for (const type of ['agent-preset/selected', 'permission/preset', 'sandbox/mode', 'approval/policy', 'model/selection']) {
     const event = lastOf(type)
     if (event !== undefined) out.push({ seq: 0, type, time: ownTime(event), data: event.data })
   }
+  // 标题要引用「更早的事件」，所以不能放在 head：重建时先记下来，最后再追加。
+  const titleEvent = lastOf('session/title')
+  // 工具定义表：`tool-addition` 通知引用的 header 必须**恰好**定义它点名的那一个工具。
+  // 原日志里每个 header 带的是当轮全部工具，直接复制下来会 0 个或 N 个匹配，格式层拒收。
+  const toolDefinitions = new Map()
+  for (const event of events) {
+    if (event.type !== 'request/header') continue
+    const tools = event.data?.header?.tools
+    if (!Array.isArray(tools)) continue
+    for (const tool of tools) {
+      if (tool && typeof tool.name === 'string') toolDefinitions.set(tool.name, tool)
+    }
+  }
+  // `mergeStateEvents` 会往 out 里插行，插完后面的下标就变了；headerSeq 必须
+  // 在合并之后按最终位置回填，否则会指向别的行。
+  const pendingHeaderSeqs = []
   let turn = 0
   let step = 0
   let open = false
@@ -599,24 +618,39 @@ export function rebuildSurface(events) {
     const role = message !== null && typeof message === 'object' ? message.role : undefined
     const header = headerBefore(event.seq)
     if (event.type === 'system/message') continue
+    // 标题统一在最后重写（引用必须更早）；这里不再原样复制一份。
+    if (event.type === 'session/title') continue
     if (event.type === 'developer/message') {
       if (!open) openTurn(header)
       if (!stepOpen) openStep(typeof data.step === 'number' ? data.step : null)
       const next = { turn, step, message }
       const addsTools =
         Array.isArray(message?.content) && message.content.some((part) => part?.type === 'tool-addition')
-      if (event.type === 'developer/message' && addsTools && header !== null) {
-        // A tool-addition notice names the header that introduced that tool.
-        headerIndex = out.length
-        out.push({ seq: 0, type: 'request/header', time: clock, data: header.data })
-        next.headerSeq = headerIndex
+      if (event.type === 'developer/message' && addsTools) {
+        // 通知必须引用一个「恰好定义它点名的工具」的 header：从定义表里取，
+        // 凑不齐就干脆不写 headerSeq（格式层只在有 headerSeq 时才校验）。
+        const names = [...new Set(message.content.filter((part) => part?.type === 'tool-addition' && typeof part.toolName === 'string').map((part) => part.toolName))]
+        const definitions = names.map((name) => toolDefinitions.get(name)).filter((definition) => definition !== undefined)
+        if (header !== null && definitions.length === names.length && names.length > 0) {
+          const data2 = { ...header.data, header: { ...header.data.header, tools: definitions } }
+          const headerRow = { seq: 0, type: 'request/header', time: clock, data: data2 }
+          headerIndex = out.length
+          out.push(headerRow)
+          next.headerSeq = headerIndex
+          pendingHeaderSeqs.push({ data: next, row: headerRow })
+        }
       }
+      rowIndexBySeq.set(event.seq, out.length)
       out.push({ seq: 0, type: event.type, time: ownTime(event), data: next, surfaceOp: 'append' })
       continue
     }
     if (role === 'user' || event.type === 'user/message') {
       openTurn(header)
-      out.push({ seq: 0, type: event.type, time: ownTime(event), data: { ...message, turn }, surfaceOp: 'append' })
+      // 扁平载荷把 source 放在 data 上；嵌套载荷（data.message）要把它补回去，
+      // 否则 kind / promptSeq / rerun 归属全丢，标题也没法引用它。
+      const extra = data.source !== undefined && message.source === undefined ? { source: data.source } : {}
+      rowIndexBySeq.set(event.seq, out.length)
+      out.push({ seq: 0, type: event.type, time: ownTime(event), data: { ...message, ...extra, turn }, surfaceOp: 'append' })
       continue
     }
     if (!open) openTurn(header)
@@ -644,6 +678,8 @@ export function rebuildSurface(events) {
     // without it the format layer reads the row as a fork result and refuses it.
     if (data.error !== undefined) payload.error = data.error
     if (event.type === 'tool/call') payload.callId = data.callId
+    if (data.source !== undefined) payload.source = data.source
+    rowIndexBySeq.set(event.seq, out.length)
     out.push({ seq: 0, type: event.type, time: ownTime(event), data: payload, surfaceOp: 'append' })
     // A tool call is announced by its assistant message and "started" by a
     // tool/call event; without that event the result looks like a tool that
@@ -668,6 +704,68 @@ export function rebuildSurface(events) {
   }
   closeTurn()
   const merged = mergeStateEvents(out, marks, preserved)
+  // `source.promptSeq` 指向「这一轮是由哪条 prompt 触发的」，格式层要求它更早。
+  // 重建后 seq 全变了，按源 seq → 原下标 → 合并后下标 映射回来；映射不到的删掉，
+  // 否则整份日志会被交叉引用检查拒绝。
+  const outToMerged = new Map()
+  for (let index = 0; index < out.length; index += 1) outToMerged.set(out[index], index)
+  for (let index = 0; index < merged.length; index += 1) {
+    const row = merged[index]
+    const rowOutIndex = outToMerged.get(row)
+    if (rowOutIndex === undefined) continue
+    outToMerged.set(row, index)
+  }
+  const mergedIndexOfSourceSeq = (sourceSeq) => {
+    const outIndex = rowIndexBySeq.get(sourceSeq) ?? marks.get(sourceSeq)
+    if (outIndex === undefined) return undefined
+    return outToMerged.get(out[outIndex])
+  }
+  for (const row of merged) {
+    // 两种载荷形状都要处理：嵌套的 `data.message.source` 和扁平的 `data.source`
+    // （rerun / delete 留下的载体用的是后者）。
+    const sources = []
+    const message = row.data?.message
+    if (message !== null && typeof message === 'object' && message.source !== null && typeof message.source === 'object') sources.push(message.source)
+    if (row.data?.source !== null && typeof row.data?.source === 'object') sources.push(row.data.source)
+    for (const source of sources) {
+      for (const key of ['promptSeq', 'logFrom', 'logTo', 'rerunTurn', 'rerunTurnEnd', 'carrierSeq', 'targetSeq']) {
+        if (typeof source[key] !== 'number') continue
+        const mapped = mergedIndexOfSourceSeq(source[key])
+        const rowIndex = outToMerged.get(row)
+        if (mapped === undefined || (rowIndex !== undefined && mapped >= rowIndex)) delete source[key]
+        else source[key] = mapped
+      }
+    }
+  }
+  for (const pending of pendingHeaderSeqs) {
+    const at = merged.indexOf(pending.row)
+    if (at >= 0) pending.data.headerSeq = at
+    else delete pending.data.headerSeq
+  }
+  // 标题放在最后：它引用的 `messageSeqs` 必须是**更早**的 `user/message`（且来源是用户），
+  // 放在 head 时前面没有任何消息，怎么改都过不了格式层。
+  if (titleEvent !== undefined) {
+    const candidates = []
+    merged.forEach((row, index) => {
+      if (row.type !== 'user/message') return
+      if (row.data?.source?.kind !== 'user') return
+      candidates.push(index)
+    })
+    const isUserTitle = titleEvent.data?.source?.kind === 'user'
+    if (isUserTitle) {
+      // 用户自己的标题：messageSeqs 必须为空。
+      merged.push({ seq: 0, type: 'session/title', time: ownTime(titleEvent), data: { ...titleEvent.data, messageSeqs: [] } })
+    } else if (candidates.length > 0) {
+      // 自动标题：必须引用至少一条更早的 user/message。
+      const wanted = Math.max(1, Math.min(2, Array.isArray(titleEvent.data?.messageSeqs) ? titleEvent.data.messageSeqs.length : 1))
+      merged.push({
+        seq: 0,
+        type: 'session/title',
+        time: ownTime(titleEvent),
+        data: { ...titleEvent.data, messageSeqs: candidates.slice(-wanted) },
+      })
+    }
+  }
   const rebuilt = merged.map((event, index) => ({ ...event, seq: index }))
   // A fork result encodes the sequence it was appended at inside its identity
   // (`forked-tool-result-<callId>-<seq>`); renumbering has to follow, or the host
