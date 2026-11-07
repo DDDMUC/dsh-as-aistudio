@@ -9642,7 +9642,7 @@ window.__ModuleLoader__.load({
     const react = require('react')
     const { jsx, jsxs } = require('react/jsx-runtime')
 
-    const PLUGIN_VERSION = '0.7.8'
+    const PLUGIN_VERSION = '0.7.9'
     const ROUTE_PREFIX = '/api/dsh-log-trim'
 
     /** The knobs this card edits, in the order they are drawn. */
@@ -9690,7 +9690,7 @@ window.__ModuleLoader__.load({
         hint: '每次改写日志记一笔（窗口数 / 事件数 / 字节），写到 ~/.dsh/dsh-log-trim/ledger.json；dsh-session-pages 会读它显示，其它插件也能读。关掉就不记',
         kind: 'toggle',
       },
-      { key: 'minBytes', label: '最小日志体积', hint: '小于它就根本不读，默认 1 MB', min: 0, max: 200, step: 1, kind: 'mb' },
+      { key: 'minBytes', label: '最小日志体积', hint: '小于它就根本不读，默认 0.25 MB（256 KB）；可填小数，如 0.25 / 0.5', min: 0, max: 200, step: 0.25, kind: 'mb' },
       {
         key: 'backupKeep',
         label: '保留备份数',
@@ -9774,7 +9774,7 @@ window.__ModuleLoader__.load({
 
     /** One number input bound to a config key. */
     function NumberField({ field, value, onChange }) {
-      const shown = field.kind === 'ratio' ? Math.round(Number(value) * 100) : field.kind === 'mb' ? Math.round(Number(value) / 1048576) : Number(value)
+      const shown = field.kind === 'ratio' ? Math.round(Number(value) * 100) : field.kind === 'mb' ? Number((Number(value) / 1048576).toFixed(2)) : Number(value)
       return jsxs('label', {
         style: style.row,
         children: [
@@ -10168,7 +10168,7 @@ window.__ModuleLoader__.load({
     const NS = 'dsh-as-aistudio'
 
     /** Keep in sync with package.json and src/components.js. */
-    const PLUGIN_VERSION = '0.5.21'
+    const PLUGIN_VERSION = '0.5.22'
 
     /** Presence marker the live verifier reads. */
     const DEBUG_KEY = '__DSH_AS_AISTUDIO__'
