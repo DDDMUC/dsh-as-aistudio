@@ -1,6 +1,6 @@
 // dsh-log-trim host half (dsh-log-trim.vendor.compact-session.mjs), VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-log-trim/lib/vendor.compact-session.mjs  (v0.7.6, sha256 3df242c4e94bd6d9)
+// Source: ../dsh-log-trim/lib/vendor.compact-session.mjs  (v0.7.7, sha256 69e33224d92c2157)
 // Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.
 //
 // src/shell.js imports the copy named after the component, which is why the
@@ -2301,6 +2301,9 @@ export async function applyTrim(logFile, keep, options = {}) {
         if (retried.ok) return commitTrim(staged, logFile)
         fs.rmSync(staged.staging, { force: true })
         const bad = retried.checks.filter((check) => !check.ok).map((check) => `${check.name} ${check.detail}`).join('；')
+        // 两次都不过：如果退回后本来就“不需要裁”，那是这份日志结构不适合丢前缀，
+        // 当成跳过而不是失败（扫描不该因为收益型优化失败而报错）。
+        if (String(bad).includes('不需要裁')) throw new Error('不需要裁（前缀清理在这份日志上过不了宿主校验）')
         throw new Error(`裁剪结果没通过宿主校验，未写入：${bad}`)
       }
       const bad = result.checks.filter((check) => !check.ok).map((check) => `${check.name} ${check.detail}`).join('；')

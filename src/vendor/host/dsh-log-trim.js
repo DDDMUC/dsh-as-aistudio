@@ -1,6 +1,6 @@
 // dsh-log-trim host half (dsh-log-trim.js), VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-log-trim/lib/index.js  (v0.7.6, sha256 78ee6ff182ff4b93)
+// Source: ../dsh-log-trim/lib/index.js  (v0.7.7, sha256 9c7bc26a51828b7b)
 // Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.
 //
 // src/shell.js imports the copy named after the component, which is why the
@@ -44,7 +44,7 @@ import { readLedger, recordFor } from './dsh-log-trim.ledger.js'
 
 export const name = 'dsh-log-trim'
 export const PLUGIN_ID = name
-export const PLUGIN_VERSION = '0.7.6'
+export const PLUGIN_VERSION = '0.7.7'
 export const ROUTE_PREFIX = '/api/dsh-log-trim'
 
 /**
@@ -623,7 +623,7 @@ export const DEFAULTS = {
   repairOnBoot: true,
   keepWindows: 2,
   minDroppableEvents: 500,
-  minBytes: 1048576,
+  minBytes: 262144,
   minRatio: 0.2,
   requireModelUnchanged: true,
   dryRun: false,
@@ -1004,9 +1004,10 @@ export async function runScan(config, logger = {}) {
         continue
       }
     }
-    // A log smaller than `minBytes` cannot hold four windows, and reading it out
-    // is the expensive half of a scan: 94 sessions took 68 s when every one was
-    // decoded, and almost all of them are tiny.
+    // A log smaller than `minBytes` is not worth decoding: reading it out is the
+    // expensive half of a scan. It used to be 1 MB on the assumption that four
+    // windows cannot fit below that - but three windows fit in 775 KB, so the
+    // gate now sits at 256 KB.
     let bytes = 0
     try {
       bytes = fs.statSync(logFile).size
@@ -1015,7 +1016,7 @@ export async function runScan(config, logger = {}) {
       continue
     }
     if (bytes < config.minBytes) {
-      summary.skipped.push({ sessionId, reason: `只有 ${Math.round(bytes / 1024)} KB，不可能有 4 个窗口` })
+      summary.skipped.push({ sessionId, reason: `只有 ${Math.round(bytes / 1024)} KB，低于最小体积阈值 ${Math.round(config.minBytes / 1024)} KB` })
       continue
     }
     let mtimeMs = 0
@@ -1115,7 +1116,9 @@ export async function runScan(config, logger = {}) {
           mtimeMs = stat.mtimeMs
         }
       } catch (error) {
-        summary.failed.push({ sessionId, reason: `清理失败：${error instanceof Error ? error.message : String(error)}` })
+        const text = error instanceof Error ? error.message : String(error)
+        if (text.includes('不需要裁')) summary.skipped.push({ sessionId, reason: text })
+        else summary.failed.push({ sessionId, reason: `清理失败：${text}` })
         continue
       }
     }
