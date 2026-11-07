@@ -1,6 +1,6 @@
 // dsh-log-trim host half (dsh-log-trim.js), VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-log-trim/lib/index.js  (v0.7.7, sha256 9c7bc26a51828b7b)
+// Source: ../dsh-log-trim/lib/index.js  (v0.7.8, sha256 860ac9d48e3492d3)
 // Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.
 //
 // src/shell.js imports the copy named after the component, which is why the
@@ -44,7 +44,7 @@ import { readLedger, recordFor } from './dsh-log-trim.ledger.js'
 
 export const name = 'dsh-log-trim'
 export const PLUGIN_ID = name
-export const PLUGIN_VERSION = '0.7.7'
+export const PLUGIN_VERSION = '0.7.8'
 export const ROUTE_PREFIX = '/api/dsh-log-trim'
 
 /**
@@ -1271,7 +1271,10 @@ export async function runScan(config, logger = {}) {
         prunedBackups: pruned,
       })
     } catch (error) {
-      summary.failed.push({ sessionId, reason: error instanceof Error ? error.message : String(error) })
+      const text = error instanceof Error ? error.message : String(error)
+      // “不需要裁”是判定，不是故障；前缀清理失败退回后也长这样，记成跳过。
+      if (text.includes('不需要裁')) summary.skipped.push({ sessionId, reason: text })
+      else summary.failed.push({ sessionId, reason: text })
     }
   }
   if (!config.dryRun) writeMemory(remember)
