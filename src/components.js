@@ -26,7 +26,7 @@
 export const STUDIO_ID = 'dsh-as-aistudio'
 
 /** Keep in sync with package.json and src/client.js. */
-export const STUDIO_VERSION = '0.5.22'
+export const STUDIO_VERSION = '0.5.23'
 
 /**
  * The AI Studio action strip this studio composes, in the order the user meets
