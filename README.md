@@ -1,5 +1,12 @@
 # dsh-as-aistudio
 
+<p align="center">
+  <a href="https://www.npmjs.com/package/dsh-as-aistudio"><img alt="npm version" src="https://img.shields.io/npm/v/dsh-as-aistudio?color=4d6bfe"></a>
+  <a href="https://www.npmjs.com/package/dsh-as-aistudio"><img alt="npm downloads" src="https://img.shields.io/npm/dw/dsh-as-aistudio"></a>
+  <a href="https://github.com/DDDMUC/dsh-as-aistudio/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/DDDMUC/dsh-as-aistudio?color=eac54f"></a>
+  <a href="LICENSE"><img alt="license" src="https://img.shields.io/npm/l/dsh-as-aistudio"></a>
+</p>
+
 **把 DeepSeek Harness 用成 Google AI Studio —— 一轮对话就是一个可以反复打磨的 prompt playground，而且插件列表里只占一行。** 改一句提示词并重跑、原位重跑某条回复、把不该留下的那一轮从模型上下文里删掉、让发出的提示词按 Markdown 渲染。
 
 [中文](#中文) · [English](#english)
