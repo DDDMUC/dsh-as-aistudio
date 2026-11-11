@@ -7,7 +7,9 @@
   <a href="LICENSE"><img alt="license" src="https://img.shields.io/npm/l/dsh-as-aistudio"></a>
 </p>
 
-如果这个项目对你有帮助，欢迎点个 ⭐ Star 支持一下。
+> ⭐ **如果这个项目对你有帮助，欢迎点个 Star 支持一下。**
+>
+> ⭐ **If you find this project useful, a star is appreciated.**
 
 **把 DeepSeek Harness 用成 Google AI Studio —— 一轮对话就是一个可以反复打磨的 prompt playground，而且插件列表里只占一行。** 改一句提示词并重跑、原位重跑某条回复、把不该留下的那一轮从模型上下文里删掉、让发出的提示词按 Markdown 渲染。
 
