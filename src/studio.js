@@ -60,7 +60,7 @@ window.__ModuleLoader__.load({
     const STATUS_ROUTE = '/api/dsh-as-aistudio/status'
 
     /** The four vendored factory names, in mount order. */
-    const VENDORED = ['dsh-edit-turn', 'dsh-rerun-turn', 'dsh-delete-turn', 'dsh-markdown-bubble']
+    const VENDORED = ['dsh-edit-turn', 'dsh-rerun-turn', 'dsh-delete-turn', 'dsh-markdown-bubble', 'dsh-log-trim', 'dsh-fork-anywhere']
 
     /**
      * Which components export a settings card, and under what name.
@@ -85,7 +85,7 @@ window.__ModuleLoader__.load({
       tab: 'AI Studio',
       heading: 'AI Studio 组件',
       intro:
-        '这些组件就是 AI Studio 式的一轮循环：改提示词并重跑、原位重跑、删掉这一轮，把发出的提示词按 Markdown 渲染，再加上会话日志的启动维护。五个都是独立插件，单独安装也能用，任意子集都能共存。这个面板显示它们各自的实际状态。',
+        '这些组件就是 AI Studio 式的一轮循环：改提示词并重跑、原位重跑、删掉这一轮，把发出的提示词按 Markdown 渲染，在任意位置分叉，再加上会话日志的启动维护。六个都是独立插件，单独安装也能用，任意子集都能共存。这个面板显示它们各自的实际状态。',
       statusMounted: '已启用',
       statusInstalled: '已安装，宿主未挂载',
       statusMissing: '未安装',
@@ -105,7 +105,7 @@ window.__ModuleLoader__.load({
       interopHide: '行隐藏归属属性（别人声明的隐藏，我不能清掉）',
       host: '宿主 DSH {version}',
       hostUnknown: '宿主版本未知',
-      note: '五个组件由这个包的五个补丁行挂载（dsh-as-aistudio/edit、…/trim 等），插件列表里仍然只有 AI Studio 一行；它们仍是独立 npm 包，单独安装时自己出现一行。宿主未挂载的组件不会画到界面上。',
+      note: '六个组件由这个包的六个补丁行挂载（dsh-as-aistudio/edit、…/fork、…/trim 等），插件列表里仍然只有 AI Studio 一行；它们仍是独立 npm 包，单独安装时自己出现一行。宿主未挂载的组件不会画到界面上。',
       summaryShort: '改词重跑 · 原位重跑 · 删这一轮 · 提示词渲染 Markdown · 日志裁剪',
       settingsHeading: '组件设置',
     }
@@ -114,7 +114,7 @@ window.__ModuleLoader__.load({
       tab: 'AI Studio',
       heading: 'AI Studio components',
       intro:
-        'These components are the AI Studio loop for a turn: revise a prompt and re-run it, re-run a reply in place, delete the turn, render sent prompts as Markdown, and keep session logs trimmed at boot. All five are independent plugins that also work alone, and any subset coexists. This panel shows what each one is actually doing.',
+        'These components are the AI Studio loop for a turn: revise a prompt and re-run it, re-run a reply in place, delete the turn, render sent prompts as Markdown, fork anywhere, and keep session logs trimmed at boot. All six are independent plugins that also work alone, and any subset coexists. This panel shows what each one is actually doing.',
       statusMounted: 'Enabled',
       statusInstalled: 'Installed, host not mounted',
       statusMissing: 'Not installed',
@@ -134,7 +134,7 @@ window.__ModuleLoader__.load({
       interopHide: 'Row-hide ownership attributes (a foreign hide is never cleared)',
       host: 'host DSH {version}',
       hostUnknown: 'host version unknown',
-      note: 'The five components are mounted by the five patch rows of this package (dsh-as-aistudio/edit, .../trim and friends), so the plugin list still shows only AI Studio; they remain independent npm packages that show their own row when installed standalone. A component whose host half is not mounted is not drawn at all.',
+      note: 'The six components are mounted by the six patch rows of this package (dsh-as-aistudio/edit, .../fork, .../trim and friends), so the plugin list still shows only AI Studio; they remain independent npm packages that show their own row when installed standalone. A component whose host half is not mounted is not drawn at all.',
       summaryShort: 'revise and re-run, re-run in place, delete the turn, render prompts as Markdown, trim session logs',
       settingsHeading: 'Component settings',
     }
@@ -159,6 +159,10 @@ window.__ModuleLoader__.load({
       'dsh-log-trim': {
         zh: { title: '会话日志裁剪', pitch: '启动时裁掉模型看不到的旧窗口、清空逐块回放、折叠编辑痕迹；写盘前过九项校验。' },
         en: { title: 'Session log trim', pitch: 'At boot: drop invisible windows, clear streaming replay, fold edit/rerun/delete traces — validated before writing.' },
+      },
+      'dsh-fork-anywhere': {
+        zh: { title: '任意位置分叉', pitch: '在你发出的任意一条消息、或任意一个压缩检查点上分叉会话。' },
+        en: { title: 'Fork anywhere', pitch: 'Fork the session at any sent message, or at any compaction checkpoint.' },
       },
     }
 

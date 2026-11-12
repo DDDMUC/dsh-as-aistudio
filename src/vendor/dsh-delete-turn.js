@@ -1,6 +1,6 @@
 // dsh-delete-turn browser half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-delete-turn/src/client.js  (v0.2.5, sha256 d28c22f00a4de73f)
+// Source: ../dsh-delete-turn/src/client.js  (v0.2.6, sha256 8f10302ae6cbd608)
 // Regenerate with `npm run vendor`; test/vendor-sync.test.js fails when this is stale.
 //
 // The component registers its factory with the host module loader; inside this
@@ -451,6 +451,22 @@ export default (require) => {
           })
         this.inflight = pending
         return pending
+      }
+
+      /**
+       * 撤回一条还没落盘的排队消息（宿主的输入队列）。
+       *
+       * @param {string} key - 行的 flow key。
+       * @returns {Promise<void>} 撤回完成。
+       */
+      async recallQueue(key) {
+        const response = await fetch(`${ROUTE_PREFIX}/queue-remove`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ sessionId: this.sessionId, key }),
+        })
+        const data = await response.json().catch(() => ({}))
+        if (!response.ok || !data.ok) throw new Error(data && data.error ? String(data.error) : `HTTP ${response.status}`)
       }
 
       // Entering/leaving multi-select. Leaving drops the selection, so a later
@@ -1163,6 +1179,42 @@ export default (require) => {
     const CONTENT_KINDS = new Set(['user', 'context', 'steering', 'tool-call', 'assistant-step'])
     const DISCLOSURE_KINDS = new Set(['turn-error', 'model-retry', 'turn-tail', 'turn-process'])
 
+    /** 调试开关：`localStorage['dsh-delete-turn:debug'] = '1'` 时打印跳过原因。 */
+    function debugOn() {
+      try {
+        return typeof localStorage !== 'undefined' && localStorage.getItem('dsh-delete-turn:debug') === '1'
+      } catch {
+        return false
+      }
+    }
+
+    const debugSeen = new Set()
+
+    /**
+     * 打一条「这行为什么没有删除入口」的诊断；同一个 key 只打一次。
+     *
+     * @param {string} key - flow key。
+     * @param {Element} row - 行元素。
+     * @param {string} reason - 原因。
+     */
+    function debugSkip(key, row, reason) {
+      if (!debugOn()) return
+      const stamp = key + '|' + reason
+      if (debugSeen.has(stamp)) return
+      debugSeen.add(stamp)
+      try {
+        console.info('[dshdt] skip', {
+          reason,
+          key,
+          flowKind: row.getAttribute('data-chat-flow-kind'),
+          turn: row.getAttribute('data-chat-turn'),
+          text: String(row.innerText ?? '').slice(0, 24),
+        })
+      } catch {
+        // console 不可用就算了。
+      }
+    }
+
     const UUID_PATTERN = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi
     const USERISH_FLOW_KINDS = new Set(['user', 'steering', 'context'])
 
@@ -1238,6 +1290,14 @@ export default (require) => {
           if (userish) node = nodeFromKey(key, view)
         }
         if (!node) {
+          const flowKindName = row.getAttribute('data-chat-flow-kind')
+          const pendingUserish = flowKindName === null || flowKindName === '' || USERISH_FLOW_KINDS.has(flowKindName)
+          if (pendingUserish) {
+            debugSkip(key, row, 'queued')
+            injectQueueAction(row, key, controller)
+            continue
+          }
+          debugSkip(key, row, 'no-node')
           // Process group rows carry a composite key ("["process", memberKey,
           // part]") and wrap ordinary member nodes. Hide the group together
           // with its anchor member, so deleting a turn's content leaves no
@@ -1274,7 +1334,10 @@ export default (require) => {
           deletable && turnTargetFor(node) !== null && view.turnSeqs.has(target.seq) ? liveTarget(turnTargetFor(node), view.edits) : null
         const pickTarget = target !== null ? target : deletable ? replyPick : null
         if (deletable && pickTarget !== null) injectRowAction(row, node, target, turnTarget, view, controller, t, pickTarget)
-        else removeRowAction(row)
+        else {
+          removeRowAction(row)
+          debugSkip(key, row, hidden ? 'hidden' : target === null ? 'no-target' : !covered ? 'not-covered' : 'not-deletable')
+        }
         if (deletable && target !== null && turnTarget !== null) row.dataset.dshdtTurn = '1'
         else delete row.dataset.dshdtTurn
         if (!hidden && covered && !rowDeletable(node, seqs, view)) row.dataset.dshdtNoTarget = '1'
@@ -1296,6 +1359,45 @@ export default (require) => {
       // session), refresh it so the ledger and the gates stay current.
       if (view.surfaceReady && maxSeq > view.surfaceThrough) controller.requestRefresh()
       updateTurnNavigation()
+    }
+
+    /**
+     * 给「宿主画了、日志里还没有」的行注入撤回入口。
+     *
+     * 这类行是输入队列里的待发消息：有官方复制，没有 seq。删除它们要调宿主的
+     * 队列接口，而不是写日志。
+     *
+     * @param {Element} row - 行元素。
+     * @param {string} key - flow key（含消息 id）。
+     * @param {object} controller - 控制器。
+     */
+    function injectQueueAction(row, key, controller) {
+      let host = row.querySelector('.dshdt-queue-host')
+      if (host === null) {
+        host = document.createElement('span')
+        host.className = 'dshdt-action-host dshdt-queue-host'
+        const button = document.createElement('button')
+        button.type = 'button'
+        button.className = 'dshdt-action dshdt-queue'
+        button.setAttribute('aria-label', '撤回排队消息')
+        button.title = '撤回排队消息'
+        button.innerHTML = ICON_MARKUP
+        if (typeof button.addEventListener === 'function') button.addEventListener('click', (event) => {
+          event.preventDefault()
+          event.stopPropagation()
+          void controller.recallQueue(key).then(
+            () => {
+              host.remove()
+              row.style.display = 'none'
+            },
+            () => {
+              button.title = '撤回失败：这条消息可能已经开始发送'
+            },
+          )
+        })
+        host.appendChild(button)
+        row.appendChild(host)
+      }
     }
 
     /** The turn a rail mark addresses: its label carries the real turn number. */

@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = join(here, '..')
-const ORDER = ['dsh-edit-turn', 'dsh-rerun-turn', 'dsh-delete-turn', 'dsh-markdown-bubble', 'dsh-log-trim']
+const ORDER = ['dsh-edit-turn', 'dsh-rerun-turn', 'dsh-delete-turn', 'dsh-markdown-bubble', 'dsh-log-trim', 'dsh-fork-anywhere']
 const CALL = 'window.__ModuleLoader__.load({'
 const checkOnly = process.argv.includes('--check')
 

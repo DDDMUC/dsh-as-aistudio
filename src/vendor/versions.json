@@ -1,7 +1,8 @@
 {
   "dsh-edit-turn": "0.5.24",
   "dsh-rerun-turn": "0.2.11",
-  "dsh-delete-turn": "0.2.5",
+  "dsh-delete-turn": "0.2.6",
   "dsh-markdown-bubble": "0.1.5",
-  "dsh-log-trim": "0.7.9"
+  "dsh-log-trim": "0.7.9",
+  "dsh-fork-anywhere": "0.1.0"
 }
