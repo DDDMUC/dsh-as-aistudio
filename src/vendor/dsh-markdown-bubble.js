@@ -1,6 +1,6 @@
 // dsh-markdown-bubble browser half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-markdown-bubble/src/client.js  (v0.1.6, sha256 c6cecc2380d83bc4)
+// Source: ../dsh-markdown-bubble/src/client.js  (v0.1.6, sha256 813caebe3e45fda7)
 // Regenerate with `npm run vendor`; test/vendor-sync.test.js fails when this is stale.
 //
 // The component registers its factory with the host module loader; inside this
@@ -37,47 +37,21 @@ export default (require) => {
     const LAYOUT_CSS = `
 /* Pro（模仿 Google AI Studio）：整条用户消息是一个和输入框同宽的圆角框——
    细边框、透明底，框内第一行是「User · 时:分」，正文在下面。 */
-html[data-dshmb-layout="full"] .dshmb-stack{max-width:100%!important;width:100%!important;align-items:stretch!important}
-html[data-dshmb-layout="full"] .dshmb-bubble{
+body[data-dshmb-layout="full"] .dshmb-stack{max-width:100%!important;width:100%!important;align-items:stretch!important}
+body[data-dshmb-layout="full"] .dshmb-bubble{
   display:block!important;
   width:100%!important;max-width:100%!important;
   box-sizing:border-box;
   background:transparent!important;
-  /* 静默态：只有顶上一条横线，没有框。 */
-  border:0!important;
-  /* 静默态也有 1px 的边框，只是颜色透明——这样悬浮时只过渡颜色，
-     不会出现「先黑后灰」的闪色，也不会因为突然多出 1px 而跳动。 */
-  border:1px solid transparent!important;
+  border:1px solid var(--dsw-alias-border-l2,rgba(16,24,40,.16))!important;
   border-radius:var(--dsw-radius-xl,16px)!important;
-  position:relative;
   padding:12px 16px!important;
   text-align:left!important;
-  transition:border-color .12s ease, border-radius .12s ease, box-shadow .12s ease;
 }
-
-/* 静默顶线：两端内收一个圆角半径，长度 == 悬浮框顶边的直线段。 */
-html[data-dshmb-layout="full"] .dshmb-bubble::before{
-  content:"";position:absolute;left:16px;right:16px;top:0;height:1px;
-  background:var(--dsw-alias-border-l2,rgba(16,24,40,.16));
-  transition:opacity .12s ease;
-}
-html[data-dshmb-layout="full"] [data-chat-flow-kind="user"]:hover .dshmb-bubble::before,
-html[data-dshmb-layout="full"] [data-chat-flow-kind="steering"]:hover .dshmb-bubble::before,
-html[data-dshmb-layout="full"] .dshmb-bubble:hover::before{opacity:0}
-
-/* 悬浮态：整框出现（四边 + 圆角），移开又只剩顶线。 */
-html[data-dshmb-layout="full"] [data-chat-flow-kind="user"]:hover .dshmb-bubble,
-html[data-dshmb-layout="full"] [data-chat-flow-kind="steering"]:hover .dshmb-bubble,
-html[data-dshmb-layout="full"] .dshmb-bubble:hover{
-  border-color:var(--dsw-alias-border-l2,rgba(16,24,40,.16))!important;
-  border-radius:var(--dsw-radius-xl,16px)!important;
-}
-html[data-dshmb-layout="full"] .dshmb-md{text-align:left!important}
-/* 框要「高」一点：正文照常排版，框底多留 20px 呼吸空间。 */
-html[data-dshmb-layout="full"] .dshmb-bubble{padding-bottom:20px!important}
-html[data-dshmb-layout="full"] .dshmb-attachments{justify-content:flex-start!important}
+body[data-dshmb-layout="full"] .dshmb-md{text-align:left!important}
+body[data-dshmb-layout="full"] .dshmb-attachments{justify-content:flex-start!important}
 /* 抬头：User · 03:06 */
-.dshmb-pro-head{display:flex;align-items:center;justify-content:space-between;gap:6px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary,#81858c);margin:0 0 6px}
+.dshmb-pro-head{display:flex;align-items:center;gap:6px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary,#81858c);margin:0 0 6px}
 .dshmb-pro-head b{font-weight:500;color:var(--dsw-alias-label-secondary,#4b5872)}
 `
 
@@ -105,8 +79,6 @@ html[data-dshmb-layout="full"] .dshmb-attachments{justify-content:flex-start!imp
       const who = document.createElement('b')
       who.textContent = row.getAttribute('data-chat-flow-kind') === 'steering' ? 'You' : 'User'
       head.appendChild(who)
-      // 本行的动作入口（编辑 / 重跑 / 删除）搬进抬头行右侧——只搬本行自己的，
-      // 绝不跨行，否则会像之前那样把上一行的删除按钮吸过来。
       bubble.insertBefore(head, bubble.firstChild)
     }
 
@@ -117,32 +89,6 @@ html[data-dshmb-layout="full"] .dshmb-attachments{justify-content:flex-start!imp
         decorateProHeader(row)
       }
     }
-
-    /** 本地缓存键：让下一帧之前就能知道外观，避免新消息先画成气泡再跳变。 */
-    const LAYOUT_CACHE_KEY = 'dsh-markdown-bubble:layout'
-
-    /**
-     * 同步地把外观标记打到 `<html>` 上。
-     *
-     * 宿主配置是异步读的（一次 fetch），但新消息到来的第一帧必须已经是正确的
-     * 外观，否则会「先画成右边的气泡，闪一下才变成 Pro」。所以真实来源仍是宿主
-     * 配置，这里只用一个本地缓存做首帧的提前量，读到配置后再校正。
-     *
-     * @param {'bubble' | 'full' | null} [value] - 要写入的外观；省略则读缓存。
-     */
-    function markLayout(value) {
-      if (typeof document === 'undefined') return
-      try {
-        const layout = value ?? (typeof localStorage !== 'undefined' ? localStorage.getItem(LAYOUT_CACHE_KEY) : null)
-        if (layout === 'full') document.documentElement.dataset.dshmbLayout = 'full'
-        else if (layout === 'bubble') document.documentElement.dataset.dshmbLayout = 'bubble'
-      } catch {
-        /* 没有 document/localStorage 就交给宿主 */
-      }
-    }
-
-    // 模块加载即执行：赶在第一帧之前。
-    markLayout()
 
     /**
      * 读宿主记住的外观；失败一律当默认（气泡）。
@@ -1027,12 +973,11 @@ html[data-dshmb-layout="full"] .dshmb-attachments{justify-content:flex-start!imp
       // 读到了再切换，避免闪一下错的样子。
       void readLayout().then((layout) => {
         try {
-          if (typeof localStorage !== 'undefined') localStorage.setItem(LAYOUT_CACHE_KEY, layout)
+          if (typeof document !== 'undefined' && document.body) document.body.dataset.dshmbLayout = layout
+          decorateAllRows()
         } catch {
-          /* 存不进去也没关系 */
+          /* 没有 body 就等着宿主自己渲染 */
         }
-        markLayout(layout)
-        decorateAllRows()
       })
       // 消息行会随时重渲染：轻量地补抬头，不监听整棵文档的文本变化。
       let scheduled = false
@@ -1102,15 +1047,9 @@ html[data-dshmb-layout="full"] .dshmb-attachments{justify-content:flex-start!imp
           .then(async (response) => {
             const data = await response.json().catch(() => ({}))
             if (!response.ok || data.ok !== true) throw new Error(data.error ? String(data.error) : `HTTP ${response.status}`)
-            const nextLayout = data.layout === 'full' ? 'full' : 'bubble'
-            setLayout(nextLayout)
+            setLayout(data.layout === 'full' ? 'full' : 'bubble')
             setError('')
-            try {
-              if (typeof localStorage !== 'undefined') localStorage.setItem(LAYOUT_CACHE_KEY, nextLayout)
-            } catch {
-              /* 存不进去也没关系 */
-            }
-            markLayout(nextLayout)
+            if (typeof document !== 'undefined' && document.body) document.body.dataset.dshmbLayout = data.layout === 'full' ? 'full' : 'bubble'
           })
           .catch((failure) => setError(String(failure && failure.message ? failure.message : failure)))
       }

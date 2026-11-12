@@ -1,6 +1,6 @@
 // dsh-delete-turn browser half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-delete-turn/src/client.js  (v0.2.6, sha256 cadb379fcd95ddd8)
+// Source: ../dsh-delete-turn/src/client.js  (v0.2.6, sha256 8f10302ae6cbd608)
 // Regenerate with `npm run vendor`; test/vendor-sync.test.js fails when this is stale.
 //
 // The component registers its factory with the host module loader; inside this
@@ -185,7 +185,7 @@ export default (require) => {
       '.dshdt-action:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,rgba(127,127,127,.12));color:var(--dsw-alias-state-error-primary,#d54941)}',
       '.dshdt-action:focus-visible{outline:2px solid var(--dsw-alias-button-primary-fill,#4d6bfe);outline-offset:2px}',
       '.dshdt-action:disabled{cursor:default;opacity:.4}',
-      '.dshdt-action svg{width:16px;height:16px}',
+      '.dshdt-action svg{width:15px;height:15px}',
       '.dshdt-action-host{display:inline-flex;align-items:center;justify-content:center}',
       '.dshdt-row{position:relative}',
       '.dshdt-floating{position:absolute;top:2px;right:6px;z-index:2;opacity:0;transition:opacity .12s}',
@@ -208,7 +208,7 @@ export default (require) => {
       '.dshdt-turn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,rgba(127,127,127,.12));color:var(--dsw-alias-button-primary-fill,#4d6bfe)}',
       '.dshdt-turn:focus-visible{outline:2px solid var(--dsw-alias-button-primary-fill,#4d6bfe);outline-offset:2px}',
       '.dshdt-turn:disabled{cursor:default;opacity:.4}',
-      '.dshdt-turn svg{width:16px;height:16px}',
+      '.dshdt-turn svg{width:15px;height:15px}',
       '[data-dshdt-no-target="1"] .dshdt-action{display:none!important}',
       // In multi-select the toggle is a badge pinned to the row itself: the
       // action strip of a message row only exists while the pointer is on it,
