@@ -1,6 +1,6 @@
 // dsh-edit-turn browser half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-edit-turn/lib/client.js  (v0.5.24, sha256 a708b8cc9cf2bd69)
+// Source: ../dsh-edit-turn/lib/client.js  (v0.5.24, sha256 7d3f0943c9ad3fc8)
 // Regenerate with `npm run vendor`; test/vendor-sync.test.js fails when this is stale.
 //
 // The component registers its factory with the host module loader; inside this
@@ -463,7 +463,7 @@ export default (require) => {
       '.dshet-action:hover:not(:disabled){background:var(--dshet-chip);box-shadow:inset 0 0 0 1px var(--dshet-line);color:var(--dsw-alias-label-primary,var(--dshet-ink))}',
       '.dshet-action:focus-visible{outline:2px solid var(--dsw-alias-button-primary-fill,var(--dshet-accent));outline-offset:2px}',
       '.dshet-action:disabled{cursor:default;opacity:.4}',
-      '.dshet-action svg{width:15px;height:15px}',
+      '.dshet-action svg{width:16px;height:16px}',
       // The reply pencil leads its strip. The host draws the copy button ahead of
       // the slot this entry is rendered into, and the strip lays its children out
       // in DOM order, so in DOM position the pencil can only ever come second -
