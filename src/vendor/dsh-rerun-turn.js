@@ -1,6 +1,6 @@
 // dsh-rerun-turn browser half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-rerun-turn/lib/client.js  (v0.2.11, sha256 4a9b0c8d153b8165)
+// Source: ../dsh-rerun-turn/lib/client.js  (v0.2.11, sha256 d7cc4e929997345e)
 // Regenerate with `npm run vendor`; test/vendor-sync.test.js fails when this is stale.
 //
 // The component registers its factory with the host module loader; inside this
@@ -245,7 +245,7 @@ export default (require) => {
       '.dsrr-action:hover:not(:disabled){background:var(--dsrr-field);color:var(--dsw-alias-label-primary,var(--dsrr-ink))}',
       '.dsrr-action:focus-visible{outline:2px solid var(--dsw-alias-button-primary-fill,var(--dsrr-accent));outline-offset:2px}',
       '.dsrr-action:disabled{cursor:default;opacity:.4}',
-      '.dsrr-action svg{width:15px;height:15px}',
+      '.dsrr-action svg{width:16px;height:16px}',
       '.dsrr-action-host{display:inline-flex;align-items:center}',
       // Next to the sibling edit pencil, ahead of the platform's own actions.
       '.dsrr-reply-action{order:-1}',
