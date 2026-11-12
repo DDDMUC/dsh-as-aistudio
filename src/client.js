@@ -12431,8 +12431,68 @@ function removeHost(row) {
     return plugin
   }
 
+    // ===== vendored dsh-bubble-pro =====
+    const factory_dsh_bubble_pro = (require) => {
+    const module = { exports: {} }
+    const exports = module.exports
+    Object.defineProperty(exports, Symbol.toStringTag, { value: 'Module' })
+
+    const NS = 'dsh-bubble-pro'
+    const PLUGIN_VERSION = '0.1.0'
+    const CSS_TAG = NS + '/bubble-pro.css'
+
+    /** 只覆盖 markdown-bubble 自己的类名：不碰宿主命名的节点。 */
+    const CSS = `
+/* 1. 整列铺满：Lite 的 70% 上限放开，与输入框同一列宽。 */
+.dshmb-stack{max-width:100%!important;width:100%!important;align-items:stretch!important}
+/* 2. 去掉气泡外观：没有底色、圆角、内边距，文字直接落在页面上。 */
+.dshmb-bubble{background:none!important;border:none!important;border-radius:0!important;padding:0!important;max-width:100%!important;width:100%!important;box-sizing:border-box}
+/* 3. 记录式的呼吸：下边一条细分隔线 + 段间距，读起来像文档而不是聊天。 */
+.dshmb-stack{padding-bottom:14px!important;border-bottom:1px solid var(--dsw-alias-border-l2,rgba(16,24,40,.12));margin-bottom:14px!important}
+/* 4. 附件、文件卡也跟着铺开，但保持可读的宽度。 */
+.dshmb-attachments{justify-content:flex-start!important}
+`
+
+    /** 注入样式表（按自己的 tag 去重）。 */
+    function injectStyles() {
+      if (typeof document === 'undefined') return
+      if (document.querySelector('style[data-plugin-css=' + JSON.stringify(CSS_TAG) + ']') !== null) return
+      const tag = document.createElement('style')
+      tag.dataset.plugin = NS
+      tag.dataset.pluginCss = CSS_TAG
+      tag.textContent = CSS
+      document.head.appendChild(tag)
+    }
+
+    /** 移除本插件注入的样式表。 */
+    function removeStyles() {
+      if (typeof document === 'undefined') return
+      const tag = document.querySelector('style[data-plugin-css=' + JSON.stringify(CSS_TAG) + ']')
+      if (tag !== null) tag.remove()
+    }
+
+    /**
+     * 浏览器插件体：只注入样式，不替换任何座位。
+     * @param {object} ctx - 客户端 cordis 上下文。
+     */
+    function apply(ctx) {
+      injectStyles()
+      ctx.effect(
+        () => () => {
+          removeStyles()
+        },
+        NS + ': lifecycle',
+      )
+    }
+
+    exports.apply = apply
+    exports.inject = []
+    exports.PLUGIN_VERSION = PLUGIN_VERSION
+    return module.exports
+  }
+
     // --- which factories the studio mounts ---
-    const VENDORED_TABLE = { "dsh-edit-turn": factory_dsh_edit_turn, "dsh-rerun-turn": factory_dsh_rerun_turn, "dsh-delete-turn": factory_dsh_delete_turn, "dsh-markdown-bubble": factory_dsh_markdown_bubble, "dsh-log-trim": factory_dsh_log_trim, "dsh-fork-anywhere": factory_dsh_fork_anywhere }
+    const VENDORED_TABLE = { "dsh-edit-turn": factory_dsh_edit_turn, "dsh-rerun-turn": factory_dsh_rerun_turn, "dsh-delete-turn": factory_dsh_delete_turn, "dsh-markdown-bubble": factory_dsh_markdown_bubble, "dsh-log-trim": factory_dsh_log_trim, "dsh-fork-anywhere": factory_dsh_fork_anywhere, "dsh-bubble-pro": factory_dsh_bubble_pro }
 
     // --- the studio own browser half ---
 
@@ -12460,7 +12520,7 @@ function removeHost(row) {
     const STATUS_ROUTE = '/api/dsh-as-aistudio/status'
 
     /** The four vendored factory names, in mount order. */
-    const VENDORED = ['dsh-edit-turn', 'dsh-rerun-turn', 'dsh-delete-turn', 'dsh-markdown-bubble', 'dsh-log-trim', 'dsh-fork-anywhere']
+    const VENDORED = ['dsh-edit-turn', 'dsh-rerun-turn', 'dsh-delete-turn', 'dsh-markdown-bubble', 'dsh-log-trim', 'dsh-fork-anywhere', 'dsh-bubble-pro']
 
     /**
      * Which components export a settings card, and under what name.
@@ -12553,12 +12613,16 @@ function removeHost(row) {
         en: { title: 'Delete this turn', pitch: 'Remove a message, a step or a whole reply from the derived context.' },
       },
       'dsh-markdown-bubble': {
-        zh: { title: 'Markdown 气泡', pitch: '发出的提示词按 Markdown 渲染；排队与预览保持纯文本。' },
+        zh: { title: '气泡 Lite', pitch: '发出的提示词按 Markdown 渲染；排队与预览保持纯文本。' },
         en: { title: 'Markdown bubble', pitch: 'Sent prompts render as Markdown; queues and previews stay plain.' },
       },
       'dsh-log-trim': {
         zh: { title: '会话日志裁剪', pitch: '启动时裁掉模型看不到的旧窗口、清空逐块回放、折叠编辑痕迹；写盘前过九项校验。' },
         en: { title: 'Session log trim', pitch: 'At boot: drop invisible windows, clear streaming replay, fold edit/rerun/delete traces — validated before writing.' },
+      },
+      'dsh-bubble-pro': {
+        zh: { title: '气泡 Pro', pitch: '用户消息铺满对话列、与输入框同宽，不画气泡；内容仍由气泡 Lite 渲染。' },
+        en: { title: 'Bubble Pro', pitch: 'User messages run the full column width, aligned with the composer, with no bubble chrome.' },
       },
       'dsh-fork-anywhere': {
         zh: { title: '任意位置分叉', pitch: '在你发出的任意一条消息、或任意一个压缩检查点上分叉会话。' },
