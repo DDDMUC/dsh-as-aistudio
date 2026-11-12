@@ -60,7 +60,7 @@ window.__ModuleLoader__.load({
     const STATUS_ROUTE = '/api/dsh-as-aistudio/status'
 
     /** The four vendored factory names, in mount order. */
-    const VENDORED = ['dsh-edit-turn', 'dsh-rerun-turn', 'dsh-delete-turn', 'dsh-markdown-bubble', 'dsh-log-trim', 'dsh-fork-anywhere', 'dsh-bubble-pro']
+    const VENDORED = ['dsh-edit-turn', 'dsh-rerun-turn', 'dsh-delete-turn', 'dsh-markdown-bubble', 'dsh-log-trim', 'dsh-fork-anywhere']
 
     /**
      * Which components export a settings card, and under what name.
@@ -74,6 +74,7 @@ window.__ModuleLoader__.load({
       { id: 'dsh-edit-turn', title: { zh: '编辑与重跑', en: 'Edit and re-run' } },
       { id: 'dsh-rerun-turn', title: { zh: '重跑', en: 'Re-run' } },
       { id: 'dsh-delete-turn', title: { zh: '删除', en: 'Delete' } },
+      { id: 'dsh-markdown-bubble', title: { zh: '气泡 Lite / Pro', en: 'Bubble Lite / Pro' } },
       { id: 'dsh-log-trim', title: { zh: '会话日志裁剪', en: 'Session log trim' } },
     ]
 
@@ -153,16 +154,12 @@ window.__ModuleLoader__.load({
         en: { title: 'Delete this turn', pitch: 'Remove a message, a step or a whole reply from the derived context.' },
       },
       'dsh-markdown-bubble': {
-        zh: { title: '气泡 Lite', pitch: '发出的提示词按 Markdown 渲染；排队与预览保持纯文本。' },
+        zh: { title: '气泡 Lite / Pro', pitch: '发出的提示词按 Markdown 渲染；外观可选右对齐气泡（Lite）或铺满整列（Pro）。' },
         en: { title: 'Markdown bubble', pitch: 'Sent prompts render as Markdown; queues and previews stay plain.' },
       },
       'dsh-log-trim': {
         zh: { title: '会话日志裁剪', pitch: '启动时裁掉模型看不到的旧窗口、清空逐块回放、折叠编辑痕迹；写盘前过九项校验。' },
         en: { title: 'Session log trim', pitch: 'At boot: drop invisible windows, clear streaming replay, fold edit/rerun/delete traces — validated before writing.' },
-      },
-      'dsh-bubble-pro': {
-        zh: { title: '气泡 Pro', pitch: '用户消息铺满对话列、与输入框同宽，不画气泡；内容仍由气泡 Lite 渲染。' },
-        en: { title: 'Bubble Pro', pitch: 'User messages run the full column width, aligned with the composer, with no bubble chrome.' },
       },
       'dsh-fork-anywhere': {
         zh: { title: '任意位置分叉', pitch: '在你发出的任意一条消息、或任意一个压缩检查点上分叉会话。' },

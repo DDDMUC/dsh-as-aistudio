@@ -38,7 +38,6 @@ const COMPONENTS = [
   { id: 'dsh-markdown-bubble', from: 'src/client.js', hostFrom: 'src/index.js' },
   { id: 'dsh-log-trim', from: 'lib/client.js', hostFrom: 'lib/index.js' },
   { id: 'dsh-fork-anywhere', from: 'src/client.js', hostFrom: 'src/index.js' },
-  { id: 'dsh-bubble-pro', from: 'src/client.js', hostFrom: 'src/index.js' },
 ]
 
 /** Everything before the loader call must be comments, or the shape is not ours. */

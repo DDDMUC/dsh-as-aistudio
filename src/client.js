@@ -8896,7 +8896,7 @@ window.__ModuleLoader__.load({
     const NS = 'dsh-markdown-bubble'
 
     /** Keep in sync with package.json and src/index.js. */
-    const PLUGIN_VERSION = '0.1.5'
+    const PLUGIN_VERSION = '0.1.6'
 
     /** Presence marker the live verifier reads. */
     const DEBUG_KEY = '__DSH_MARKDOWN_BUBBLE__'
@@ -8905,6 +8905,33 @@ window.__ModuleLoader__.load({
     const CSS_TAG = NS + '/markdown-bubble.css'
 
     /** Chat-node seats this renderer replaces; the host serves both with one view. */
+    /**
+     * 外观（layout）覆盖。
+     *
+     * 默认（`bubble`）一条规则都不命中，现有的气泡外观分毫不变；只有页面被
+     * 标记成 `full` 时才换成长条记录式：铺满对话列、去掉气泡底色、下方一条
+     * 细分隔线。规则只碰本插件自己的类名，绝不改宿主命名的节点。
+     */
+    const LAYOUT_CSS = `
+body[data-dshmb-layout="full"] .dshmb-stack{max-width:100%!important;width:100%!important;align-items:stretch!important;padding-bottom:14px!important;border-bottom:1px solid var(--dsw-alias-border-l2,rgba(16,24,40,.12));margin-bottom:14px!important}
+body[data-dshmb-layout="full"] .dshmb-bubble{background:none!important;border:none!important;border-radius:0!important;padding:0!important;max-width:100%!important;width:100%!important;box-sizing:border-box}
+body[data-dshmb-layout="full"] .dshmb-attachments{justify-content:flex-start!important}
+`
+
+    /**
+     * 读宿主记住的外观；失败一律当默认（气泡）。
+     * @returns {Promise<'bubble' | 'full'>} 外观。
+     */
+    async function readLayout() {
+      try {
+        const response = await fetch('/api/dsh-markdown-bubble/config', { headers: { accept: 'application/json' } })
+        const data = await response.json()
+        return data && data.layout === 'full' ? 'full' : 'bubble'
+      } catch {
+        return 'bubble'
+      }
+    }
+
     const SEATS = ['user', 'steering']
 
     // Seat priority: the host's default is 0, the plugin sits below it, and it
@@ -9749,7 +9776,7 @@ window.__ModuleLoader__.load({
       const tag = document.createElement('style')
       tag.dataset.plugin = NS
       tag.dataset.pluginCss = CSS_TAG
-      tag.textContent = CSS
+      tag.textContent = CSS + LAYOUT_CSS
       document.head.appendChild(tag)
     }
 
@@ -9770,6 +9797,15 @@ window.__ModuleLoader__.load({
      */
     function apply(ctx) {
       injectStyles()
+      // 外观由宿主记住（跨窗口、跨重启一致）；读到之前先按默认气泡渲染，
+      // 读到了再切换，避免闪一下错的样子。
+      void readLayout().then((layout) => {
+        try {
+          if (typeof document !== 'undefined' && document.body) document.body.dataset.dshmbLayout = layout
+        } catch {
+          /* 没有 body 就等着宿主自己渲染 */
+        }
+      })
       for (const key of SEATS) {
         ctx.slots.inject('conversation.chat.node', () =>
           ctx.slots.register(
@@ -9795,7 +9831,73 @@ window.__ModuleLoader__.load({
       )
     }
 
+    /**
+     * 设置卡：选择气泡外观。
+     *
+     * 写入宿主配置（跨窗口、跨重启），并立刻改页面标记——两种外观都是同一份
+     * 渲染管线，切换不需要重载。
+     *
+     * @returns {object} React 元素。
+     */
+    function ConfigCard() {
+      const [layout, setLayout] = react.useState(null)
+      const [error, setError] = react.useState('')
+      react.useEffect(() => {
+        void readLayout().then(setLayout)
+      }, [])
+      const choose = (next) => {
+        fetch('/api/dsh-markdown-bubble/config', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ layout: next }),
+        })
+          .then(async (response) => {
+            const data = await response.json().catch(() => ({}))
+            if (!response.ok || data.ok !== true) throw new Error(data.error ? String(data.error) : `HTTP ${response.status}`)
+            setLayout(data.layout === 'full' ? 'full' : 'bubble')
+            setError('')
+            if (typeof document !== 'undefined' && document.body) document.body.dataset.dshmbLayout = data.layout === 'full' ? 'full' : 'bubble'
+          })
+          .catch((failure) => setError(String(failure && failure.message ? failure.message : failure)))
+      }
+      const option = (value, title, hint) =>
+        react.createElement(
+          'button',
+          {
+            key: value,
+            type: 'button',
+            onClick: () => choose(value),
+            style: {
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'flex-start',
+              gap: 2,
+              padding: '8px 12px',
+              borderRadius: 8,
+              cursor: 'pointer',
+              textAlign: 'left',
+              border: '1px solid ' + (layout === value ? 'var(--dsw-alias-button-primary-fill,#4d6bfe)' : 'var(--dsw-alias-border-l2,rgba(16,24,40,.16))'),
+              background: layout === value ? 'var(--dsw-alias-bg-layer-2,transparent)' : 'transparent',
+              color: 'inherit',
+            },
+          },
+          [
+            react.createElement('span', { key: 't', style: { fontSize: 13, fontWeight: 600 } }, title),
+            react.createElement('span', { key: 'h', style: { fontSize: 12, opacity: 0.7 } }, hint),
+          ],
+        )
+      return react.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: 8 } }, [
+        react.createElement('div', { key: 'title', style: { fontSize: 13, fontWeight: 600 } }, '气泡外观'),
+        react.createElement('div', { key: 'options', style: { display: 'flex', gap: 8, flexWrap: 'wrap' } }, [
+          option('bubble', '气泡 Lite', '右对齐气泡，宽度约对话列的 70%（默认）'),
+          option('full', '气泡 Pro', '铺满对话列、与输入框同宽，无气泡底色'),
+        ]),
+        error === '' ? null : react.createElement('p', { key: 'err', style: { fontSize: 12, color: 'var(--dsw-alias-state-error-primary,#c93a31)', margin: 0 } }, `保存失败：${error}`),
+      ])
+    }
+
     exports.apply = apply
+    exports.ConfigCard = ConfigCard
     exports.inject = ['slots', 'locale']
     exports.PLUGIN_VERSION = PLUGIN_VERSION
     exports.SEATS = SEATS
@@ -12431,92 +12533,8 @@ function removeHost(row) {
     return plugin
   }
 
-    // ===== vendored dsh-bubble-pro =====
-    const factory_dsh_bubble_pro = (require) => {
-    const module = { exports: {} }
-    const exports = module.exports
-    Object.defineProperty(exports, Symbol.toStringTag, { value: 'Module' })
-
-    const NS = 'dsh-bubble-pro'
-    const PLUGIN_VERSION = '0.1.0'
-    const CSS_TAG = NS + '/bubble-pro.css'
-
-    /** 只覆盖 markdown-bubble 自己的类名：不碰宿主命名的节点。 */
-    const CSS = `
-/* 目标：用户消息从对话列最左到最右，宽度与输入框一致，不画气泡。
-   两种 DOM 都要覆盖：
-     a) 宿主自己的 UserMessageBubble（带 data-message-bubble）
-     b) 气泡 Lite 的 .dshmb-* 座位
-   任何一方命中都能生效，互不依赖。 */
-
-/* 1) 宿主气泡 */
-[data-message-bubble]{
-  background:none!important;border:none!important;border-radius:0!important;
-  padding:0!important;max-width:100%!important;width:100%!important;box-sizing:border-box;
-}
-/* 2) Lite 座位 */
-.dshmb-stack{max-width:100%!important;width:100%!important;align-items:stretch!important}
-.dshmb-bubble{background:none!important;border:none!important;border-radius:0!important;padding:0!important;max-width:100%!important;width:100%!important;box-sizing:border-box}
-
-/* 3) 用户行本身：解除右对齐与宽度上限 */
-[data-chat-flow-kind="user"], [data-chat-flow-kind="steering"]{justify-content:stretch!important;align-items:stretch!important}
-[data-chat-flow-kind="user"] > *, [data-chat-flow-kind="steering"] > *{
-  max-width:100%!important;width:100%!important;box-sizing:border-box;
-}
-[data-chat-flow-kind="user"] > * > *, [data-chat-flow-kind="steering"] > * > *{
-  max-width:100%!important;
-}
-
-/* 4) 记录式的呼吸：下边一条细分隔线 + 段间距 */
-[data-chat-flow-kind="user"] [data-message-bubble],
-[data-chat-flow-kind="user"] .dshmb-stack{
-  padding-bottom:14px!important;
-  border-bottom:1px solid var(--dsw-alias-border-l2,rgba(16,24,40,.12));
-  margin-bottom:14px!important;
-}
-.dshmb-attachments{justify-content:flex-start!important}
-`
-
-    /** 注入样式表（按自己的 tag 去重）。 */
-    function injectStyles() {
-      if (typeof document === 'undefined') return
-      if (document.querySelector('style[data-plugin-css=' + JSON.stringify(CSS_TAG) + ']') !== null) return
-      const tag = document.createElement('style')
-      tag.dataset.plugin = NS
-      tag.dataset.pluginCss = CSS_TAG
-      tag.textContent = CSS
-      document.head.appendChild(tag)
-    }
-
-    /** 移除本插件注入的样式表。 */
-    function removeStyles() {
-      if (typeof document === 'undefined') return
-      const tag = document.querySelector('style[data-plugin-css=' + JSON.stringify(CSS_TAG) + ']')
-      if (tag !== null) tag.remove()
-    }
-
-    /**
-     * 浏览器插件体：只注入样式，不替换任何座位。
-     * @param {object} ctx - 客户端 cordis 上下文。
-     */
-    function apply(ctx) {
-      injectStyles()
-      ctx.effect(
-        () => () => {
-          removeStyles()
-        },
-        NS + ': lifecycle',
-      )
-    }
-
-    exports.apply = apply
-    exports.inject = []
-    exports.PLUGIN_VERSION = PLUGIN_VERSION
-    return module.exports
-  }
-
     // --- which factories the studio mounts ---
-    const VENDORED_TABLE = { "dsh-edit-turn": factory_dsh_edit_turn, "dsh-rerun-turn": factory_dsh_rerun_turn, "dsh-delete-turn": factory_dsh_delete_turn, "dsh-markdown-bubble": factory_dsh_markdown_bubble, "dsh-log-trim": factory_dsh_log_trim, "dsh-fork-anywhere": factory_dsh_fork_anywhere, "dsh-bubble-pro": factory_dsh_bubble_pro }
+    const VENDORED_TABLE = { "dsh-edit-turn": factory_dsh_edit_turn, "dsh-rerun-turn": factory_dsh_rerun_turn, "dsh-delete-turn": factory_dsh_delete_turn, "dsh-markdown-bubble": factory_dsh_markdown_bubble, "dsh-log-trim": factory_dsh_log_trim, "dsh-fork-anywhere": factory_dsh_fork_anywhere }
 
     // --- the studio own browser half ---
 
@@ -12544,7 +12562,7 @@ function removeHost(row) {
     const STATUS_ROUTE = '/api/dsh-as-aistudio/status'
 
     /** The four vendored factory names, in mount order. */
-    const VENDORED = ['dsh-edit-turn', 'dsh-rerun-turn', 'dsh-delete-turn', 'dsh-markdown-bubble', 'dsh-log-trim', 'dsh-fork-anywhere', 'dsh-bubble-pro']
+    const VENDORED = ['dsh-edit-turn', 'dsh-rerun-turn', 'dsh-delete-turn', 'dsh-markdown-bubble', 'dsh-log-trim', 'dsh-fork-anywhere']
 
     /**
      * Which components export a settings card, and under what name.
@@ -12558,6 +12576,7 @@ function removeHost(row) {
       { id: 'dsh-edit-turn', title: { zh: '编辑与重跑', en: 'Edit and re-run' } },
       { id: 'dsh-rerun-turn', title: { zh: '重跑', en: 'Re-run' } },
       { id: 'dsh-delete-turn', title: { zh: '删除', en: 'Delete' } },
+      { id: 'dsh-markdown-bubble', title: { zh: '气泡 Lite / Pro', en: 'Bubble Lite / Pro' } },
       { id: 'dsh-log-trim', title: { zh: '会话日志裁剪', en: 'Session log trim' } },
     ]
 
@@ -12637,16 +12656,12 @@ function removeHost(row) {
         en: { title: 'Delete this turn', pitch: 'Remove a message, a step or a whole reply from the derived context.' },
       },
       'dsh-markdown-bubble': {
-        zh: { title: '气泡 Lite', pitch: '发出的提示词按 Markdown 渲染；排队与预览保持纯文本。' },
+        zh: { title: '气泡 Lite / Pro', pitch: '发出的提示词按 Markdown 渲染；外观可选右对齐气泡（Lite）或铺满整列（Pro）。' },
         en: { title: 'Markdown bubble', pitch: 'Sent prompts render as Markdown; queues and previews stay plain.' },
       },
       'dsh-log-trim': {
         zh: { title: '会话日志裁剪', pitch: '启动时裁掉模型看不到的旧窗口、清空逐块回放、折叠编辑痕迹；写盘前过九项校验。' },
         en: { title: 'Session log trim', pitch: 'At boot: drop invisible windows, clear streaming replay, fold edit/rerun/delete traces — validated before writing.' },
-      },
-      'dsh-bubble-pro': {
-        zh: { title: '气泡 Pro', pitch: '用户消息铺满对话列、与输入框同宽，不画气泡；内容仍由气泡 Lite 渲染。' },
-        en: { title: 'Bubble Pro', pitch: 'User messages run the full column width, aligned with the composer, with no bubble chrome.' },
       },
       'dsh-fork-anywhere': {
         zh: { title: '任意位置分叉', pitch: '在你发出的任意一条消息、或任意一个压缩检查点上分叉会话。' },
