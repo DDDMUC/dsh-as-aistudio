@@ -296,7 +296,8 @@ test('the studio own browser half touches no web-only global', () => {
 
 test('the browser half fetches one relative route', () => {
   const routes = [...client.matchAll(/'(\/api\/[a-z0-9-]+\/[a-z0-9-]+)'/g)].map((match) => match[1])
-  assert.deepEqual(routes, ['/api/dsh-as-aistudio/status'])
+  // 每个自带设置页的组件各有一条本机路由：studio 自己的状态、气泡的外观配置。
+  assert.deepEqual([...new Set(routes)].sort(), ['/api/dsh-as-aistudio/status', '/api/dsh-markdown-bubble/config'])
   // XML namespaces are identifiers, not addresses: the vendored halves build
   // their icons with `xmlns="http://www.w3.org/2000/svg"`, which is not a fetch.
   const withoutNamespaces = client

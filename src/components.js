@@ -104,7 +104,7 @@ export const COMPONENTS = [
     repo: 'https://github.com/DDDMUC/dsh-markdown-bubble',
     slot: null,
     overlay: null,
-    title: { zh: 'Markdown 气泡', en: 'Markdown bubble' },
+    title: { zh: '气泡 Lite / Pro', en: 'Bubble Lite / Pro' },
     pitch: {
       zh: '发出的提示词按 Markdown 渲染（列表、代码、表格、引用），排队与预览仍保持纯文本投影。',
       en: 'Sent prompts render as Markdown (lists, code, tables, quotes) while queues and previews keep the plain projection.',
@@ -138,21 +138,6 @@ export const COMPONENTS = [
     pitch: {
       zh: '在任意一条已发送的消息、或任意一个上下文压缩检查点上分叉会话；宿主关掉的无回复轮次会隐藏，不冒充已完成。',
       en: 'Fork the session at any sent user message or any compaction checkpoint; the reply-less Turn the Host closes on a mid-turn cut is hidden rather than shown as finished.',
-    },
-  },
-  {
-    id: 'dsh-bubble-pro',
-    package: 'dsh-bubble-pro',
-    suffix: 'pro',
-    feature: 'layout',
-    kind: 'reader',
-    repo: 'https://github.com/DDDMUC/dsh-bubble-pro',
-    slot: null,
-    overlay: null,
-    title: { zh: '气泡 Pro', en: 'Bubble Pro' },
-    pitch: {
-      zh: '用户消息不再画成气泡：从对话列最左到最右、与输入框同宽，像文档记录一样排下来（内容仍由气泡 Lite 渲染）。',
-      en: 'User messages stop being bubbles: full width, aligned with the composer, reading like a document (content still rendered by Bubble Lite).',
     },
   },
 ]
