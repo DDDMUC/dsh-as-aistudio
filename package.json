@@ -13,7 +13,8 @@
     "./markdown": "./src/shell.js",
     "./package.json": "./package.json",
     "./trim": "./src/shell.js",
-    "./fork": "./src/shell.js"
+    "./fork": "./src/shell.js",
+    "./pro": "./src/shell.js"
   },
   "files": [
     "src/index.js",
@@ -84,6 +85,7 @@
     }
   },
   "devDependencies": {
+    "dsh-bubble-pro": "^0.1.0",
     "dsh-delete-turn": "^0.1.14",
     "dsh-edit-turn": "^0.5.3",
     "dsh-fork-anywhere": "^0.1.0",
