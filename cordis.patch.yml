@@ -64,3 +64,8 @@
       name: 'dsh-as-aistudio/trim'
       config:
         plugin: 'dsh-log-trim'
+- insert:
+    - id: dsh-as-aistudio-fork
+      name: 'dsh-as-aistudio/fork'
+      config:
+        plugin: 'dsh-fork-anywhere'

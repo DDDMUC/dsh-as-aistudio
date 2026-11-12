@@ -124,7 +124,22 @@ export const COMPONENTS = [
       zh: '启动时裁掉模型早已看不到的旧窗口、清空逐块回放记录、把 edit/rerun/delete 的痕迹折叠掉；写盘前过宿主自己的九项校验。',
       en: 'At boot: drops windows the model can no longer see, clears streaming replay records, and folds edit/rerun/delete traces away - every write validated by the host own checks first.',
     },
-  }
+  },
+  {
+    id: 'dsh-fork-anywhere',
+    package: 'dsh-fork-anywhere',
+    suffix: 'fork',
+    feature: 'fork',
+    kind: 'action',
+    repo: 'https://github.com/DDDMUC/dsh-fork-anywhere',
+    slot: null,
+    overlay: null,
+    title: { zh: '任意位置分叉', en: 'Fork anywhere' },
+    pitch: {
+      zh: '在任意一条已发送的消息、或任意一个上下文压缩检查点上分叉会话；宿主关掉的无回复轮次会隐藏，不冒充已完成。',
+      en: 'Fork the session at any sent user message or any compaction checkpoint; the reply-less Turn the Host closes on a mid-turn cut is hidden rather than shown as finished.',
+    },
+  },
 ]
 
 /** Component ids, in manifest order. */

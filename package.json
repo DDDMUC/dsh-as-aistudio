@@ -12,7 +12,8 @@
     "./delete": "./src/shell.js",
     "./markdown": "./src/shell.js",
     "./package.json": "./package.json",
-    "./trim": "./src/shell.js"
+    "./trim": "./src/shell.js",
+    "./fork": "./src/shell.js"
   },
   "files": [
     "src/index.js",
@@ -85,6 +86,7 @@
   "devDependencies": {
     "dsh-delete-turn": "^0.1.14",
     "dsh-edit-turn": "^0.5.3",
+    "dsh-fork-anywhere": "^0.1.0",
     "dsh-log-trim": "^0.5.0",
     "dsh-markdown-bubble": "^0.1.5",
     "dsh-rerun-turn": "^0.2.4"

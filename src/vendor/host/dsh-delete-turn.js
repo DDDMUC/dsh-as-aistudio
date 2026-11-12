@@ -1,6 +1,6 @@
 // dsh-delete-turn host half (dsh-delete-turn.js), VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-delete-turn/src/index.js  (v0.2.5, sha256 a41db39315246181)
+// Source: ../dsh-delete-turn/src/index.js  (v0.2.6, sha256 f8a1c0faacb79e0f)
 // Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.
 //
 // src/shell.js imports the copy named after the component, which is why the
@@ -352,6 +352,9 @@ function idSeqMap(events, surface) {
     const data = event.data ?? {}
     const id = data.id ?? data.message?.id ?? data.callId ?? data.message?.toolCallId
     if (typeof id === 'string' && id !== '') out[id] = event.seq
+    // 前端的 flow-key 有时带的是发送时的 rpcId，而不是消息 id。
+    const rpcId = data.source?.rpcId ?? data.message?.source?.rpcId
+    if (typeof rpcId === 'string' && rpcId !== '') out[rpcId] = event.seq
   }
   return out
 }
@@ -592,6 +595,41 @@ async function deleteTarget(ctx, sessionId, body) {
   }
 }
 
+
+// --- queue (unsent messages) -------------------------------------------------
+
+/**
+ * 撤回一条「还没落盘」的排队消息。
+ *
+ * 这类消息只在宿主的输入队列里（`agent/inbox/spliced`），日志里没有
+ * `user/message`，所以按轮次删除的路径碰不到它们。宿主的 sessionController 有
+ * `updateQueue({ sessionId, itemId, action: { kind: 'remove' } })`，这里用它。
+ *
+ * @param {object} ctx - cordis 上下文。
+ * @param {string} sessionId - 会话 id。
+ * @param {string} key - 行的 flow key（里面带消息 id / rpcId）。
+ * @returns {Promise<{ itemId: string }>} 被撤回的队列项 id。
+ */
+async function recallQueueItem(ctx, sessionId, key) {
+  const controller = ctx.get('sessionController')
+  if (!controller || typeof controller.updateQueue !== 'function') {
+    throw new HttpError(409, 'unsupported', 'sessionController.updateQueue is unavailable')
+  }
+  const ids = String(key ?? '').match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi) ?? []
+  if (ids.length === 0) throw new HttpError(400, 'invalid', 'the row key names no message id')
+  let lastError
+  for (const itemId of ids) {
+    try {
+      const result = await controller.updateQueue({ sessionId, itemId, action: { kind: 'remove' } })
+      if (result === undefined || result.ok !== false) return { itemId }
+      lastError = result.error
+    } catch (error) {
+      lastError = error
+    }
+  }
+  throw new HttpError(404, 'not-queued', `no queued message matches this row: ${String(lastError && lastError.message ? lastError.message : lastError ?? '')}`)
+}
+
 // --- http --------------------------------------------------------------------
 
 function isLoopbackAddress(address) {
@@ -730,6 +768,37 @@ export function apply(ctx) {
         },
       }),
     )
+    fiber.effect(() =>
+      webServer.register({
+        kind: 'exact',
+        path: `${ROUTE_PREFIX}/queue-remove`,
+        handler: async (req, res) => {
+          if (!guard(req, res)) return
+          if (req.method !== 'POST') {
+            sendJson(res, 405, { ok: false, code: 'method', error: 'POST only' })
+            return
+          }
+          let body = {}
+          try {
+            const raw = await readBody(req)
+            if (raw) body = JSON.parse(raw)
+          } catch {
+            sendJson(res, 400, { ok: false, code: 'invalid', error: 'malformed JSON body' })
+            return
+          }
+          try {
+            const sessionId = requireSessionId(typeof body.sessionId === 'string' ? body.sessionId.trim() : '')
+            const result = await recallQueueItem(ctx, sessionId, body.key)
+            sendJson(res, 200, { ok: true, ...result })
+          } catch (error) {
+            const status = error instanceof HttpError ? error.status : 500
+            const code = error instanceof HttpError ? error.code : 'internal'
+            sendJson(res, status, { ok: false, code, error: String((error && error.message) || error) })
+          }
+        },
+      }),
+    )
+
   }
 
   const webServer = ctx.get('webServer')
