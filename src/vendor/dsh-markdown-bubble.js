@@ -1,6 +1,6 @@
 // dsh-markdown-bubble browser half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-markdown-bubble/src/client.js  (v0.1.6, sha256 7ee761a0d5121429)
+// Source: ../dsh-markdown-bubble/src/client.js  (v0.1.6, sha256 891653aaafbbca47)
 // Regenerate with `npm run vendor`; test/vendor-sync.test.js fails when this is stale.
 //
 // The component registers its factory with the host module loader; inside this
@@ -35,8 +35,19 @@ export default (require) => {
      * 细分隔线。规则只碰本插件自己的类名，绝不改宿主命名的节点。
      */
     const LAYOUT_CSS = `
-body[data-dshmb-layout="full"] .dshmb-stack{max-width:100%!important;width:100%!important;align-items:stretch!important;padding-bottom:14px!important;border-bottom:1px solid var(--dsw-alias-border-l2,rgba(16,24,40,.12));margin-bottom:14px!important}
-body[data-dshmb-layout="full"] .dshmb-bubble{background:none!important;border:none!important;border-radius:0!important;padding:0!important;max-width:100%!important;width:100%!important;box-sizing:border-box}
+/* Pro：整条消息是一个「和输入框同宽」的框——保留气泡的底色与圆角，只把
+   宽度从 70% 放到 100%，并左对齐。不是去掉框，而是把框拉满整列。 */
+body[data-dshmb-layout="full"] .dshmb-stack{max-width:100%!important;width:100%!important;align-items:stretch!important}
+body[data-dshmb-layout="full"] .dshmb-bubble{
+  display:block!important;
+  width:100%!important;max-width:100%!important;
+  box-sizing:border-box;
+  background:var(--dsw-specific-bubble,var(--dshmb-bubble-bg,rgba(77,107,254,.08)))!important;
+  border-radius:var(--dsw-radius-xl,16px)!important;
+  padding:10px 14px!important;
+  text-align:left!important;
+}
+body[data-dshmb-layout="full"] .dshmb-md{text-align:left!important}
 body[data-dshmb-layout="full"] .dshmb-attachments{justify-content:flex-start!important}
 `
 
