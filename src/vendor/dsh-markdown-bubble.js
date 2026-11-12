@@ -1,6 +1,6 @@
 // dsh-markdown-bubble browser half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-markdown-bubble/src/client.js  (v0.1.6, sha256 d16e17cbcf27df86)
+// Source: ../dsh-markdown-bubble/src/client.js  (v0.1.6, sha256 813caebe3e45fda7)
 // Regenerate with `npm run vendor`; test/vendor-sync.test.js fails when this is stale.
 //
 // The component registers its factory with the host module loader; inside this
@@ -74,21 +74,11 @@ body[data-dshmb-layout="full"] .dshmb-attachments{justify-content:flex-start!imp
         return
       }
       if (existing) return
-      const clockEl = row.querySelector('[data-clock]')
-      const clock = clockEl ? String(clockEl.getAttribute('data-clock') || clockEl.textContent || '').trim() : ''
       const head = document.createElement('div')
       head.className = 'dshmb-pro-head'
       const who = document.createElement('b')
       who.textContent = row.getAttribute('data-chat-flow-kind') === 'steering' ? 'You' : 'User'
       head.appendChild(who)
-      if (clock !== '') {
-        const dot = document.createElement('span')
-        dot.textContent = '·'
-        head.appendChild(dot)
-        const time = document.createElement('span')
-        time.textContent = clock
-        head.appendChild(time)
-      }
       bubble.insertBefore(head, bubble.firstChild)
     }
 

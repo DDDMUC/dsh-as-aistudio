@@ -8952,21 +8952,11 @@ body[data-dshmb-layout="full"] .dshmb-attachments{justify-content:flex-start!imp
         return
       }
       if (existing) return
-      const clockEl = row.querySelector('[data-clock]')
-      const clock = clockEl ? String(clockEl.getAttribute('data-clock') || clockEl.textContent || '').trim() : ''
       const head = document.createElement('div')
       head.className = 'dshmb-pro-head'
       const who = document.createElement('b')
       who.textContent = row.getAttribute('data-chat-flow-kind') === 'steering' ? 'You' : 'User'
       head.appendChild(who)
-      if (clock !== '') {
-        const dot = document.createElement('span')
-        dot.textContent = '·'
-        head.appendChild(dot)
-        const time = document.createElement('span')
-        time.textContent = clock
-        head.appendChild(time)
-      }
       bubble.insertBefore(head, bubble.firstChild)
     }
 
