@@ -12443,13 +12443,37 @@ function removeHost(row) {
 
     /** 只覆盖 markdown-bubble 自己的类名：不碰宿主命名的节点。 */
     const CSS = `
-/* 1. 整列铺满：Lite 的 70% 上限放开，与输入框同一列宽。 */
+/* 目标：用户消息从对话列最左到最右，宽度与输入框一致，不画气泡。
+   两种 DOM 都要覆盖：
+     a) 宿主自己的 UserMessageBubble（带 data-message-bubble）
+     b) 气泡 Lite 的 .dshmb-* 座位
+   任何一方命中都能生效，互不依赖。 */
+
+/* 1) 宿主气泡 */
+[data-message-bubble]{
+  background:none!important;border:none!important;border-radius:0!important;
+  padding:0!important;max-width:100%!important;width:100%!important;box-sizing:border-box;
+}
+/* 2) Lite 座位 */
 .dshmb-stack{max-width:100%!important;width:100%!important;align-items:stretch!important}
-/* 2. 去掉气泡外观：没有底色、圆角、内边距，文字直接落在页面上。 */
 .dshmb-bubble{background:none!important;border:none!important;border-radius:0!important;padding:0!important;max-width:100%!important;width:100%!important;box-sizing:border-box}
-/* 3. 记录式的呼吸：下边一条细分隔线 + 段间距，读起来像文档而不是聊天。 */
-.dshmb-stack{padding-bottom:14px!important;border-bottom:1px solid var(--dsw-alias-border-l2,rgba(16,24,40,.12));margin-bottom:14px!important}
-/* 4. 附件、文件卡也跟着铺开，但保持可读的宽度。 */
+
+/* 3) 用户行本身：解除右对齐与宽度上限 */
+[data-chat-flow-kind="user"], [data-chat-flow-kind="steering"]{justify-content:stretch!important;align-items:stretch!important}
+[data-chat-flow-kind="user"] > *, [data-chat-flow-kind="steering"] > *{
+  max-width:100%!important;width:100%!important;box-sizing:border-box;
+}
+[data-chat-flow-kind="user"] > * > *, [data-chat-flow-kind="steering"] > * > *{
+  max-width:100%!important;
+}
+
+/* 4) 记录式的呼吸：下边一条细分隔线 + 段间距 */
+[data-chat-flow-kind="user"] [data-message-bubble],
+[data-chat-flow-kind="user"] .dshmb-stack{
+  padding-bottom:14px!important;
+  border-bottom:1px solid var(--dsw-alias-border-l2,rgba(16,24,40,.12));
+  margin-bottom:14px!important;
+}
 .dshmb-attachments{justify-content:flex-start!important}
 `
 
