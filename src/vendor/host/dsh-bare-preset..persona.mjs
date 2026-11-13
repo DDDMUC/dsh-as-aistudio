@@ -1,6 +1,6 @@
 // dsh-bare-preset host half (dsh-bare-preset..persona.mjs), VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-bare-preset/lib/index.js  (v0.1.1, sha256 802e33451d61a6ed)
+// Source: ../dsh-bare-preset/lib/index.js  (v0.2.0, sha256 802e33451d61a6ed)
 // Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.
 /**
  * bare-persona —— 裸模模式唯一的一条提示词行。
