@@ -4,13 +4,16 @@
 
 ## 中文
 
-**0.6.0** —— 第 7 个组件：裸模式预设。
+**0.6.0** —— 对比 v0.5.23：组件 5 → 7，四个组件升级。
 
-- 纳入 `dsh-bare-preset`（纯宿主组件，无浏览器半部）：vendor 工具支持 `hostOnly`，只抄宿主半部并带版本戳。
-- vendor 时把组件的 `persona.mjs` 一并带入并改写 URL，预设不再指向不存在的文件。
-- 组件版本：edit 0.6.0 / rerun 0.3.0 / delete 0.2.7 / markdown 0.2.0 / trim 0.7.9 / fork 0.1.2 / bare 0.2.0。
-
-**0.5.24** —— 跟进 dsh-delete-turn 0.2.5（官方复制出现时，删除入口也出现）；新增 `link:local` 本地软链脚本。
+- 新增组件 **任意位置分叉**（`dsh-fork-anywhere` 0.1.2）：在任意已发送消息或压缩检查点上分叉会话。
+- 新增组件 **裸模式预设**（`dsh-bare-preset` 0.2.0，纯宿主）：vendor 工具支持 `hostOnly`，`persona.mjs` 一并带入并改写 URL。
+- `dsh-edit-turn` 0.5.24 → **0.6.0**：图标随字号（`16px + delta`，按钮 `28px + delta`）；原地编辑底栏透明、不再上下色差；底栏按钮放大；拖拽进编辑框不再复制一份到输入框、遮罩正常收起。
+- `dsh-rerun-turn` 0.2.11 → **0.3.0**：图标尺寸同上；助手行入口先渲染（状态未到时置灰）。
+- `dsh-delete-turn` 0.2.4 → **0.2.7**：官方复制出现时删除入口也出现（按 key 里的 id/rpcId 反查）；三个入口图标随字号放大。
+- `dsh-markdown-bubble` 0.1.5 → **0.2.0**：新增「气泡 Lite / Pro」两种外观（Pro 铺满整列、与输入框同宽、静默顶线、悬浮圆角框）；Pro 下宿主乐观气泡同样式、不再闪；动作条与下一轮间距 16px；插件页新增外观设置卡。
+- `dsh-log-trim` 0.7.9 不变。
+- 工程：新增 `link:local`（软链本地仓库到 profile，改完不用发版）；vendor 支持 `hostOnly` 组件。
 
 **0.5.23** —— 跟进 dsh-edit-turn 0.5.24（深色皮肤下编辑器黑底黑字）。
 
@@ -194,6 +197,17 @@
 **0.2.14** —— 浏览器半侧与宿主半侧全部内置：本包没有任何运行时依赖，装它不会再装别的包；宿主半侧改为从运行中的 harness 解析平台包（`_platform.js`），并把组件导入的兄弟模块一起抄进来。
 
 ## English
+
+**0.6.0** — against v0.5.23: five components become seven, four of them upgraded.
+
+- New: **Fork anywhere** (`dsh-fork-anywhere` 0.1.2) — fork at any sent message or compaction checkpoint.
+- New: **Bare preset** (`dsh-bare-preset` 0.2.0, host-only) — the vendor tool now supports host-only components and carries `persona.mjs` with a rewritten URL.
+- `dsh-edit-turn` 0.5.24 → **0.6.0**: icons scale with the content font (`16px + delta`, buttons `28px + delta`); in-place footer is transparent (no top/bottom seam); footer controls enlarged; dropping a file into the editor no longer duplicates it into the composer, and the host overlay closes properly.
+- `dsh-rerun-turn` 0.2.11 → **0.3.0**: same icon sizing; assistant-row entry renders before `/state` (disabled until known).
+- `dsh-delete-turn` 0.2.4 → **0.2.7**: delete entry now appears wherever the official copy does (key id/rpcId lookup); the three entries scale with the font.
+- `dsh-markdown-bubble` 0.1.5 → **0.2.0**: Bubble Lite / Pro layouts (Pro spans the column, matches the composer width, hairline when idle, rounded frame on hover); the host's optimistic bubble uses the same look; 16px gap under the action strip; a layout card on the plugin page.
+- `dsh-log-trim` stays 0.7.9.
+- Tooling: `link:local`, and host-only support in the vendor tool.
 
 **0.5.10** — the boot scan no longer freezes the host (the bug that left the session list empty).
 
