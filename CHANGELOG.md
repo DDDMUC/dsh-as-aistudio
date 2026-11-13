@@ -4,6 +4,12 @@
 
 ## 中文
 
+**0.6.0** —— 第 7 个组件：裸模式预设。
+
+- 纳入 `dsh-bare-preset`（纯宿主组件，无浏览器半部）：vendor 工具支持 `hostOnly`，只抄宿主半部并带版本戳。
+- vendor 时把组件的 `persona.mjs` 一并带入并改写 URL，预设不再指向不存在的文件。
+- 组件版本：edit 0.6.0 / rerun 0.3.0 / delete 0.2.7 / markdown 0.2.0 / trim 0.7.9 / fork 0.1.2 / bare 0.2.0。
+
 **0.5.24** —— 跟进 dsh-delete-turn 0.2.5（官方复制出现时，删除入口也出现）；新增 `link:local` 本地软链脚本。
 
 **0.5.23** —— 跟进 dsh-edit-turn 0.5.24（深色皮肤下编辑器黑底黑字）。
