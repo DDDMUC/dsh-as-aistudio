@@ -1,6 +1,6 @@
 // dsh-edit-turn browser half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-edit-turn/lib/client.js  (v0.5.24, sha256 a708b8cc9cf2bd69)
+// Source: ../dsh-edit-turn/lib/client.js  (v0.6.0, sha256 272b27ce14c5b8be)
 // Regenerate with `npm run vendor`; test/vendor-sync.test.js fails when this is stale.
 //
 // The component registers its factory with the host module loader; inside this
@@ -447,7 +447,7 @@ export default (require) => {
       // read as a different, "active" icon next to the neutral grey ones. The
       // variable resolves on the action bar (and everywhere above it); the
       // fallback is the value it resolves to in the default theme.
-      '.dshet-action{width:28px;height:28px;padding:6px;display:inline-flex;align-items:center;justify-content:center;border:none;border-radius:28px;background:transparent;color:var(--dsw-alias-label-tertiary,#81858c);cursor:pointer;transition:background-color .12s,color .12s}',
+      '.dshet-action{width:calc(28px + var(--dsh-content-font-delta,0px));height:calc(28px + var(--dsh-content-font-delta,0px));padding:6px;display:inline-flex;align-items:center;justify-content:center;border:none;border-radius:28px;background:transparent;color:var(--dsw-alias-label-tertiary,#81858c);cursor:pointer;transition:background-color .12s,color .12s}',
       // The fallback strip for a turn with no closing body.
       //
       // The gate is the host's OWN marker: TurnTailNodeView renders
@@ -463,7 +463,7 @@ export default (require) => {
       '.dshet-action:hover:not(:disabled){background:var(--dshet-chip);box-shadow:inset 0 0 0 1px var(--dshet-line);color:var(--dsw-alias-label-primary,var(--dshet-ink))}',
       '.dshet-action:focus-visible{outline:2px solid var(--dsw-alias-button-primary-fill,var(--dshet-accent));outline-offset:2px}',
       '.dshet-action:disabled{cursor:default;opacity:.4}',
-      '.dshet-action svg{width:15px;height:15px}',
+      '.dshet-action svg{width:calc(16px + var(--dsh-content-font-delta,0px));height:calc(16px + var(--dsh-content-font-delta,0px))}',
       // The reply pencil leads its strip. The host draws the copy button ahead of
       // the slot this entry is rendered into, and the strip lays its children out
       // in DOM order, so in DOM position the pencil can only ever come second -
@@ -537,7 +537,7 @@ export default (require) => {
       '.dshet-editor:focus-within{border-color:var(--dsw-alias-button-primary-fill,var(--dshet-accent))}',
       '.dshet-editor[data-dshet-inplace="1"]{overflow:hidden;border:1.5px solid var(--dsw-alias-button-primary-fill,#4a7dff);border-radius:var(--dshet-radius-md);background:var(--dshet-panel);backdrop-filter:none;box-shadow:none}',
       '.dshet-editor[data-dshet-inplace="1"] textarea{position:absolute;min-height:0;max-height:none;padding:6px 10px;border:0;border-radius:8px;background:transparent;overflow-y:auto}',
-      '.dshet-editor[data-dshet-inplace="1"] .dshet-footer{position:absolute;top:auto;left:0;right:0;bottom:0;height:46px;align-items:center;padding:6px 10px;box-sizing:border-box;background:var(--dshet-panel);border-radius:0 0 var(--dshet-radius-md) var(--dshet-radius-md);gap:6px}',
+      '.dshet-editor[data-dshet-inplace="1"] .dshet-footer{position:absolute;top:auto;left:0;right:0;bottom:0;height:calc(46px + var(--dsh-content-font-delta,0px));align-items:center;padding:6px 10px;box-sizing:border-box;background:transparent;border-radius:0 0 var(--dshet-radius-md) var(--dshet-radius-md);gap:6px}',
       '.dshet-editor[data-dshet-inplace="1"] .dshet-btn{padding:2px 8px;font-size:12px;line-height:18px;border-radius:8px}',
       '.dshet-editor[data-dshet-inplace="1"] .dshet-pick{position:static;top:auto;left:auto;padding:0;background:transparent;border-radius:0}',
       '.dshet-editor[data-dshet-inplace="1"] .dshet-note,.dshet-editor[data-dshet-inplace="1"] .dshet-warn{position:absolute;left:8px;bottom:6px;max-width:60%;margin:0;background:var(--dshet-panel);border-radius:8px;padding:2px 6px}',
@@ -588,19 +588,19 @@ export default (require) => {
       '.dshet-btn:hover:not(:disabled){background:var(--dshet-hover)}',
       '.dshet-btn:focus-visible{outline:2px solid var(--dsw-alias-button-primary-fill,var(--dshet-accent));outline-offset:2px}',
       '.dshet-btn:disabled{cursor:default;opacity:.5}',
-      '.dshet-btn-save{width:28px;height:28px;padding:0;border:0;border-radius:50%;background:transparent;color:#81858c}',
+      '.dshet-btn-save{width:calc(28px + var(--dsh-content-font-delta,0px));height:calc(28px + var(--dsh-content-font-delta,0px));padding:0;border:0;border-radius:50%;background:transparent;color:#81858c}',
       '.dshet-btn-save:hover:not(:disabled){background:var(--dshet-hover)}',
-      '.dshet-btn-save svg{width:15px;height:15px;display:block;stroke:currentColor;fill:none;stroke-width:1.2;stroke-linecap:round;stroke-linejoin:round}',
+      '.dshet-btn-save svg{width:calc(16px + var(--dsh-content-font-delta,0px));height:calc(16px + var(--dsh-content-font-delta,0px));display:block;stroke:currentColor;fill:none;stroke-width:1.2;stroke-linecap:round;stroke-linejoin:round}',
       '.dshet-sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}',
       '.dshet-btn-primary{border-color:var(--dsw-alias-button-primary-fill,var(--dshet-accent));background:var(--dsw-alias-button-primary-fill,var(--dshet-accent));color:var(--dsw-alias-label-primary-foreground,var(--dshet-on-accent))}',
       '.dshet-btn-primary:hover:not(:disabled){background:var(--dsw-alias-button-primary-fill,var(--dshet-accent));filter:brightness(1.08)}',
-'.dshet-btn.dshet-btn-save{width:28px;height:28px;padding:0;border:0;border-radius:50%;background:transparent;color:var(--dshet-ink-soft);filter:none}',
+'.dshet-btn.dshet-btn-save{width:calc(28px + var(--dsh-content-font-delta,0px));height:calc(28px + var(--dsh-content-font-delta,0px));padding:0;border:0;border-radius:50%;background:transparent;color:var(--dshet-ink-soft);filter:none}',
       '.dshet-btn.dshet-btn-save:hover:not(:disabled){background:var(--dshet-hover);filter:none}',
       '.dshet-btn.dshet-btn-save.dshet-btn-confirm{background:var(--dshet-hover);box-shadow:inset 0 0 0 1.5px var(--dshet-accent)}',
-      '.dshet-editor .dshet-footer .dshet-btn.dshet-btn-icon{width:28px;height:28px;padding:0;border:0;border-radius:50%;background:transparent;color:#81858c;filter:none}',
+      '.dshet-editor .dshet-footer .dshet-btn.dshet-btn-icon{width:calc(28px + var(--dsh-content-font-delta,0px));height:calc(28px + var(--dsh-content-font-delta,0px));padding:0;border:0;border-radius:50%;background:transparent;color:#81858c;filter:none}',
       '.dshet-editor .dshet-footer .dshet-btn.dshet-btn-icon:hover:not(:disabled){background:var(--dshet-hover);color:var(--dshet-ink-soft);filter:none}',
-      '.dshet-btn-icon svg{width:15px;height:15px;display:block;fill:none;stroke:currentColor;stroke-width:1.2;stroke-linecap:round;stroke-linejoin:round}',
-      '.dshet-editor[data-dshet-inplace="1"] .dshet-btn.dshet-btn-save{width:28px;height:28px;padding:0;border:0;border-radius:50%;background:transparent;color:#81858c;filter:none}',
+      '.dshet-btn-icon svg{width:calc(16px + var(--dsh-content-font-delta,0px));height:calc(16px + var(--dsh-content-font-delta,0px));display:block;fill:none;stroke:currentColor;stroke-width:1.2;stroke-linecap:round;stroke-linejoin:round}',
+      '.dshet-editor[data-dshet-inplace="1"] .dshet-btn.dshet-btn-save{width:calc(28px + var(--dsh-content-font-delta,0px));height:calc(28px + var(--dsh-content-font-delta,0px));padding:0;border:0;border-radius:50%;background:transparent;color:#81858c;filter:none}',
       '.dshet-editor[data-dshet-inplace="1"] .dshet-btn.dshet-btn-save:hover:not(:disabled){background:var(--dshet-hover);filter:none}',
       '.dshet-pick{display:flex;align-items:center;gap:4px;padding:0;font-size:12px;color:var(--dshet-ink-dim)}',
       '.dshet-config{display:flex;flex-direction:column;gap:10px}',
@@ -3835,6 +3835,8 @@ export default (require) => {
         })
         box.addEventListener('dragover', (event) => {
           event.preventDefault()
+          // 不让事件传到输入框：否则宿主也会把这次拖拽当成它的附件。
+          event.stopPropagation()
           box.dataset.dshetDrop = '1'
         })
         box.addEventListener('dragleave', () => {
@@ -3842,9 +3844,17 @@ export default (require) => {
         })
         box.addEventListener('drop', (event) => {
           event.preventDefault()
+          event.stopPropagation()
           delete box.dataset.dshetDrop
           const files = filesFromData(event.dataTransfer)
           if (files.length > 0) controller.attachFiles(files)
+          // 宿主的「文件或图片拖动到此处即可添加」遮罩是靠它自己的 document drop
+          // 关闭的；我们把事件拦下来了，就得替它收尾，否则遮罩会一直挂着。
+          try {
+            window.dispatchEvent(new DragEvent('dragend', { bubbles: true }))
+          } catch {
+            /* 老环境没有 DragEvent 就算了 */
+          }
         })
       }
 
@@ -4699,12 +4709,18 @@ export default (require) => {
           if (typeof unsubscribe === 'function') unsubscribe()
         }
       }, [controller])
-      const entry = view === null ? undefined : view.repliesByMessage.get(messageId)
-      if (entry === undefined || entry === null || view.hidden.has(entry.seq)) return null
+      // 先渲染、后确认：/state 还没回来时也把铅笔画出来（置灰），
+      // 否则宿主和别的插件都在了，只有我们要等一次请求才出现。
+      // 没有 messageId 就无从谈起：这种行不进入口。
+      if (messageId === undefined || messageId === null || messageId === '') return null
+      const loaded = view !== null
+      const entry = loaded ? view.repliesByMessage.get(messageId) : undefined
+      if (loaded && (entry === undefined || entry === null || view.hidden.has(entry.seq))) return null
       const label = t === null ? '' : t('action.edit-reply')
       const open = (event) => {
         event.preventDefault()
         event.stopPropagation()
+        if (entry === undefined) return
         controller.open({
           anchor: event.currentTarget,
           seq: entry.seq,
@@ -4728,6 +4744,7 @@ export default (require) => {
         className: 'dshet-action dshet-row-action dshet-reply-action',
         'aria-label': label,
         title: label,
+        disabled: entry === undefined,
         onClick: open,
         children: jsx(PencilIcon, {}),
       })

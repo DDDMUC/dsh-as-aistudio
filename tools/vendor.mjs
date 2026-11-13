@@ -38,6 +38,8 @@ const COMPONENTS = [
   { id: 'dsh-markdown-bubble', from: 'src/client.js', hostFrom: 'src/index.js' },
   { id: 'dsh-log-trim', from: 'lib/client.js', hostFrom: 'lib/index.js' },
   { id: 'dsh-fork-anywhere', from: 'src/client.js', hostFrom: 'src/index.js' },
+  // 纯宿主组件：没有浏览器半部，只 vendor 宿主半部。
+  { id: 'dsh-bare-preset', from: null, hostFrom: 'lib/index.js', hostOnly: true },
 ]
 
 /** Everything before the loader call must be comments, or the shape is not ours. */
@@ -185,6 +187,33 @@ const generated = []
 let stale = 0
 
 for (const component of COMPONENTS) {
+  if (component.hostOnly === true) {
+    const hostPath = join(workspace, component.id, component.hostFrom)
+    if (!existsSync(hostPath)) {
+      console.error('missing component host: ' + hostPath)
+      process.exit(2)
+    }
+    const version = JSON.parse(readFileSync(join(workspace, component.id, 'package.json'), 'utf8')).version
+    versions[component.id] = version
+    for (const file of vendorHostHalf(component, hostPath)) {
+      const hostSha = createHash('sha256').update(file.text).digest('hex').slice(0, 16)
+      const hostHeader = [
+        '// ' + component.id + ' host half (' + file.name + '), VENDORED by tools/vendor.mjs - DO NOT EDIT.',
+        '//',
+        '// Source: ../' + component.id + '/' + component.hostFrom + '  (v' + version + ', sha256 ' + hostSha + ')',
+        '// Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.',
+        '',
+      ].join('\n')
+      generated.push({
+        id: component.id + ' (host)',
+        target: join(root, 'src', 'vendor', 'host', file.name),
+        out: hostHeader + file.text,
+        version,
+        sha: hostSha,
+      })
+    }
+    continue
+  }
   const sourcePath = join(workspace, component.id, component.from)
   if (!existsSync(sourcePath)) {
     console.error('missing component source: ' + sourcePath)

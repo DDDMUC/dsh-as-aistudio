@@ -69,3 +69,8 @@
       name: 'dsh-as-aistudio/fork'
       config:
         plugin: 'dsh-fork-anywhere'
+- insert:
+    - id: dsh-as-aistudio-bare
+      name: 'dsh-as-aistudio/bare'
+      config:
+        plugin: 'dsh-bare-preset'

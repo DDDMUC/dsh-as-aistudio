@@ -455,7 +455,7 @@ window.__ModuleLoader__.load({
       // read as a different, "active" icon next to the neutral grey ones. The
       // variable resolves on the action bar (and everywhere above it); the
       // fallback is the value it resolves to in the default theme.
-      '.dshet-action{width:28px;height:28px;padding:6px;display:inline-flex;align-items:center;justify-content:center;border:none;border-radius:28px;background:transparent;color:var(--dsw-alias-label-tertiary,#81858c);cursor:pointer;transition:background-color .12s,color .12s}',
+      '.dshet-action{width:calc(28px + var(--dsh-content-font-delta,0px));height:calc(28px + var(--dsh-content-font-delta,0px));padding:6px;display:inline-flex;align-items:center;justify-content:center;border:none;border-radius:28px;background:transparent;color:var(--dsw-alias-label-tertiary,#81858c);cursor:pointer;transition:background-color .12s,color .12s}',
       // The fallback strip for a turn with no closing body.
       //
       // The gate is the host's OWN marker: TurnTailNodeView renders
@@ -471,7 +471,7 @@ window.__ModuleLoader__.load({
       '.dshet-action:hover:not(:disabled){background:var(--dshet-chip);box-shadow:inset 0 0 0 1px var(--dshet-line);color:var(--dsw-alias-label-primary,var(--dshet-ink))}',
       '.dshet-action:focus-visible{outline:2px solid var(--dsw-alias-button-primary-fill,var(--dshet-accent));outline-offset:2px}',
       '.dshet-action:disabled{cursor:default;opacity:.4}',
-      '.dshet-action svg{width:15px;height:15px}',
+      '.dshet-action svg{width:calc(16px + var(--dsh-content-font-delta,0px));height:calc(16px + var(--dsh-content-font-delta,0px))}',
       // The reply pencil leads its strip. The host draws the copy button ahead of
       // the slot this entry is rendered into, and the strip lays its children out
       // in DOM order, so in DOM position the pencil can only ever come second -
@@ -545,7 +545,7 @@ window.__ModuleLoader__.load({
       '.dshet-editor:focus-within{border-color:var(--dsw-alias-button-primary-fill,var(--dshet-accent))}',
       '.dshet-editor[data-dshet-inplace="1"]{overflow:hidden;border:1.5px solid var(--dsw-alias-button-primary-fill,#4a7dff);border-radius:var(--dshet-radius-md);background:var(--dshet-panel);backdrop-filter:none;box-shadow:none}',
       '.dshet-editor[data-dshet-inplace="1"] textarea{position:absolute;min-height:0;max-height:none;padding:6px 10px;border:0;border-radius:8px;background:transparent;overflow-y:auto}',
-      '.dshet-editor[data-dshet-inplace="1"] .dshet-footer{position:absolute;top:auto;left:0;right:0;bottom:0;height:46px;align-items:center;padding:6px 10px;box-sizing:border-box;background:var(--dshet-panel);border-radius:0 0 var(--dshet-radius-md) var(--dshet-radius-md);gap:6px}',
+      '.dshet-editor[data-dshet-inplace="1"] .dshet-footer{position:absolute;top:auto;left:0;right:0;bottom:0;height:calc(46px + var(--dsh-content-font-delta,0px));align-items:center;padding:6px 10px;box-sizing:border-box;background:transparent;border-radius:0 0 var(--dshet-radius-md) var(--dshet-radius-md);gap:6px}',
       '.dshet-editor[data-dshet-inplace="1"] .dshet-btn{padding:2px 8px;font-size:12px;line-height:18px;border-radius:8px}',
       '.dshet-editor[data-dshet-inplace="1"] .dshet-pick{position:static;top:auto;left:auto;padding:0;background:transparent;border-radius:0}',
       '.dshet-editor[data-dshet-inplace="1"] .dshet-note,.dshet-editor[data-dshet-inplace="1"] .dshet-warn{position:absolute;left:8px;bottom:6px;max-width:60%;margin:0;background:var(--dshet-panel);border-radius:8px;padding:2px 6px}',
@@ -596,19 +596,19 @@ window.__ModuleLoader__.load({
       '.dshet-btn:hover:not(:disabled){background:var(--dshet-hover)}',
       '.dshet-btn:focus-visible{outline:2px solid var(--dsw-alias-button-primary-fill,var(--dshet-accent));outline-offset:2px}',
       '.dshet-btn:disabled{cursor:default;opacity:.5}',
-      '.dshet-btn-save{width:28px;height:28px;padding:0;border:0;border-radius:50%;background:transparent;color:#81858c}',
+      '.dshet-btn-save{width:calc(28px + var(--dsh-content-font-delta,0px));height:calc(28px + var(--dsh-content-font-delta,0px));padding:0;border:0;border-radius:50%;background:transparent;color:#81858c}',
       '.dshet-btn-save:hover:not(:disabled){background:var(--dshet-hover)}',
-      '.dshet-btn-save svg{width:15px;height:15px;display:block;stroke:currentColor;fill:none;stroke-width:1.2;stroke-linecap:round;stroke-linejoin:round}',
+      '.dshet-btn-save svg{width:calc(16px + var(--dsh-content-font-delta,0px));height:calc(16px + var(--dsh-content-font-delta,0px));display:block;stroke:currentColor;fill:none;stroke-width:1.2;stroke-linecap:round;stroke-linejoin:round}',
       '.dshet-sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}',
       '.dshet-btn-primary{border-color:var(--dsw-alias-button-primary-fill,var(--dshet-accent));background:var(--dsw-alias-button-primary-fill,var(--dshet-accent));color:var(--dsw-alias-label-primary-foreground,var(--dshet-on-accent))}',
       '.dshet-btn-primary:hover:not(:disabled){background:var(--dsw-alias-button-primary-fill,var(--dshet-accent));filter:brightness(1.08)}',
-'.dshet-btn.dshet-btn-save{width:28px;height:28px;padding:0;border:0;border-radius:50%;background:transparent;color:var(--dshet-ink-soft);filter:none}',
+'.dshet-btn.dshet-btn-save{width:calc(28px + var(--dsh-content-font-delta,0px));height:calc(28px + var(--dsh-content-font-delta,0px));padding:0;border:0;border-radius:50%;background:transparent;color:var(--dshet-ink-soft);filter:none}',
       '.dshet-btn.dshet-btn-save:hover:not(:disabled){background:var(--dshet-hover);filter:none}',
       '.dshet-btn.dshet-btn-save.dshet-btn-confirm{background:var(--dshet-hover);box-shadow:inset 0 0 0 1.5px var(--dshet-accent)}',
-      '.dshet-editor .dshet-footer .dshet-btn.dshet-btn-icon{width:28px;height:28px;padding:0;border:0;border-radius:50%;background:transparent;color:#81858c;filter:none}',
+      '.dshet-editor .dshet-footer .dshet-btn.dshet-btn-icon{width:calc(28px + var(--dsh-content-font-delta,0px));height:calc(28px + var(--dsh-content-font-delta,0px));padding:0;border:0;border-radius:50%;background:transparent;color:#81858c;filter:none}',
       '.dshet-editor .dshet-footer .dshet-btn.dshet-btn-icon:hover:not(:disabled){background:var(--dshet-hover);color:var(--dshet-ink-soft);filter:none}',
-      '.dshet-btn-icon svg{width:15px;height:15px;display:block;fill:none;stroke:currentColor;stroke-width:1.2;stroke-linecap:round;stroke-linejoin:round}',
-      '.dshet-editor[data-dshet-inplace="1"] .dshet-btn.dshet-btn-save{width:28px;height:28px;padding:0;border:0;border-radius:50%;background:transparent;color:#81858c;filter:none}',
+      '.dshet-btn-icon svg{width:calc(16px + var(--dsh-content-font-delta,0px));height:calc(16px + var(--dsh-content-font-delta,0px));display:block;fill:none;stroke:currentColor;stroke-width:1.2;stroke-linecap:round;stroke-linejoin:round}',
+      '.dshet-editor[data-dshet-inplace="1"] .dshet-btn.dshet-btn-save{width:calc(28px + var(--dsh-content-font-delta,0px));height:calc(28px + var(--dsh-content-font-delta,0px));padding:0;border:0;border-radius:50%;background:transparent;color:#81858c;filter:none}',
       '.dshet-editor[data-dshet-inplace="1"] .dshet-btn.dshet-btn-save:hover:not(:disabled){background:var(--dshet-hover);filter:none}',
       '.dshet-pick{display:flex;align-items:center;gap:4px;padding:0;font-size:12px;color:var(--dshet-ink-dim)}',
       '.dshet-config{display:flex;flex-direction:column;gap:10px}',
@@ -3843,6 +3843,8 @@ window.__ModuleLoader__.load({
         })
         box.addEventListener('dragover', (event) => {
           event.preventDefault()
+          // 不让事件传到输入框：否则宿主也会把这次拖拽当成它的附件。
+          event.stopPropagation()
           box.dataset.dshetDrop = '1'
         })
         box.addEventListener('dragleave', () => {
@@ -3850,9 +3852,17 @@ window.__ModuleLoader__.load({
         })
         box.addEventListener('drop', (event) => {
           event.preventDefault()
+          event.stopPropagation()
           delete box.dataset.dshetDrop
           const files = filesFromData(event.dataTransfer)
           if (files.length > 0) controller.attachFiles(files)
+          // 宿主的「文件或图片拖动到此处即可添加」遮罩是靠它自己的 document drop
+          // 关闭的；我们把事件拦下来了，就得替它收尾，否则遮罩会一直挂着。
+          try {
+            window.dispatchEvent(new DragEvent('dragend', { bubbles: true }))
+          } catch {
+            /* 老环境没有 DragEvent 就算了 */
+          }
         })
       }
 
@@ -4707,12 +4717,18 @@ window.__ModuleLoader__.load({
           if (typeof unsubscribe === 'function') unsubscribe()
         }
       }, [controller])
-      const entry = view === null ? undefined : view.repliesByMessage.get(messageId)
-      if (entry === undefined || entry === null || view.hidden.has(entry.seq)) return null
+      // 先渲染、后确认：/state 还没回来时也把铅笔画出来（置灰），
+      // 否则宿主和别的插件都在了，只有我们要等一次请求才出现。
+      // 没有 messageId 就无从谈起：这种行不进入口。
+      if (messageId === undefined || messageId === null || messageId === '') return null
+      const loaded = view !== null
+      const entry = loaded ? view.repliesByMessage.get(messageId) : undefined
+      if (loaded && (entry === undefined || entry === null || view.hidden.has(entry.seq))) return null
       const label = t === null ? '' : t('action.edit-reply')
       const open = (event) => {
         event.preventDefault()
         event.stopPropagation()
+        if (entry === undefined) return
         controller.open({
           anchor: event.currentTarget,
           seq: entry.seq,
@@ -4736,6 +4752,7 @@ window.__ModuleLoader__.load({
         className: 'dshet-action dshet-row-action dshet-reply-action',
         'aria-label': label,
         title: label,
+        disabled: entry === undefined,
         onClick: open,
         children: jsx(PencilIcon, {}),
       })
@@ -5558,7 +5575,7 @@ window.__ModuleLoader__.load({
     const ROUTE_PREFIX = '/dsh-rerun-turn'
 
     /** Keep in sync with package.json and lib/index.js. */
-    const PLUGIN_VERSION = '0.2.11'
+    const PLUGIN_VERSION = '0.3.0'
 
     // --- copy -----------------------------------------------------------------
 
@@ -5779,11 +5796,11 @@ window.__ModuleLoader__.load({
       'body[data-ds-dark-theme]{--dsrr-panel:rgba(22,28,44,.96);--dsrr-field:rgba(14,19,33,.98);--dsrr-line:rgba(255,255,255,.18);--dsrr-ink:#eef2f8;--dsrr-ink-dim:#a6b1c6;--dsrr-hover:rgba(255,255,255,.11);--dsrr-shadow:0 12px 32px rgba(0,0,0,.5)}',
       // The rerun icon sits among the platform's own action icons and takes
       // their colour (the fallback is what the default theme resolves to).
-      '.dsrr-action{width:28px;height:28px;padding:6px;box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;border:none;border-radius:28px;background:transparent;color:var(--dsw-alias-label-tertiary,#81858c);cursor:pointer;transition:background-color .12s,color .12s}',
+      '.dsrr-action{width:calc(28px + var(--dsh-content-font-delta,0px));height:calc(28px + var(--dsh-content-font-delta,0px));padding:6px;box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;border:none;border-radius:28px;background:transparent;color:var(--dsw-alias-label-tertiary,#81858c);cursor:pointer;transition:background-color .12s,color .12s}',
       '.dsrr-action:hover:not(:disabled){background:var(--dsrr-field);color:var(--dsw-alias-label-primary,var(--dsrr-ink))}',
       '.dsrr-action:focus-visible{outline:2px solid var(--dsw-alias-button-primary-fill,var(--dsrr-accent));outline-offset:2px}',
       '.dsrr-action:disabled{cursor:default;opacity:.4}',
-      '.dsrr-action svg{width:15px;height:15px}',
+      '.dsrr-action svg{width:calc(16px + var(--dsh-content-font-delta,0px));height:calc(16px + var(--dsh-content-font-delta,0px))}',
       '.dsrr-action-host{display:inline-flex;align-items:center}',
       // Next to the sibling edit pencil, ahead of the platform's own actions.
       '.dsrr-reply-action{order:-1}',
@@ -6787,9 +6804,10 @@ window.__ModuleLoader__.load({
           if (typeof unsubscribe === 'function') unsubscribe()
         }
       }, [controller])
-      const entry = view === null || messageId === undefined || messageId === null ? undefined : view.repliesByMessage.get(messageId)
-      if (entry === undefined || entry === null) return null
-      if (view.hidden.has(entry.seq)) return null
+      // 先渲染、后确认：/state 没回来也先把重跑按钮画出来（置灰）。
+      const loaded = view !== null && messageId !== undefined && messageId !== null
+      const entry = loaded ? view.repliesByMessage.get(messageId) : undefined
+      if (loaded && (entry === undefined || entry === null || view.hidden.has(entry.seq))) return null
       // Deliberately NOT hidden while the session is busy or a rerun is in
       // flight: other turns must look untouched during the process. The host
       // admits one rerun at a time and answers a second attempt with a clear
@@ -6803,9 +6821,11 @@ window.__ModuleLoader__.load({
         'data-dsrr-action': 'rerun',
         'aria-label': label,
         title: label,
+        disabled: entry === undefined,
         onClick: (event) => {
           event.preventDefault()
           event.stopPropagation()
+          if (entry === undefined) return
           controller.rerun(entry)
         },
         children: jsx(RerunIcon, {}),
@@ -7313,11 +7333,11 @@ window.__ModuleLoader__.load({
     // --- style ----------------------------------------------------------------
 
     const CSS = [
-      '.dshdt-action{width:28px;height:28px;padding:6px;display:inline-flex;align-items:center;justify-content:center;border:none;border-radius:28px;background:transparent;color:var(--dsw-alias-label-tertiary,#8a8f98);cursor:pointer;transition:background-color .12s,color .12s}',
+      '.dshdt-action{width:calc(28px + var(--dsh-content-font-delta,0px));height:calc(28px + var(--dsh-content-font-delta,0px));padding:6px;display:inline-flex;align-items:center;justify-content:center;border:none;border-radius:28px;background:transparent;color:var(--dsw-alias-label-tertiary,#8a8f98);cursor:pointer;transition:background-color .12s,color .12s}',
       '.dshdt-action:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,rgba(127,127,127,.12));color:var(--dsw-alias-state-error-primary,#d54941)}',
       '.dshdt-action:focus-visible{outline:2px solid var(--dsw-alias-button-primary-fill,#4d6bfe);outline-offset:2px}',
       '.dshdt-action:disabled{cursor:default;opacity:.4}',
-      '.dshdt-action svg{width:15px;height:15px}',
+      '.dshdt-action svg{width:calc(16px + var(--dsh-content-font-delta,0px));height:calc(16px + var(--dsh-content-font-delta,0px))}',
       '.dshdt-action-host{display:inline-flex;align-items:center;justify-content:center}',
       '.dshdt-row{position:relative}',
       '.dshdt-floating{position:absolute;top:2px;right:6px;z-index:2;opacity:0;transition:opacity .12s}',
@@ -7335,12 +7355,12 @@ window.__ModuleLoader__.load({
       // its own class so the trash action's selector, its counts and the
       // interop contract stay exactly as they were; the row attribute turns it
       // on only where the host can plan the operation.
-      '.dshdt-turn{width:28px;height:28px;padding:6px;display:none;align-items:center;justify-content:center;border:none;border-radius:28px;background:transparent;color:var(--dsw-alias-label-tertiary,#8a8f98);cursor:pointer;transition:background-color .12s,color .12s}',
+      '.dshdt-turn{width:calc(28px + var(--dsh-content-font-delta,0px));height:calc(28px + var(--dsh-content-font-delta,0px));padding:6px;display:none;align-items:center;justify-content:center;border:none;border-radius:28px;background:transparent;color:var(--dsw-alias-label-tertiary,#8a8f98);cursor:pointer;transition:background-color .12s,color .12s}',
       '[data-dshdt-turn="1"] .dshdt-turn{display:inline-flex}',
       '.dshdt-turn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,rgba(127,127,127,.12));color:var(--dsw-alias-button-primary-fill,#4d6bfe)}',
       '.dshdt-turn:focus-visible{outline:2px solid var(--dsw-alias-button-primary-fill,#4d6bfe);outline-offset:2px}',
       '.dshdt-turn:disabled{cursor:default;opacity:.4}',
-      '.dshdt-turn svg{width:15px;height:15px}',
+      '.dshdt-turn svg{width:calc(16px + var(--dsh-content-font-delta,0px));height:calc(16px + var(--dsh-content-font-delta,0px))}',
       '[data-dshdt-no-target="1"] .dshdt-action{display:none!important}',
       // In multi-select the toggle is a badge pinned to the row itself: the
       // action strip of a message row only exists while the pointer is on it,
@@ -8896,7 +8916,7 @@ window.__ModuleLoader__.load({
     const NS = 'dsh-markdown-bubble'
 
     /** Keep in sync with package.json and src/index.js. */
-    const PLUGIN_VERSION = '0.1.6'
+    const PLUGIN_VERSION = '0.2.0'
 
     /** Presence marker the live verifier reads. */
     const DEBUG_KEY = '__DSH_MARKDOWN_BUBBLE__'
@@ -8915,21 +8935,69 @@ window.__ModuleLoader__.load({
     const LAYOUT_CSS = `
 /* Pro（模仿 Google AI Studio）：整条用户消息是一个和输入框同宽的圆角框——
    细边框、透明底，框内第一行是「User · 时:分」，正文在下面。 */
-body[data-dshmb-layout="full"] .dshmb-stack{max-width:100%!important;width:100%!important;align-items:stretch!important}
-body[data-dshmb-layout="full"] .dshmb-bubble{
+html[data-dshmb-layout="full"] .dshmb-stack{max-width:100%!important;width:100%!important;align-items:stretch!important}
+html[data-dshmb-layout="full"] .dshmb-bubble{
   display:block!important;
   width:100%!important;max-width:100%!important;
   box-sizing:border-box;
   background:transparent!important;
-  border:1px solid var(--dsw-alias-border-l2,rgba(16,24,40,.16))!important;
+  /* 静默态：只有顶上一条横线，没有框。 */
+  border:0!important;
+  /* 静默态也有 1px 的边框，只是颜色透明——这样悬浮时只过渡颜色，
+     不会出现「先黑后灰」的闪色，也不会因为突然多出 1px 而跳动。 */
+  border:1px solid transparent!important;
+  border-radius:var(--dsw-radius-xl,16px)!important;
+  position:relative;
+  padding:12px 16px!important;
+  text-align:left!important;
+  transition:border-color .12s ease, border-radius .12s ease, box-shadow .12s ease;
+}
+
+/* 刚发出、还没落盘的那一帧由宿主自己的 UserMessageBubble 画（data-message-bubble），
+   它没有 .dshmb-* 类。这里把它也按 Pro 的样子铺开，避免「先闪一下右侧气泡」。 */
+html[data-dshmb-layout="full"] [data-chat-flow-kind="user"] [data-message-bubble],
+html[data-dshmb-layout="full"] [data-chat-flow-kind="steering"] [data-message-bubble]{
+  width:100%!important;max-width:100%!important;
+  box-sizing:border-box;
+  background:transparent!important;
+  border:1px solid transparent!important;
   border-radius:var(--dsw-radius-xl,16px)!important;
   padding:12px 16px!important;
   text-align:left!important;
 }
-body[data-dshmb-layout="full"] .dshmb-md{text-align:left!important}
-body[data-dshmb-layout="full"] .dshmb-attachments{justify-content:flex-start!important}
+html[data-dshmb-layout="full"] [data-chat-flow-kind="user"] [data-message-bubble]::before,
+html[data-dshmb-layout="full"] [data-chat-flow-kind="steering"] [data-message-bubble]::before{
+  content:"";position:absolute;left:16px;right:16px;top:0;height:1px;
+  background:var(--dsw-alias-border-l2,rgba(16,24,40,.16));
+}
+html[data-dshmb-layout="full"] [data-chat-flow-kind="user"] [data-message-bubble]{position:relative}
+
+/* 一轮结束后的动作条与下一轮之间的呼吸：宿主默认只留 4px，太挤。 */
+html[data-dshmb-layout="full"] [data-chat-flow-kind="turn-tail"]{margin-bottom:16px!important}
+
+/* 静默顶线：两端内收一个圆角半径，长度 == 悬浮框顶边的直线段。 */
+html[data-dshmb-layout="full"] .dshmb-bubble::before{
+  content:"";position:absolute;left:16px;right:16px;top:0;height:1px;
+  background:var(--dsw-alias-border-l2,rgba(16,24,40,.16));
+  transition:opacity .12s ease;
+}
+html[data-dshmb-layout="full"] [data-chat-flow-kind="user"]:hover .dshmb-bubble::before,
+html[data-dshmb-layout="full"] [data-chat-flow-kind="steering"]:hover .dshmb-bubble::before,
+html[data-dshmb-layout="full"] .dshmb-bubble:hover::before{opacity:0}
+
+/* 悬浮态：整框出现（四边 + 圆角），移开又只剩顶线。 */
+html[data-dshmb-layout="full"] [data-chat-flow-kind="user"]:hover .dshmb-bubble,
+html[data-dshmb-layout="full"] [data-chat-flow-kind="steering"]:hover .dshmb-bubble,
+html[data-dshmb-layout="full"] .dshmb-bubble:hover{
+  border-color:var(--dsw-alias-border-l2,rgba(16,24,40,.16))!important;
+  border-radius:var(--dsw-radius-xl,16px)!important;
+}
+html[data-dshmb-layout="full"] .dshmb-md{text-align:left!important}
+/* 框要「高」一点：正文照常排版，框底多留 20px 呼吸空间。 */
+html[data-dshmb-layout="full"] .dshmb-bubble{padding-bottom:20px!important}
+html[data-dshmb-layout="full"] .dshmb-attachments{justify-content:flex-start!important}
 /* 抬头：User · 03:06 */
-.dshmb-pro-head{display:flex;align-items:center;gap:6px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary,#81858c);margin:0 0 6px}
+.dshmb-pro-head{display:flex;align-items:center;justify-content:space-between;gap:6px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary,#81858c);margin:0 0 6px}
 .dshmb-pro-head b{font-weight:500;color:var(--dsw-alias-label-secondary,#4b5872)}
 `
 
@@ -8957,6 +9025,8 @@ body[data-dshmb-layout="full"] .dshmb-attachments{justify-content:flex-start!imp
       const who = document.createElement('b')
       who.textContent = row.getAttribute('data-chat-flow-kind') === 'steering' ? 'You' : 'User'
       head.appendChild(who)
+      // 本行的动作入口（编辑 / 重跑 / 删除）搬进抬头行右侧——只搬本行自己的，
+      // 绝不跨行，否则会像之前那样把上一行的删除按钮吸过来。
       bubble.insertBefore(head, bubble.firstChild)
     }
 
@@ -8967,6 +9037,32 @@ body[data-dshmb-layout="full"] .dshmb-attachments{justify-content:flex-start!imp
         decorateProHeader(row)
       }
     }
+
+    /** 本地缓存键：让下一帧之前就能知道外观，避免新消息先画成气泡再跳变。 */
+    const LAYOUT_CACHE_KEY = 'dsh-markdown-bubble:layout'
+
+    /**
+     * 同步地把外观标记打到 `<html>` 上。
+     *
+     * 宿主配置是异步读的（一次 fetch），但新消息到来的第一帧必须已经是正确的
+     * 外观，否则会「先画成右边的气泡，闪一下才变成 Pro」。所以真实来源仍是宿主
+     * 配置，这里只用一个本地缓存做首帧的提前量，读到配置后再校正。
+     *
+     * @param {'bubble' | 'full' | null} [value] - 要写入的外观；省略则读缓存。
+     */
+    function markLayout(value) {
+      if (typeof document === 'undefined') return
+      try {
+        const layout = value ?? (typeof localStorage !== 'undefined' ? localStorage.getItem(LAYOUT_CACHE_KEY) : null)
+        if (layout === 'full') document.documentElement.dataset.dshmbLayout = 'full'
+        else if (layout === 'bubble') document.documentElement.dataset.dshmbLayout = 'bubble'
+      } catch {
+        /* 没有 document/localStorage 就交给宿主 */
+      }
+    }
+
+    // 模块加载即执行：赶在第一帧之前。
+    markLayout()
 
     /**
      * 读宿主记住的外观；失败一律当默认（气泡）。
@@ -9851,11 +9947,12 @@ body[data-dshmb-layout="full"] .dshmb-attachments{justify-content:flex-start!imp
       // 读到了再切换，避免闪一下错的样子。
       void readLayout().then((layout) => {
         try {
-          if (typeof document !== 'undefined' && document.body) document.body.dataset.dshmbLayout = layout
-          decorateAllRows()
+          if (typeof localStorage !== 'undefined') localStorage.setItem(LAYOUT_CACHE_KEY, layout)
         } catch {
-          /* 没有 body 就等着宿主自己渲染 */
+          /* 存不进去也没关系 */
         }
+        markLayout(layout)
+        decorateAllRows()
       })
       // 消息行会随时重渲染：轻量地补抬头，不监听整棵文档的文本变化。
       let scheduled = false
@@ -9887,6 +9984,17 @@ body[data-dshmb-layout="full"] .dshmb-attachments{justify-content:flex-start!imp
               locale: 'chat',
             },
             MarkdownBubbleSeat,
+          ),
+        )
+      }
+
+      // 独立安装时也要有设置卡：插件页的 `plugins.bundle.config`，
+      // key 用包名，和 dsh-context 等插件同一约定。
+      if (ctx.slots !== null && ctx.slots !== undefined && typeof ctx.slots.inject === 'function') {
+        ctx.slots.inject('plugins.bundle.config', () =>
+          ctx.slots.register(
+            { name: 'plugins.bundle.config', key: 'dsh-markdown-bubble', locale: NS },
+            ConfigCard,
           ),
         )
       }
@@ -9925,9 +10033,15 @@ body[data-dshmb-layout="full"] .dshmb-attachments{justify-content:flex-start!imp
           .then(async (response) => {
             const data = await response.json().catch(() => ({}))
             if (!response.ok || data.ok !== true) throw new Error(data.error ? String(data.error) : `HTTP ${response.status}`)
-            setLayout(data.layout === 'full' ? 'full' : 'bubble')
+            const nextLayout = data.layout === 'full' ? 'full' : 'bubble'
+            setLayout(nextLayout)
             setError('')
-            if (typeof document !== 'undefined' && document.body) document.body.dataset.dshmbLayout = data.layout === 'full' ? 'full' : 'bubble'
+            try {
+              if (typeof localStorage !== 'undefined') localStorage.setItem(LAYOUT_CACHE_KEY, nextLayout)
+            } catch {
+              /* 存不进去也没关系 */
+            }
+            markLayout(nextLayout)
           })
           .catch((failure) => setError(String(failure && failure.message ? failure.message : failure)))
       }
@@ -9960,7 +10074,7 @@ body[data-dshmb-layout="full"] .dshmb-attachments{justify-content:flex-start!imp
       return react.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: 8 } }, [
         react.createElement('div', { key: 'title', style: { fontSize: 13, fontWeight: 600 } }, '气泡外观'),
         react.createElement('div', { key: 'options', style: { display: 'flex', gap: 8, flexWrap: 'wrap' } }, [
-          option('bubble', '气泡 Lite', '右对齐气泡，宽度约对话列的 70%（默认）'),
+          option('bubble', '气泡 Lite', '右对齐气泡，宽度约对话列的 70%'),
           option('full', '气泡 Pro', '铺满对话列、与输入框同宽，无气泡底色'),
         ]),
         error === '' ? null : react.createElement('p', { key: 'err', style: { fontSize: 12, color: 'var(--dsw-alias-state-error-primary,#c93a31)', margin: 0 } }, `保存失败：${error}`),
@@ -10506,7 +10620,7 @@ body[data-dshmb-layout="full"] .dshmb-attachments{justify-content:flex-start!imp
     const react = require('react')
 
     const NS = 'dsh-fork-anywhere'
-    const PLUGIN_VERSION = '0.1.0'
+    const PLUGIN_VERSION = '0.1.2'
     /** Own node namespace: only elements carrying it are ever removed (I3). */
     const HOST_ATTR = 'data-dsfa-host'
     const HOST_SELECTOR = '[data-dsfa-host="1"]'
@@ -10659,6 +10773,7 @@ body[data-dshmb-layout="full"] .dshmb-attachments{justify-content:flex-start!imp
       '[data-dsfa-stale="1"]{display:none!important}',
       '[data-dsfa-empty-turn="1"]{display:none!important}',
       '.dsfa-dirty-row{display:flex;align-items:center;padding:2px 0 4px 34px}',
+      '[data-dsfa-hide-shipped="1"]{display:none!important}',
       '[data-dsfa-fork-tail="1"]{display:none!important}',
       '.dsfa-crow--node{gap:4px;height:calc(28px + var(--dsh-content-font-delta,0px))}',
       '.dsfa-glyph{display:inline-flex;align-items:center;justify-content:center}',
@@ -11575,6 +11690,39 @@ function removeHost(row) {
      * @param sessionId - source session.
      * @param atSeq - inclusive event cut (the prompt's own seq).
      */
+    /**
+     * 平台那排操作里被禁用的分支按钮。
+     *
+     * 平台的 `MessageIconActions` 用 `aria-disabled` / `data-unavailable` 标记不可用
+     * 的动作；只有分支会带这个标记，所以命中即分支按钮。
+     * @returns 那个按钮，没有则 null。
+     */
+    function disabledBranchButton(container) {
+      if (container === null || container === undefined || typeof container.querySelectorAll !== 'function') return null
+      for (const button of [].slice.call(container.querySelectorAll('button'))) {
+        if (typeof button.getAttribute !== 'function') continue
+        if (button.getAttribute('data-dsfa-hide-shipped') === '1') return null
+        const disabled = button.getAttribute('aria-disabled') === 'true' || (typeof button.hasAttribute === 'function' && button.hasAttribute('data-unavailable'))
+        if (disabled) return button
+      }
+      return null
+    }
+
+    /**
+     * 容器里是否已有平台自己的操作按钮。
+     *
+     * 平台的 MessageIconActions（复制 / 分支 / 时间）渲染在 div[data-turn-tail]
+     * 里；只要里面有一个不是本插件创建的 button，就说明这一轮平台已经提供了入口。
+     */
+    function hasShippedActions(container) {
+      if (container === null || container === undefined || typeof container.querySelectorAll !== 'function') return false
+      for (const button of [].slice.call(container.querySelectorAll('button'))) {
+        const host = typeof button.closest === 'function' ? button.closest('[' + HOST_ATTR + '="1"]') : null
+        if (host === null || host === undefined) return true
+      }
+      return false
+    }
+
     /** Turns a fork closed with a synthetic `forked` end. */
     function forkedTurnNumbers(sessions, sessionId) {
       const none = []
@@ -11679,6 +11827,17 @@ function removeHost(row) {
         const anchorRow = header === null || header === undefined ? null : closestRow(header)
         let container = null
         if (tail !== null && tail !== undefined) {
+          // 平台已经放了一排操作时：
+          // - 分支按钮可用 → 收掉自己的，避免两个入口；
+          // - 分支按钮是禁用态（“仅可从已完成轮次的最后一条消息分支”）→ 把这个
+          //   点不动的按钮藏起来，留自己的可点按钮。页面上始终只有一个可点的 fork。
+          const shippedDisabled = disabledBranchButton(tail)
+          if (shippedDisabled !== null) {
+            shippedDisabled.setAttribute('data-dsfa-hide-shipped', '1')
+          } else if (hasShippedActions(tail)) {
+            for (const mine of [].slice.call(tail.querySelectorAll('[data-dsfa-dirty="1"]'))) mine.remove()
+            continue
+          }
           container = tail
         } else if (anchorRow !== null && anchorRow !== undefined) {
           // No such container: the action becomes its own row strictly BELOW the
@@ -12587,6 +12746,8 @@ function removeHost(row) {
         hideStaleInputs,
         forkedTurnNumbers,
         hideEmptyForkedTurns,
+        hasShippedActions,
+        disabledBranchButton,
         dirtyTurnEnds,
         decorateDirtyTurns,
         usageLabel,

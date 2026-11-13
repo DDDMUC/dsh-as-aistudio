@@ -1,6 +1,6 @@
 // dsh-rerun-turn browser half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-rerun-turn/lib/client.js  (v0.2.11, sha256 4a9b0c8d153b8165)
+// Source: ../dsh-rerun-turn/lib/client.js  (v0.3.0, sha256 dfd58ca65903a793)
 // Regenerate with `npm run vendor`; test/vendor-sync.test.js fails when this is stale.
 //
 // The component registers its factory with the host module loader; inside this
@@ -20,7 +20,7 @@ export default (require) => {
     const ROUTE_PREFIX = '/dsh-rerun-turn'
 
     /** Keep in sync with package.json and lib/index.js. */
-    const PLUGIN_VERSION = '0.2.11'
+    const PLUGIN_VERSION = '0.3.0'
 
     // --- copy -----------------------------------------------------------------
 
@@ -241,11 +241,11 @@ export default (require) => {
       'body[data-ds-dark-theme]{--dsrr-panel:rgba(22,28,44,.96);--dsrr-field:rgba(14,19,33,.98);--dsrr-line:rgba(255,255,255,.18);--dsrr-ink:#eef2f8;--dsrr-ink-dim:#a6b1c6;--dsrr-hover:rgba(255,255,255,.11);--dsrr-shadow:0 12px 32px rgba(0,0,0,.5)}',
       // The rerun icon sits among the platform's own action icons and takes
       // their colour (the fallback is what the default theme resolves to).
-      '.dsrr-action{width:28px;height:28px;padding:6px;box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;border:none;border-radius:28px;background:transparent;color:var(--dsw-alias-label-tertiary,#81858c);cursor:pointer;transition:background-color .12s,color .12s}',
+      '.dsrr-action{width:calc(28px + var(--dsh-content-font-delta,0px));height:calc(28px + var(--dsh-content-font-delta,0px));padding:6px;box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;border:none;border-radius:28px;background:transparent;color:var(--dsw-alias-label-tertiary,#81858c);cursor:pointer;transition:background-color .12s,color .12s}',
       '.dsrr-action:hover:not(:disabled){background:var(--dsrr-field);color:var(--dsw-alias-label-primary,var(--dsrr-ink))}',
       '.dsrr-action:focus-visible{outline:2px solid var(--dsw-alias-button-primary-fill,var(--dsrr-accent));outline-offset:2px}',
       '.dsrr-action:disabled{cursor:default;opacity:.4}',
-      '.dsrr-action svg{width:15px;height:15px}',
+      '.dsrr-action svg{width:calc(16px + var(--dsh-content-font-delta,0px));height:calc(16px + var(--dsh-content-font-delta,0px))}',
       '.dsrr-action-host{display:inline-flex;align-items:center}',
       // Next to the sibling edit pencil, ahead of the platform's own actions.
       '.dsrr-reply-action{order:-1}',
@@ -1249,9 +1249,10 @@ export default (require) => {
           if (typeof unsubscribe === 'function') unsubscribe()
         }
       }, [controller])
-      const entry = view === null || messageId === undefined || messageId === null ? undefined : view.repliesByMessage.get(messageId)
-      if (entry === undefined || entry === null) return null
-      if (view.hidden.has(entry.seq)) return null
+      // 先渲染、后确认：/state 没回来也先把重跑按钮画出来（置灰）。
+      const loaded = view !== null && messageId !== undefined && messageId !== null
+      const entry = loaded ? view.repliesByMessage.get(messageId) : undefined
+      if (loaded && (entry === undefined || entry === null || view.hidden.has(entry.seq))) return null
       // Deliberately NOT hidden while the session is busy or a rerun is in
       // flight: other turns must look untouched during the process. The host
       // admits one rerun at a time and answers a second attempt with a clear
@@ -1265,9 +1266,11 @@ export default (require) => {
         'data-dsrr-action': 'rerun',
         'aria-label': label,
         title: label,
+        disabled: entry === undefined,
         onClick: (event) => {
           event.preventDefault()
           event.stopPropagation()
+          if (entry === undefined) return
           controller.rerun(entry)
         },
         children: jsx(RerunIcon, {}),

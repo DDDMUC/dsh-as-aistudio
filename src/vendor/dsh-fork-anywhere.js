@@ -1,6 +1,6 @@
 // dsh-fork-anywhere browser half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-fork-anywhere/src/client.js  (v0.1.0, sha256 6fe4218cbce28d6b)
+// Source: ../dsh-fork-anywhere/src/client.js  (v0.1.2, sha256 c8b7885faaaeeb20)
 // Regenerate with `npm run vendor`; test/vendor-sync.test.js fails when this is stale.
 //
 // The component registers its factory with the host module loader; inside this
@@ -11,7 +11,7 @@ export default (require) => {
     const react = require('react')
 
     const NS = 'dsh-fork-anywhere'
-    const PLUGIN_VERSION = '0.1.0'
+    const PLUGIN_VERSION = '0.1.2'
     /** Own node namespace: only elements carrying it are ever removed (I3). */
     const HOST_ATTR = 'data-dsfa-host'
     const HOST_SELECTOR = '[data-dsfa-host="1"]'
@@ -164,6 +164,7 @@ export default (require) => {
       '[data-dsfa-stale="1"]{display:none!important}',
       '[data-dsfa-empty-turn="1"]{display:none!important}',
       '.dsfa-dirty-row{display:flex;align-items:center;padding:2px 0 4px 34px}',
+      '[data-dsfa-hide-shipped="1"]{display:none!important}',
       '[data-dsfa-fork-tail="1"]{display:none!important}',
       '.dsfa-crow--node{gap:4px;height:calc(28px + var(--dsh-content-font-delta,0px))}',
       '.dsfa-glyph{display:inline-flex;align-items:center;justify-content:center}',
@@ -1080,6 +1081,39 @@ function removeHost(row) {
      * @param sessionId - source session.
      * @param atSeq - inclusive event cut (the prompt's own seq).
      */
+    /**
+     * 平台那排操作里被禁用的分支按钮。
+     *
+     * 平台的 `MessageIconActions` 用 `aria-disabled` / `data-unavailable` 标记不可用
+     * 的动作；只有分支会带这个标记，所以命中即分支按钮。
+     * @returns 那个按钮，没有则 null。
+     */
+    function disabledBranchButton(container) {
+      if (container === null || container === undefined || typeof container.querySelectorAll !== 'function') return null
+      for (const button of [].slice.call(container.querySelectorAll('button'))) {
+        if (typeof button.getAttribute !== 'function') continue
+        if (button.getAttribute('data-dsfa-hide-shipped') === '1') return null
+        const disabled = button.getAttribute('aria-disabled') === 'true' || (typeof button.hasAttribute === 'function' && button.hasAttribute('data-unavailable'))
+        if (disabled) return button
+      }
+      return null
+    }
+
+    /**
+     * 容器里是否已有平台自己的操作按钮。
+     *
+     * 平台的 MessageIconActions（复制 / 分支 / 时间）渲染在 div[data-turn-tail]
+     * 里；只要里面有一个不是本插件创建的 button，就说明这一轮平台已经提供了入口。
+     */
+    function hasShippedActions(container) {
+      if (container === null || container === undefined || typeof container.querySelectorAll !== 'function') return false
+      for (const button of [].slice.call(container.querySelectorAll('button'))) {
+        const host = typeof button.closest === 'function' ? button.closest('[' + HOST_ATTR + '="1"]') : null
+        if (host === null || host === undefined) return true
+      }
+      return false
+    }
+
     /** Turns a fork closed with a synthetic `forked` end. */
     function forkedTurnNumbers(sessions, sessionId) {
       const none = []
@@ -1184,6 +1218,17 @@ function removeHost(row) {
         const anchorRow = header === null || header === undefined ? null : closestRow(header)
         let container = null
         if (tail !== null && tail !== undefined) {
+          // 平台已经放了一排操作时：
+          // - 分支按钮可用 → 收掉自己的，避免两个入口；
+          // - 分支按钮是禁用态（“仅可从已完成轮次的最后一条消息分支”）→ 把这个
+          //   点不动的按钮藏起来，留自己的可点按钮。页面上始终只有一个可点的 fork。
+          const shippedDisabled = disabledBranchButton(tail)
+          if (shippedDisabled !== null) {
+            shippedDisabled.setAttribute('data-dsfa-hide-shipped', '1')
+          } else if (hasShippedActions(tail)) {
+            for (const mine of [].slice.call(tail.querySelectorAll('[data-dsfa-dirty="1"]'))) mine.remove()
+            continue
+          }
           container = tail
         } else if (anchorRow !== null && anchorRow !== undefined) {
           // No such container: the action becomes its own row strictly BELOW the
@@ -2092,6 +2137,8 @@ function removeHost(row) {
         hideStaleInputs,
         forkedTurnNumbers,
         hideEmptyForkedTurns,
+        hasShippedActions,
+        disabledBranchButton,
         dirtyTurnEnds,
         decorateDirtyTurns,
         usageLabel,
