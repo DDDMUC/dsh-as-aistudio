@@ -1,9 +1,9 @@
 {
-  "dsh-edit-turn": "0.6.0",
+  "dsh-edit-turn": "0.6.1",
   "dsh-rerun-turn": "0.3.0",
   "dsh-delete-turn": "0.2.7",
-  "dsh-markdown-bubble": "0.2.0",
-  "dsh-log-trim": "0.7.9",
+  "dsh-markdown-bubble": "0.2.1",
+  "dsh-log-trim": "0.8.0",
   "dsh-fork-anywhere": "0.1.2",
   "dsh-bare-preset": "0.2.0"
 }

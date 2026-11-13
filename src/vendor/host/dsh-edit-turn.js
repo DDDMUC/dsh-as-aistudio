@@ -1,6 +1,6 @@
 // dsh-edit-turn host half (dsh-edit-turn.js), VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-edit-turn/lib/index.js  (v0.6.0, sha256 c2d08f10eb33e95e)
+// Source: ../dsh-edit-turn/lib/index.js  (v0.6.1, sha256 93cb0c34a6bf7358)
 // Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.
 //
 // src/shell.js imports the copy named after the component, which is why the
@@ -85,7 +85,7 @@ export const PLUGIN_ID = 'dsh-edit-turn'
 export const name = PLUGIN_ID
 
 /** Keep in sync with package.json and lib/client.js. */
-export const PLUGIN_VERSION = '0.6.0'
+export const PLUGIN_VERSION = '0.6.1'
 
 // A ring of the last few requests, answering "did the browser half even ask, and
 // what did it get?" without needing its console. Read-only diagnostics: the
@@ -1828,7 +1828,20 @@ async function stateOf(ctx, sessionId, config) {
     // The landed in-place patches, latest per block. The browser half uses them
     // to draw the projected text in place of the recorded one; the model already
     // sees them through the host projection.
-    patches: patchList(activePatches),
+    // 每个补丁带上原文：`/state` 的回复只发身份（没有 blocks），浏览器端
+    // 投影时需要一个用于匹配 DOM 的旧文本，否则保存成功却不会重绘。
+    patches: (() => {
+      const seqs = new Set(activePatches.keys())
+      const messageBySeq = new Map()
+      for (const event of events) {
+        if (seqs.has(event.seq)) messageBySeq.set(event.seq, event.data && event.data.message !== undefined ? event.data.message : event.data)
+      }
+      return patchList(activePatches).map((patch) => {
+        const message = messageBySeq.get(patch.seq)
+        const block = message === undefined ? undefined : editableBlocks(message).find((entry) => entry.index === patch.blockIndex)
+        return { ...patch, original: block === undefined ? '' : block.text }
+      })
+    })(),
     mode: config.patch === true ? 'patch' : 'replay',
     live: Boolean(live),
     busy: isBusy(events),

@@ -1,6 +1,6 @@
 // dsh-markdown-bubble host half (dsh-markdown-bubble.js), VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-markdown-bubble/src/index.js  (v0.2.0, sha256 15212c92e7ca7090)
+// Source: ../dsh-markdown-bubble/src/index.js  (v0.2.1, sha256 e7da18dbf9fd76f3)
 // Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.
 //
 // src/shell.js imports the copy named after the component, which is why the
@@ -25,7 +25,7 @@ import path from 'node:path'
 export const PLUGIN_ID = 'dsh-markdown-bubble'
 
 /** 与 package.json / src/client.js 保持同步。 */
-export const PLUGIN_VERSION = '0.2.0'
+export const PLUGIN_VERSION = '0.2.1'
 
 /** Cordis 插件名；bundle patch 用这个名字解析包。 */
 export const name = PLUGIN_ID

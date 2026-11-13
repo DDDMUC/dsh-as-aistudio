@@ -1,6 +1,6 @@
 // dsh-log-trim host half (dsh-log-trim.js), VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-log-trim/lib/index.js  (v0.7.9, sha256 8de453b1edc314b0)
+// Source: ../dsh-log-trim/lib/index.js  (v0.8.0, sha256 81007098fc97d584)
 // Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.
 //
 // src/shell.js imports the copy named after the component, which is why the
@@ -37,6 +37,7 @@ import { discoverRoots, isCurrentLog, listLegacy } from './dsh-log-trim.roots.js
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { appendArchive, archiveInfo, archivePathOf, readArchive } from './dsh-log-trim.archive.js'
 import { applyTrim, commitTrim, dropShadowedPrefix, encodeLogAsync, foldSurface, isSessionLocked, keepLastWindows, readLogAsync, renumber, windowsOf } from './dsh-log-trim.vendor.compact-session.mjs'
 import { applyFlatten, applyLossless, applyStreamOnly, planLossless, applyRebuild } from './dsh-log-trim.lossless.js'
 import { orphanGoalRounds, stripOrphanGoalSources } from './dsh-log-trim.goal-repair.js'
@@ -44,7 +45,7 @@ import { readLedger, recordFor } from './dsh-log-trim.ledger.js'
 
 export const name = 'dsh-log-trim'
 export const PLUGIN_ID = name
-export const PLUGIN_VERSION = '0.7.9'
+export const PLUGIN_VERSION = '0.8.0'
 export const ROUTE_PREFIX = '/api/dsh-log-trim'
 
 /**
@@ -216,6 +217,16 @@ export async function trimOne(logFile, config) {
     throw new Error('这个会话正被宿主打开着（session.lock）。先切到别的对话或重启 DSH，再压缩它')
   }
   const before = fs.statSync(logFile).size
+  // 完美备份：动手之前先把「档案里还没有的事件」追加进档案（追加一个 zstd 帧）。
+  let archive = null
+  if (config.perfectBackup === true) {
+    try {
+      archive = appendArchive(logFile, (await readLogAsync(logFile)).events)
+    } catch (error) {
+      // 档案写不进去就不裁剪：宁可这轮不动，也不能出现「内容已经没了、档案也没留住」。
+      throw new Error(`完美备份失败，未改动日志：${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
   let result
   if (config.mode === 'rebuild') {
     result = await applyRebuild(logFile, config)
@@ -240,6 +251,7 @@ export async function trimOne(logFile, config) {
     model: result.model,
     backup: path.basename(result.backup),
     prunedBackups: pruned,
+    ...(archive === null ? {} : { archive }),
   }
 }
 
@@ -335,6 +347,74 @@ export function backupsOf(logFile) {
  * @param {object} config - the resolved config (for backup retention).
  * @returns {Promise<{ok: boolean, safety?: string, error?: string}>} the outcome.
  */
+/**
+ * 标题必须引用「更早的事件」：档案按 time 重排后，原来的 messageSeqs 可能指到
+ * 已删/更晚的位置，宿主会整份拒收。这里把每条标题重新指向它之前最近的一条消息。
+ *
+ * @param {object[]} events - 已重新编号的事件。
+ * @returns {object[]} 修好引用的副本。
+ */
+function fixTitleRefs(events) {
+  return events.flatMap((event, index) => {
+    if (event?.type !== 'session/title') return [event]
+    const data = event.data ?? {}
+    const seqs = Array.isArray(data.messageSeqs) ? data.messageSeqs : null
+    if (seqs === null) return [event]
+    const earlier = (seq) => Number.isSafeInteger(seq) && seq < event.seq &&
+      events.some((other) => other.seq === seq && (other.type === 'user/message' || other.type === 'assistant/message'))
+    const kept = seqs.filter(earlier)
+    if (kept.length === seqs.length) return [event]
+    if (kept.length > 0) return [{ ...event, data: { ...data, messageSeqs: kept } }]
+    let fallback = null
+    for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+      const candidate = events[cursor]
+      if (candidate.type === 'user/message' || candidate.type === 'assistant/message') {
+        fallback = candidate.seq
+        break
+      }
+    }
+    if (fallback === null) return []
+    return [{ ...event, data: { ...data, messageSeqs: [fallback] } }]
+  })
+}
+
+/**
+ * 用档案（完美备份）整份还原一个会话。
+ *
+ * 档案里是从第一条到现在的全部事件；这里按 time 排序、重新编号成连续 seq，
+ * 过宿主校验之后才落盘。**校验不过就不写**：宁可保持现状，也不拿一份拼坏的
+ * 日志把会话弄没。落盘前照例先留一份 `.precompact-*` 快照。
+ *
+ * @param {string} logFile - 会话日志路径。
+ * @param {object} config - 解析后的配置。
+ * @returns {Promise<object>} `{ ok, backup?, events?, error? }`。
+ */
+export async function restoreFullFromArchive(logFile, config) {
+  const archived = readArchive(logFile)
+  if (archived.length === 0) return { ok: false, error: '这个会话还没有档案（perfectBackup 没开或还没裁剪过）' }
+  const live = await readLogAsync(logFile)
+  const sorted = [...archived].sort((a, b) => (Number(a?.time) || 0) - (Number(b?.time) || 0))
+  const renamed = renumber(sorted)
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+  const staging = `${logFile}.staging-restorefull-${stamp}`
+  try {
+    const ordered = fixTitleRefs(renamed.events)
+    await fs.promises.writeFile(staging, await encodeLogAsync(live.header, ordered))
+    const { verifyLog } = await import('./dsh-log-trim.verify-session-log.mjs')
+    const checked = await verifyLog(staging)
+    if (checked.ok !== true) {
+      const bad = (checked.checks || []).filter((check) => !check.ok).map((check) => `${check.name} ${check.detail}`).join('；')
+      return { ok: false, error: `档案拼出来的日志没过宿主校验，未写入：${bad}` }
+    }
+    const backup = `${logFile}.precompact-${stamp}`
+    await fs.promises.copyFile(logFile, backup)
+    await fs.promises.rename(staging, logFile)
+    return { ok: true, backup: path.basename(backup), events: renamed.events.length }
+  } finally {
+    fs.rmSync(staging, { force: true })
+  }
+}
+
 export async function restoreFromBackup(logFile, backupPath, config) {
   const dir = path.dirname(logFile)
   if (path.dirname(backupPath) !== dir || !path.basename(backupPath).startsWith(path.basename(logFile) + '.precompact-')) {
@@ -639,6 +719,10 @@ export const DEFAULTS = {
   trimOnBoot: true,
   // 只在开启时清理“已被 replace 盖住、界面早就不显示”的事件（要重编号，默认关）。
   losslessOnBoot: false,
+  // 完美备份：每次裁剪/折叠前，把「档案里还没有的事件」追加进会话目录的
+  // .archive/ 档案。会话里只留 keepWindows 窗，档案保留全部历史。默认关，
+  // 与 backupKeep 并存（那个是裁剪前快照，这个是跨裁剪累积的全程档案）。
+  perfectBackup: false,
   // 只扫 sessionsRoot，不追加默认根目录（测试/隔离用）。
   isolateRoots: false,
   mode: 'window',
@@ -718,6 +802,10 @@ export function resolveConfig(raw = {}) {
     }
     if (key === 'losslessOnBoot') {
       if (typeof value === 'boolean') merged.losslessOnBoot = value
+      continue
+    }
+    if (key === 'perfectBackup') {
+      if (typeof value === 'boolean') merged.perfectBackup = value
       continue
     }
     if (key === 'trimOnBoot') {
@@ -833,6 +921,12 @@ export async function carriersIn(logFile) {
   const log = await readLogAsync(logFile)
   let count = 0
   for (const event of log.events) {
+    // 回复块补丁（`plugin:dsh-edit-turn/patch`）没有 `data.source`，但它同样是
+    // 待折叠的痕迹：不数它，「只编辑过回复」的会话重启时就不会触发折叠。
+    if (String(event?.type ?? '').endsWith('/patch') && Array.isArray(event?.data?.targets) && event.data.targets.length > 0) {
+      count += 1
+      continue
+    }
     const source = event?.data?.source
     if (source === null || source === undefined) continue
     const kind = source.kind
@@ -1016,8 +1110,13 @@ export async function runScan(config, logger = {}) {
       continue
     }
     if (bytes < config.minBytes) {
-      summary.skipped.push({ sessionId, reason: `只有 ${Math.round(bytes / 1024)} KB，低于最小体积阈值 ${Math.round(config.minBytes / 1024)} KB` })
-      continue
+      // 体积门槛只该挡「裁窗口」这种省空间的活：折叠是清理痕迹，小日志同样
+      // 需要跑（否则一个 10 KB 的会话里改过、重跑过的痕迹永远留着）。
+      const pending = config.flattenOnBoot === false ? 0 : await carriersIn(logFile).catch(() => 0)
+      if (pending === 0) {
+        summary.skipped.push({ sessionId, reason: `只有 ${Math.round(bytes / 1024)} KB，低于最小体积阈值 ${Math.round(config.minBytes / 1024)} KB` })
+        continue
+      }
     }
     let mtimeMs = 0
     try {
@@ -1400,7 +1499,14 @@ export function apply(ctx, config = {}) {
     } catch {
       return runScan(config, logger)
     }
-    const worker = new Worker(new URL('./dsh-log-trim.worker.mjs', import.meta.url), { workerData: { config } })
+    let worker
+    try {
+      worker = new Worker(new URL('./dsh-log-trim.worker.mjs', import.meta.url), { workerData: { config } })
+    } catch {
+      // 线程起不来（被聚合进别的包时，worker 的相对路径可能解析到 asar /
+      // 缓存目录里）：退回主线程，慢但正确。
+      return runScan(config, logger)
+    }
     try {
       return await new Promise((resolve, reject) => {
         worker.on('message', (message) => {
@@ -1411,6 +1517,9 @@ export function apply(ctx, config = {}) {
         worker.on('error', reject)
         worker.on('exit', (code) => reject(new Error(`扫描线程退出（code ${code}），未拿到结果`)))
       })
+    } catch {
+      // 线程里 import 失败（例如引擎在 asar 里找不到依赖）：主线程重跑一次。
+      return runScan(config, logger)
     } finally {
       void worker.terminate()
     }
@@ -1587,6 +1696,57 @@ export function apply(ctx, config = {}) {
             sendJson(res, 200, { ok: true, ...result, release })
           } catch (error) {
             sendJson(res, 409, { ok: false, error: error instanceof Error ? error.message : String(error) })
+          }
+        },
+      }),
+    )
+
+    // 完美备份的档案：看一眼它有多大、装了多少事件，以及用档案整份还原。
+    fiber.effect(() =>
+      webServer.register({
+        kind: 'exact',
+        path: `${ROUTE_PREFIX}/archive`,
+        handler: async (req, res) => {
+          if (!isLoopback(req)) return sendJson(res, 403, { ok: false, error: 'loopback only' })
+          try {
+            const url = new URL(req.url ?? '/', 'http://localhost')
+            const sessionId = String(url.searchParams.get('sessionId') ?? '').trim()
+            if (sessionId === '') return sendJson(res, 400, { ok: false, error: 'sessionId required' })
+            const logFile = logFileOf(resolved.sessionsRoot, sessionId)
+            if (logFile === null) return sendJson(res, 404, { ok: false, error: '找不到这个会话的日志' })
+            const info = archiveInfo(logFile)
+            return sendJson(res, 200, { ok: true, enabled: resolved.perfectBackup === true, archive: info })
+          } catch (error) {
+            return sendJson(res, 409, { ok: false, error: error instanceof Error ? error.message : String(error) })
+          }
+        },
+      }),
+    )
+
+    fiber.effect(() =>
+      webServer.register({
+        kind: 'exact',
+        path: `${ROUTE_PREFIX}/restore-full`,
+        handler: async (req, res) => {
+          if (!isLoopback(req)) return sendJson(res, 403, { ok: false, error: 'loopback only' })
+          if (req.method !== 'POST') return sendJson(res, 405, { ok: false, error: 'POST only' })
+          try {
+            const body = await readJsonBody(req)
+            const sessionId = String((body && body.sessionId) || '').trim()
+            if (sessionId === '') return sendJson(res, 400, { ok: false, error: 'sessionId required' })
+            const logFile = logFileOf(resolved.sessionsRoot, sessionId)
+            if (logFile === null) return sendJson(res, 404, { ok: false, error: '找不到这个会话的日志' })
+            let release = null
+            if (isSessionLocked(logFile)) {
+              release = await releaseSession(ctx, sessionId)
+              if (release.released !== true) return sendJson(res, 409, { ok: false, error: `会话正被宿主打开着，而且没能释放（${release.detail}）` })
+              for (let attempt = 0; attempt < 20 && isSessionLocked(logFile); attempt += 1) await new Promise((resolve) => setTimeout(resolve, 150))
+            }
+            const result = await restoreFullFromArchive(logFile, resolved)
+            if (result.ok !== true) return sendJson(res, 409, { ok: false, error: result.error })
+            return sendJson(res, 200, { ok: true, ...result, release })
+          } catch (error) {
+            return sendJson(res, 409, { ok: false, error: error instanceof Error ? error.message : String(error) })
           }
         },
       }),

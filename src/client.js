@@ -4384,7 +4384,16 @@ window.__ModuleLoader__.load({
             }
           }
         }
-        if (block === undefined) continue
+        if (block === undefined) {
+          // `/state` 的回复只有身份，没有 blocks。补丁自带 original 时按文本匹配；
+          // 老宿主没带 original 时也不必放弃——按「同一行 + 块类型」在 DOM 里定位。
+          const key = `${patch.seq}:${patch.blockIndex}`
+          const original = typeof patch.original === 'string' ? patch.original : ''
+          const wanted = { key, seq: patch.seq, original, text: String(patch.text ?? '') }
+          if (patch.kind === 'text') wantedText.set(key, wanted)
+          else if (patch.kind === 'reasoning') wantedReasoning.set(key, { ...wanted, reply: null, block: null })
+          continue
+        }
         if (patch.kind === 'text') {
           wantedText.set(`${patch.seq}:${patch.blockIndex}`, {
             key: `${patch.seq}:${patch.blockIndex}`,
@@ -4464,7 +4473,31 @@ window.__ModuleLoader__.load({
         }
         const original = matchText(wanted.original)
         const previous = matchText(patchedTexts.get(key) ?? '')
-        if (original === '' && previous === '') continue
+        if (original === '' && previous === '') {
+          // 没有旧文本可比：按「该补丁所在行 + 正文容器」直接换掉。
+          const scope = owner !== undefined ? owner : root
+          let target = null
+          for (const el of containers) {
+            if (el.getAttribute(PATCH_ATTR) !== null) continue
+            try {
+              if (el.closest('[data-chat-flow-key]') !== scope) continue
+              if (el.closest('[data-variant="think"]') !== null) continue
+            } catch {
+              continue
+            }
+            if ((el.textContent || '').trim() === '') continue
+            target = el
+            break
+          }
+          if (target === null) continue
+          patchOriginals.set(target, { html: target.innerHTML, text: target.textContent })
+          target.textContent = displayText(wanted.text)
+          target.setAttribute(PATCH_ATTR, key)
+          target.style.whiteSpace = 'pre-wrap'
+          patchedElements.set(key, target)
+          patchedTexts.set(key, wanted.text)
+          continue
+        }
         let best = null
         let bestScore = Infinity
         for (const el of containers) {
@@ -4725,23 +4758,31 @@ window.__ModuleLoader__.load({
       const entry = loaded ? view.repliesByMessage.get(messageId) : undefined
       if (loaded && (entry === undefined || entry === null || view.hidden.has(entry.seq))) return null
       const label = t === null ? '' : t('action.edit-reply')
-      const open = (event) => {
+      const open = async (event) => {
         event.preventDefault()
         event.stopPropagation()
         if (entry === undefined) return
+        // `/state` 只发回复的身份（textLength / blockCount），正文和多块内容要按需
+        // 取一次；不取就打开成空框 + 占位符，也没有正文/思维链页。
+        const body = typeof controller.replyBody === 'function' ? await controller.replyBody(entry.messageId) : null
+        const blocks = body !== null && Array.isArray(body.blocks) && body.blocks.length > 0
+          ? body.blocks
+          : Array.isArray(entry.blocks) ? entry.blocks : []
         controller.open({
           anchor: event.currentTarget,
           seq: entry.seq,
           mode: 'reply',
           turn: entry.turn,
           messageId: entry.messageId,
-          text: typeof entry.text === 'string' ? entry.text : '',
+          text: body !== null && typeof body.text === 'string'
+            ? body.text
+            : typeof entry.text === 'string' ? entry.text : '',
           attachments: typeof entry.attachments === 'number' ? entry.attachments : 0,
           // On the in-place path the reply keeps its tool calls and other
           // blocks, so the editor can offer each editable block (output text
           // and reasoning). On the replay path there is no block picker: the
           // whole reply is replaced.
-          ...(Array.isArray(entry.blocks) ? { blocks: entry.blocks, patch: true } : { blocks: [] }),
+          ...(blocks.length > 0 ? { blocks, patch: true } : { blocks: [] }),
         })
       }
       // The config object is always an object: this runtime's `jsx` reads
@@ -8916,7 +8957,7 @@ window.__ModuleLoader__.load({
     const NS = 'dsh-markdown-bubble'
 
     /** Keep in sync with package.json and src/index.js. */
-    const PLUGIN_VERSION = '0.2.0'
+    const PLUGIN_VERSION = '0.2.1'
 
     /** Presence marker the live verifier reads. */
     const DEBUG_KEY = '__DSH_MARKDOWN_BUBBLE__'
@@ -10111,6 +10152,12 @@ html[data-dshmb-layout="full"] .dshmb-attachments{justify-content:flex-start!imp
     /** The knobs this card edits, in the order they are drawn. */
     const FIELDS = [      { key: 'enabled', label: '启用插件', hint: '关掉后不再自动裁剪', kind: 'toggle' },
       { key: 'scanOnBoot', label: '启动时扫描', hint: '启动那一刻是唯一"会话还没被打开"的窗口', kind: 'toggle' },
+      {
+        key: 'perfectBackup',
+        label: '完美备份（可选）',
+        hint: '每次裁剪/折叠前，把「档案里还没有的事件」追加进会话目录的 .archive/ 档案：会话里只留 keepWindows 窗，档案保留从第 1 条到现在的全部历史。与「保留几份备份」并存，默认关',
+        kind: 'toggle',
+      },
       {
         key: 'flattenOnBoot',
         label: '① 启动时折叠编辑痕迹',
@@ -12782,7 +12829,7 @@ function removeHost(row) {
     const NS = 'dsh-as-aistudio'
 
     /** Keep in sync with package.json and src/components.js. */
-    const PLUGIN_VERSION = '0.6.0'
+    const PLUGIN_VERSION = '0.6.1'
 
     /** Presence marker the live verifier reads. */
     const DEBUG_KEY = '__DSH_AS_AISTUDIO__'
