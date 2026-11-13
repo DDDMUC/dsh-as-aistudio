@@ -799,6 +799,7 @@ test('with all four loaded the registrations match the section-2 allocation tabl
     // `#/panel/plugins/<包名>` 直接能看到设置，不再有行级入口。
     'plugins.bundle.config | dsh-delete-turn | priority null',
     'plugins.bundle.config | dsh-edit-turn | priority null',
+  'plugins.bundle.config | dsh-markdown-bubble | priority null',
     'plugins.bundle.config | dsh-rerun-turn | priority null',
   ])
   assert.deepEqual(runtime.records.locales.map((item) => item.ns).sort(), [

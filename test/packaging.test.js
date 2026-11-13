@@ -166,12 +166,13 @@ test('each component is vendored once, and both halves carry the same version', 
   // The lockstep that the old dependency model could not promise: the browser
   // half and the host half are the SAME component version, or nothing is.
   for (const component of COMPONENTS) {
-    const clientHeader = readFileSync(join(root, 'src', 'vendor', component.id + '.js'), 'utf8').split('\n').slice(0, 6).join('\n')
     const hostHeader = readFileSync(join(root, 'src', 'vendor', 'host', component.id + '.js'), 'utf8').split('\n').slice(0, 6).join('\n')
-    const clientVersion = /v([0-9]+\.[0-9]+\.[0-9]+[^,)]*)/.exec(clientHeader)
     const hostVersion = /v([0-9]+\.[0-9]+\.[0-9]+[^,)]*)/.exec(hostHeader)
-    assert.ok(clientVersion !== null, component.id + ': the browser half header names no version')
     assert.ok(hostVersion !== null, component.id + ': the host half header names no version')
+    if (component.hostOnly === true) continue // 纯宿主组件没有浏览器半部
+    const clientHeader = readFileSync(join(root, 'src', 'vendor', component.id + '.js'), 'utf8').split('\n').slice(0, 6).join('\n')
+    const clientVersion = /v([0-9]+\.[0-9]+\.[0-9]+[^,)]*)/.exec(clientHeader)
+    assert.ok(clientVersion !== null, component.id + ': the browser half header names no version')
     assert.equal(hostVersion[1], clientVersion[1], component.id + ': the two halves are vendored from different versions')
   }
 })

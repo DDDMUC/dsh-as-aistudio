@@ -1,6 +1,6 @@
 // dsh-fork-anywhere host half (dsh-fork-anywhere.js), VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-fork-anywhere/src/index.js  (v0.1.0, sha256 53e4d54dc9eb5d6e)
+// Source: ../dsh-fork-anywhere/src/index.js  (v0.1.2, sha256 53e4d54dc9eb5d6e)
 // Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.
 //
 // src/shell.js imports the copy named after the component, which is why the

@@ -1,6 +1,6 @@
 // dsh-delete-turn browser half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-delete-turn/src/client.js  (v0.2.6, sha256 8f10302ae6cbd608)
+// Source: ../dsh-delete-turn/src/client.js  (v0.2.7, sha256 bb68253306dcc612)
 // Regenerate with `npm run vendor`; test/vendor-sync.test.js fails when this is stale.
 //
 // The component registers its factory with the host module loader; inside this
@@ -181,11 +181,11 @@ export default (require) => {
     // --- style ----------------------------------------------------------------
 
     const CSS = [
-      '.dshdt-action{width:28px;height:28px;padding:6px;display:inline-flex;align-items:center;justify-content:center;border:none;border-radius:28px;background:transparent;color:var(--dsw-alias-label-tertiary,#8a8f98);cursor:pointer;transition:background-color .12s,color .12s}',
+      '.dshdt-action{width:calc(28px + var(--dsh-content-font-delta,0px));height:calc(28px + var(--dsh-content-font-delta,0px));padding:6px;display:inline-flex;align-items:center;justify-content:center;border:none;border-radius:28px;background:transparent;color:var(--dsw-alias-label-tertiary,#8a8f98);cursor:pointer;transition:background-color .12s,color .12s}',
       '.dshdt-action:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,rgba(127,127,127,.12));color:var(--dsw-alias-state-error-primary,#d54941)}',
       '.dshdt-action:focus-visible{outline:2px solid var(--dsw-alias-button-primary-fill,#4d6bfe);outline-offset:2px}',
       '.dshdt-action:disabled{cursor:default;opacity:.4}',
-      '.dshdt-action svg{width:15px;height:15px}',
+      '.dshdt-action svg{width:calc(16px + var(--dsh-content-font-delta,0px));height:calc(16px + var(--dsh-content-font-delta,0px))}',
       '.dshdt-action-host{display:inline-flex;align-items:center;justify-content:center}',
       '.dshdt-row{position:relative}',
       '.dshdt-floating{position:absolute;top:2px;right:6px;z-index:2;opacity:0;transition:opacity .12s}',
@@ -203,12 +203,12 @@ export default (require) => {
       // its own class so the trash action's selector, its counts and the
       // interop contract stay exactly as they were; the row attribute turns it
       // on only where the host can plan the operation.
-      '.dshdt-turn{width:28px;height:28px;padding:6px;display:none;align-items:center;justify-content:center;border:none;border-radius:28px;background:transparent;color:var(--dsw-alias-label-tertiary,#8a8f98);cursor:pointer;transition:background-color .12s,color .12s}',
+      '.dshdt-turn{width:calc(28px + var(--dsh-content-font-delta,0px));height:calc(28px + var(--dsh-content-font-delta,0px));padding:6px;display:none;align-items:center;justify-content:center;border:none;border-radius:28px;background:transparent;color:var(--dsw-alias-label-tertiary,#8a8f98);cursor:pointer;transition:background-color .12s,color .12s}',
       '[data-dshdt-turn="1"] .dshdt-turn{display:inline-flex}',
       '.dshdt-turn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,rgba(127,127,127,.12));color:var(--dsw-alias-button-primary-fill,#4d6bfe)}',
       '.dshdt-turn:focus-visible{outline:2px solid var(--dsw-alias-button-primary-fill,#4d6bfe);outline-offset:2px}',
       '.dshdt-turn:disabled{cursor:default;opacity:.4}',
-      '.dshdt-turn svg{width:15px;height:15px}',
+      '.dshdt-turn svg{width:calc(16px + var(--dsh-content-font-delta,0px));height:calc(16px + var(--dsh-content-font-delta,0px))}',
       '[data-dshdt-no-target="1"] .dshdt-action{display:none!important}',
       // In multi-select the toggle is a badge pinned to the row itself: the
       // action strip of a message row only exists while the pointer is on it,

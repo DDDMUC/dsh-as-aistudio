@@ -140,6 +140,22 @@ export const COMPONENTS = [
       en: 'Fork the session at any sent user message or any compaction checkpoint; the reply-less Turn the Host closes on a mid-turn cut is hidden rather than shown as finished.',
     },
   },
+  {
+    id: 'dsh-bare-preset',
+    package: 'dsh-bare-preset',
+    hostOnly: true,
+    suffix: 'bare',
+    feature: 'preset',
+    kind: 'maintenance',
+    repo: 'https://github.com/DDDMUC/dsh-bare-preset',
+    slot: null,
+    overlay: null,
+    title: { zh: '裸模式预设', en: 'Bare preset' },
+    pitch: {
+      zh: '把「裸模模式」做成插件式 agent 预设：激活时注册、卸载时注销，组合里的提示词走包内子路径。',
+      en: 'Ships the bare agent preset as a plugin: registers on activate, unregisters on dispose, and resolves its prompt through a package subpath.',
+    },
+  },
 ]
 
 /** Component ids, in manifest order. */
