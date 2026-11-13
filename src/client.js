@@ -12782,7 +12782,7 @@ function removeHost(row) {
     const NS = 'dsh-as-aistudio'
 
     /** Keep in sync with package.json and src/components.js. */
-    const PLUGIN_VERSION = '0.5.24'
+    const PLUGIN_VERSION = '0.6.0'
 
     /** Presence marker the live verifier reads. */
     const DEBUG_KEY = '__DSH_AS_AISTUDIO__'
