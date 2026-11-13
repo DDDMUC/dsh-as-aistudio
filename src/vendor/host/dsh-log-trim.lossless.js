@@ -1,6 +1,6 @@
 // dsh-log-trim host half (dsh-log-trim.lossless.js), VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-log-trim/lib/lossless.js  (v0.7.9, sha256 7e8478a2fd2ec10b)
+// Source: ../dsh-log-trim/lib/lossless.js  (v0.8.0, sha256 c75f2441458c9da7)
 // Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.
 //
 // src/shell.js imports the copy named after the component, which is why the
@@ -565,6 +565,8 @@ export function rebuildSurface(events) {
   let stepOpen = false
   let openStepKey = null
   let headerIndex = -1
+  // 当前这一轮是否已经有用户消息（头部 system 与它同轮）。
+  let turnHasUser = false
   const closeStep = () => {
     if (!stepOpen) return
     out.push({ seq: 0, type: 'step/end', time: clock, data: { turn, step } })
@@ -578,6 +580,7 @@ export function rebuildSurface(events) {
   }
   const openTurn = (header) => {
     closeTurn()
+    turnHasUser = false
     turn += 1
     step = 0
     out.push({ seq: 0, type: 'turn/start', time: clock, data: { turn } })
@@ -645,7 +648,12 @@ export function rebuildSurface(events) {
       continue
     }
     if (role === 'user' || event.type === 'user/message') {
-      openTurn(header)
+      // 头部那条 system/message 已经占住了第 1 轮：它和第一条用户消息本来就是
+      // 同一轮（原始日志里 turn/start 1 同时管着 system 与 user）。这里若无条件
+      // openTurn，第 1 轮就只剩 system，用户消息被推到第 2 轮——轨迹上表现为
+      // 「第 1 轮没有内容」。
+      if (!(open && !turnHasUser)) openTurn(header)
+      turnHasUser = true
       // 扁平载荷把 source 放在 data 上；嵌套载荷（data.message）要把它补回去，
       // 否则 kind / promptSeq / rerun 归属全丢，标题也没法引用它。
       const extra = data.source !== undefined && message.source === undefined ? { source: data.source } : {}

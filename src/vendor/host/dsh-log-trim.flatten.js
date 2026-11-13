@@ -1,6 +1,6 @@
 // dsh-log-trim host half (dsh-log-trim.flatten.js), VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-log-trim/lib/flatten.js  (v0.7.9, sha256 3aa1fdcbb120ab06)
+// Source: ../dsh-log-trim/lib/flatten.js  (v0.8.0, sha256 51d812cef44f7623)
 // Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.
 //
 // src/shell.js imports the copy named after the component, which is why the
@@ -14,6 +14,7 @@
  *
  * 实现分三步：
  *   1. edit 的新正文抄回它替换的那一行（保留原行的 id/role，换的只是文本）；
+ *      回复块补丁（`plugin:dsh-edit-turn/patch`）同样按 (seq, blockIndex) 抄回正文块；
  *   2. 删掉载体本身；rerun / delete 还要删掉它们盖住的目标行；
  *   3. 用 `rebuildSurface` 按表面重建整份日志（轮次/步骤成对、工具调用成对、
  *      没有 replace 记录、没有静默载体），再修掉指向已删事件的标题引用。
@@ -36,6 +37,29 @@ function carrierKind(event) {
   return null
 }
 
+/**
+ * 回复块补丁：`plugin:dsh-edit-turn/patch`，按 `{seq, blockIndex, kind, text}`
+ * 改一条已发出的助手消息里的某一块。它不是载体（没有 `data.source`），
+ * 但对「重写成好像本来就长这样」来说同样是痕迹，必须抄进正文后删掉。
+ *
+ * @param {object} event - 一条日志事件。
+ * @returns {object[]|null} targets 数组；不是补丁事件时为 null。
+ */
+function patchTargetsOf(event) {
+  const type = String(event?.type ?? '')
+  if (!type.endsWith('/patch')) return null
+  const targets = event?.data?.targets
+  return Array.isArray(targets) && targets.length > 0 ? targets : null
+}
+
+/** 目标消息的 content 数组（两种正文形状都认）。 */
+function contentOf(event) {
+  const message = event?.data?.message
+  if (message !== undefined && Array.isArray(message.content)) return message.content
+  if (Array.isArray(event?.data?.content)) return event.data.content
+  return null
+}
+
 /** 载体里的正文算不算“可读”（零宽空格是静默载体的兜底，不算）。 */
 function readableContent(message) {
   if (message === null || message === undefined) return false
@@ -51,14 +75,44 @@ function readableContent(message) {
  *   折叠后的事件与统计；没有任何载体时原样返回。
  */
 export function flattenHistory(events) {
-  const folded = { edits: 0, reruns: 0, deletes: 0, drop: 0 }
+  const folded = { edits: 0, reruns: 0, deletes: 0, patches: 0, drop: 0 }
   const drop = new Set()
   const patches = new Map()
+  // 回复块补丁：seq -> (blockIndex -> 新文本)，在 kept 阶段一次性抄回正文。
+  const textPatches = new Map()
   let carriers = 0
 
   for (const event of events) {
     const kind = carrierKind(event)
-    if (kind === null) continue
+    if (kind === null) {
+      const targets = patchTargetsOf(event)
+      if (targets === null) continue
+      // 只有每一条目标都能落回一条仍然存在的助手消息，才敢把它抄进去并删掉；
+      // 否则保留这条补丁记录（宁可留痕，也不能丢内容）。
+      const applies = []
+      for (const target of targets) {
+        if (!Number.isSafeInteger(target?.seq) || !Number.isSafeInteger(target?.blockIndex)) break
+        const owner = events.find((candidate) => candidate.seq === target.seq)
+        const content = owner === undefined ? null : contentOf(owner)
+        const block = Array.isArray(content) ? content[target.blockIndex] : undefined
+        if (block === undefined || block === null || typeof block !== 'object') break
+        if (typeof target.text !== 'string') break
+        applies.push({ seq: target.seq, blockIndex: target.blockIndex, text: target.text })
+      }
+      if (applies.length !== targets.length) continue
+      for (const apply of applies) {
+        let byBlock = textPatches.get(apply.seq)
+        if (byBlock === undefined) {
+          byBlock = new Map()
+          textPatches.set(apply.seq, byBlock)
+        }
+        byBlock.set(apply.blockIndex, apply.text)
+      }
+      drop.add(event.seq)
+      carriers += 1
+      folded.patches += 1
+      continue
+    }
     carriers += 1
     drop.add(event.seq)
     // 两种正文形状都要认：`data.message {role, content}` 与扁平 `data.content`。
@@ -86,6 +140,19 @@ export function flattenHistory(events) {
     .filter((event) => !drop.has(event.seq))
     .map((event) => {
       const content = patches.get(event.seq)
+      const byBlock = textPatches.get(event.seq)
+      if (byBlock !== undefined) {
+        const base = content ?? contentOf(event)
+        if (Array.isArray(base)) {
+          const next = base.slice()
+          for (const [index, text] of byBlock) {
+            const block = next[index]
+            if (block !== null && typeof block === 'object') next[index] = { ...block, text }
+          }
+          if (event.data?.message !== undefined) return { ...event, data: { ...event.data, message: { ...event.data.message, content: next } } }
+          return { ...event, data: { ...event.data, content: next } }
+        }
+      }
       if (content === undefined) return event
       if (event.data?.message !== undefined) return { ...event, data: { ...event.data, message: { ...event.data.message, content } } }
       return { ...event, data: { ...event.data, content } }

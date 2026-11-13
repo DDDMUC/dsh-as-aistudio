@@ -1,6 +1,6 @@
 // dsh-log-trim browser half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-log-trim/lib/client.js  (v0.7.9, sha256 4db6aa00a7b26350)
+// Source: ../dsh-log-trim/lib/client.js  (v0.8.0, sha256 5e9b4bc63df3a121)
 // Regenerate with `npm run vendor`; test/vendor-sync.test.js fails when this is stale.
 //
 // The component registers its factory with the host module loader; inside this
@@ -20,6 +20,12 @@ export default (require) => {
     /** The knobs this card edits, in the order they are drawn. */
     const FIELDS = [      { key: 'enabled', label: '启用插件', hint: '关掉后不再自动裁剪', kind: 'toggle' },
       { key: 'scanOnBoot', label: '启动时扫描', hint: '启动那一刻是唯一"会话还没被打开"的窗口', kind: 'toggle' },
+      {
+        key: 'perfectBackup',
+        label: '完美备份（可选）',
+        hint: '每次裁剪/折叠前，把「档案里还没有的事件」追加进会话目录的 .archive/ 档案：会话里只留 keepWindows 窗，档案保留从第 1 条到现在的全部历史。与「保留几份备份」并存，默认关',
+        kind: 'toggle',
+      },
       {
         key: 'flattenOnBoot',
         label: '① 启动时折叠编辑痕迹',

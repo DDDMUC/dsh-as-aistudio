@@ -1,6 +1,6 @@
 // dsh-markdown-bubble browser half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-markdown-bubble/src/client.js  (v0.2.0, sha256 e3f4b0293d20ee3a)
+// Source: ../dsh-markdown-bubble/src/client.js  (v0.2.1, sha256 3dcbd36211a484de)
 // Regenerate with `npm run vendor`; test/vendor-sync.test.js fails when this is stale.
 //
 // The component registers its factory with the host module loader; inside this
@@ -18,7 +18,7 @@ export default (require) => {
     const NS = 'dsh-markdown-bubble'
 
     /** Keep in sync with package.json and src/index.js. */
-    const PLUGIN_VERSION = '0.2.0'
+    const PLUGIN_VERSION = '0.2.1'
 
     /** Presence marker the live verifier reads. */
     const DEBUG_KEY = '__DSH_MARKDOWN_BUBBLE__'

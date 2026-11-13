@@ -1,6 +1,6 @@
 // dsh-log-trim host half (dsh-log-trim.goal-repair.js), VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-log-trim/lib/goal-repair.js  (v0.7.9, sha256 0801a28f35667ee7)
+// Source: ../dsh-log-trim/lib/goal-repair.js  (v0.8.0, sha256 0801a28f35667ee7)
 // Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.
 //
 // src/shell.js imports the copy named after the component, which is why the

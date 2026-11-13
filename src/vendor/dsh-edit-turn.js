@@ -1,6 +1,6 @@
 // dsh-edit-turn browser half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-edit-turn/lib/client.js  (v0.6.0, sha256 272b27ce14c5b8be)
+// Source: ../dsh-edit-turn/lib/client.js  (v0.6.1, sha256 ecd47e04452f462c)
 // Regenerate with `npm run vendor`; test/vendor-sync.test.js fails when this is stale.
 //
 // The component registers its factory with the host module loader; inside this
@@ -4376,7 +4376,16 @@ export default (require) => {
             }
           }
         }
-        if (block === undefined) continue
+        if (block === undefined) {
+          // `/state` 的回复只有身份，没有 blocks。补丁自带 original 时按文本匹配；
+          // 老宿主没带 original 时也不必放弃——按「同一行 + 块类型」在 DOM 里定位。
+          const key = `${patch.seq}:${patch.blockIndex}`
+          const original = typeof patch.original === 'string' ? patch.original : ''
+          const wanted = { key, seq: patch.seq, original, text: String(patch.text ?? '') }
+          if (patch.kind === 'text') wantedText.set(key, wanted)
+          else if (patch.kind === 'reasoning') wantedReasoning.set(key, { ...wanted, reply: null, block: null })
+          continue
+        }
         if (patch.kind === 'text') {
           wantedText.set(`${patch.seq}:${patch.blockIndex}`, {
             key: `${patch.seq}:${patch.blockIndex}`,
@@ -4456,7 +4465,31 @@ export default (require) => {
         }
         const original = matchText(wanted.original)
         const previous = matchText(patchedTexts.get(key) ?? '')
-        if (original === '' && previous === '') continue
+        if (original === '' && previous === '') {
+          // 没有旧文本可比：按「该补丁所在行 + 正文容器」直接换掉。
+          const scope = owner !== undefined ? owner : root
+          let target = null
+          for (const el of containers) {
+            if (el.getAttribute(PATCH_ATTR) !== null) continue
+            try {
+              if (el.closest('[data-chat-flow-key]') !== scope) continue
+              if (el.closest('[data-variant="think"]') !== null) continue
+            } catch {
+              continue
+            }
+            if ((el.textContent || '').trim() === '') continue
+            target = el
+            break
+          }
+          if (target === null) continue
+          patchOriginals.set(target, { html: target.innerHTML, text: target.textContent })
+          target.textContent = displayText(wanted.text)
+          target.setAttribute(PATCH_ATTR, key)
+          target.style.whiteSpace = 'pre-wrap'
+          patchedElements.set(key, target)
+          patchedTexts.set(key, wanted.text)
+          continue
+        }
         let best = null
         let bestScore = Infinity
         for (const el of containers) {
@@ -4717,23 +4750,31 @@ export default (require) => {
       const entry = loaded ? view.repliesByMessage.get(messageId) : undefined
       if (loaded && (entry === undefined || entry === null || view.hidden.has(entry.seq))) return null
       const label = t === null ? '' : t('action.edit-reply')
-      const open = (event) => {
+      const open = async (event) => {
         event.preventDefault()
         event.stopPropagation()
         if (entry === undefined) return
+        // `/state` 只发回复的身份（textLength / blockCount），正文和多块内容要按需
+        // 取一次；不取就打开成空框 + 占位符，也没有正文/思维链页。
+        const body = typeof controller.replyBody === 'function' ? await controller.replyBody(entry.messageId) : null
+        const blocks = body !== null && Array.isArray(body.blocks) && body.blocks.length > 0
+          ? body.blocks
+          : Array.isArray(entry.blocks) ? entry.blocks : []
         controller.open({
           anchor: event.currentTarget,
           seq: entry.seq,
           mode: 'reply',
           turn: entry.turn,
           messageId: entry.messageId,
-          text: typeof entry.text === 'string' ? entry.text : '',
+          text: body !== null && typeof body.text === 'string'
+            ? body.text
+            : typeof entry.text === 'string' ? entry.text : '',
           attachments: typeof entry.attachments === 'number' ? entry.attachments : 0,
           // On the in-place path the reply keeps its tool calls and other
           // blocks, so the editor can offer each editable block (output text
           // and reasoning). On the replay path there is no block picker: the
           // whole reply is replaced.
-          ...(Array.isArray(entry.blocks) ? { blocks: entry.blocks, patch: true } : { blocks: [] }),
+          ...(blocks.length > 0 ? { blocks, patch: true } : { blocks: [] }),
         })
       }
       // The config object is always an object: this runtime's `jsx` reads
