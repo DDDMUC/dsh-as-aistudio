@@ -1,6 +1,6 @@
 // dsh-bare-preset host half (dsh-bare-preset.js), VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-bare-preset/lib/index.js  (v0.1.1, sha256 96cd941e9f97a674)
+// Source: ../dsh-bare-preset/lib/index.js  (v0.1.1, sha256 daab136b2278314c)
 // Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.
 /**
  * bare-preset（宿主）—— 把「裸模模式」这个 agent 预设置成一个插件。
@@ -65,7 +65,7 @@ const DENIED = function () {
 }
 
 /** 提示词行的绝对 file URL（组合里的行由 registry 在它自己的 baseUrl 下加载）。 */
-const PERSONA_URL = new URL('../persona.mjs', import.meta.url).href
+const PERSONA_URL = new URL('./dsh-bare-preset..persona.mjs', import.meta.url).href
 
 /** 交给 registry 的预设声明。 */
 const DEFINITION = {
