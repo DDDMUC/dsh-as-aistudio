@@ -149,7 +149,7 @@ function vendorHostHalf(component, hostPath) {
     // `new Worker(new URL('./worker.mjs', import.meta.url))` 是宿主半部在运行时
     // 拉起的第二个模块。它不是 import，静态扫描看不见，但同样要跟过来改名——
     // 少抄一份就是开机扫描直接报 MODULE_NOT_FOUND。
-    out = out.replace(/new URL\('(\.\/[^']+\.(?:m?js))', import\.meta\.url\)/g, (whole, rel) => {
+    out = out.replace(/new URL\('(\.{1,2}\/[^']+\.(?:m?js))', import\.meta\.url\)/g, (whole, rel) => {
       if (rel === './_platform.js') return whole
       const abs = join(dir, rel)
       if (!existsSync(abs)) {
