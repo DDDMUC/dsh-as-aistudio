@@ -1,6 +1,6 @@
 // dsh-delete-turn browser half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-delete-turn/src/client.js  (v0.2.7, sha256 bb68253306dcc612)
+// Source: ../dsh-delete-turn/src/client.js  (v0.2.8, sha256 17ca274a4b6cfde9)
 // Regenerate with `npm run vendor`; test/vendor-sync.test.js fails when this is stale.
 //
 // The component registers its factory with the host module loader; inside this
@@ -120,6 +120,8 @@ export default (require) => {
       'error.session-not-active': '这个会话当前未激活，请先打开该会话再删除。',
       'error.session-not-found': '找不到该会话的日志。',
       'error.busy': '该会话正在进行中，且当前无法自动停止（可能正在压缩），请稍后重试。',
+      'error.stop-failed': '删除前没能停住正在生成的那一轮（原因见详情），内容没有被删。',
+      'error.internal': '删除失败：插件内部出错，可能与当前内核不兼容；内容没有被删。',
       'error.stop-timeout': '已请求停止当前生成，但该回合没有及时停下；请稍后再试。',
       'error.already-deleted': '这条内容已经从上下文中删除了。',
       'error.not-deletable': '这个位置不支持删除。',
@@ -168,6 +170,8 @@ export default (require) => {
       'error.session-not-active': 'This session is not open in DSH; open it first.',
       'error.session-not-found': 'No session log was found for this id.',
       'error.busy': 'This session is working and cannot be stopped right now (a compaction may be running); try again in a moment.',
+      'error.stop-failed': 'The generating turn could not be stopped, so nothing was deleted.',
+      'error.internal': 'Delete failed: internal error (possibly a kernel API change). Nothing was deleted.',
       'error.stop-timeout': 'The running turn did not stop in time; try again in a moment.',
       'error.already-deleted': 'This content is already removed from the context.',
       'error.not-deletable': 'This position cannot be deleted.',

@@ -1,6 +1,6 @@
 // dsh-log-trim browser half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-log-trim/lib/client.js  (v0.8.0, sha256 5e9b4bc63df3a121)
+// Source: ../dsh-log-trim/lib/client.js  (v0.8.3, sha256 5e9b4bc63df3a121)
 // Regenerate with `npm run vendor`; test/vendor-sync.test.js fails when this is stale.
 //
 // The component registers its factory with the host module loader; inside this

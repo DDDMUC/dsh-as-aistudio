@@ -1,6 +1,6 @@
 // dsh-delete-turn host half (dsh-delete-turn.js), VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-delete-turn/src/index.js  (v0.2.7, sha256 f8a1c0faacb79e0f)
+// Source: ../dsh-delete-turn/src/index.js  (v0.2.8, sha256 6d74cd8c9626d335)
 // Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.
 //
 // src/shell.js imports the copy named after the component, which is why the
@@ -422,7 +422,9 @@ async function stopActiveTurn(ctx, sessionId, events) {
   }
   const controller = ctx.get('sessionController')
   if (!controller || typeof controller.cancel !== 'function') {
-    throw new HttpError(409, 'busy', 'the running turn cannot be stopped here')
+    // 环境不支持停止（内核没有 sessionController.cancel）：这不是「任务还在跑」，
+    // 报 busy 会把人引到错误的排查方向。
+    throw new HttpError(409, 'stop-failed', 'the running turn cannot be stopped here: sessionController.cancel is unavailable')
   }
   let acknowledged = false
   let lastError = null
@@ -438,7 +440,9 @@ async function stopActiveTurn(ctx, sessionId, events) {
     }
   }
   if (!acknowledged) {
-    throw new HttpError(409, 'busy', `the stop request was refused: ${String((lastError && lastError.message) || lastError)}`)
+    // 停止请求被拒可能是内核 API 变了，也可能真的在忙：一律按 stop-failed 上报，
+    // 附带原始原因，不再包装成「任务正在运行」。
+    throw new HttpError(409, 'stop-failed', `the stop request was refused: ${String((lastError && lastError.message) || lastError)}`)
   }
   const deadline = Date.now() + stopWait.timeoutMs
   for (;;) {

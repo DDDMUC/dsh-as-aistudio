@@ -1,6 +1,6 @@
 // dsh-bare-preset host half (dsh-bare-preset.js), VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-bare-preset/lib/index.js  (v0.2.0, sha256 e9ea6fd8c4ccb3a1)
+// Source: ../dsh-bare-preset/lib/index.js  (v0.2.1, sha256 85ec7f01c8bacc53)
 // Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.
 /**
  * bare-preset（宿主）—— 把「裸模模式」这个 agent 预设置成一个插件。
@@ -81,9 +81,26 @@ const DEFINITION = {
 /**
  * @param ctx - 宿主插件上下文。
  */
-export function apply(ctx) {
+/** 把配置里的 keepTools 规整成 Set（忽略非字符串与空串）。 */
+function normalizeKeepTools(value) {
+  const out = new Set()
+  if (!Array.isArray(value)) return out
+  for (const item of value) {
+    if (typeof item === 'string' && item !== '') out.add(item)
+  }
+  return out
+}
+
+export function apply(ctx, config = {}) {
   const presets = ctx.agentPresets
   if (presets === undefined) return
+
+  // 白名单：这里列出的工具即使注册在 agent 本层也不剪。
+  // 通过插件配置给，不用改源码：
+  //   - name: dsh-bare-preset
+  //     config:
+  //       keepTools: [working_directory]
+  const keepTools = normalizeKeepTools(config.keepTools)
 
   // ── 1. 注册预设（卸载时注销）──────────────────────────────────────────
   ctx.effect(() => {
@@ -148,6 +165,7 @@ export function apply(ctx) {
       if (ownTools === undefined) return
       for (const [toolName, registration] of view.registrations) {
         if (ownTools.get(toolName) !== registration) continue
+        if (keepTools.has(toolName)) continue
         if (registration.when === DENIED) continue
         registration.when = DENIED
       }

@@ -1,6 +1,6 @@
 // dsh-fork-anywhere browser half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-fork-anywhere/src/client.js  (v0.1.2, sha256 c8b7885faaaeeb20)
+// Source: ../dsh-fork-anywhere/src/client.js  (v0.6.3, sha256 861b66b73de08301)
 // Regenerate with `npm run vendor`; test/vendor-sync.test.js fails when this is stale.
 //
 // The component registers its factory with the host module loader; inside this
@@ -11,7 +11,7 @@ export default (require) => {
     const react = require('react')
 
     const NS = 'dsh-fork-anywhere'
-    const PLUGIN_VERSION = '0.1.2'
+    const PLUGIN_VERSION = '0.6.3'
     /** Own node namespace: only elements carrying it are ever removed (I3). */
     const HOST_ATTR = 'data-dsfa-host'
     const HOST_SELECTOR = '[data-dsfa-host="1"]'
@@ -95,6 +95,12 @@ export default (require) => {
         'clock.ymd': '{y}年{m}月{d}日',
         'number.groupSeparator': ',',
         'copy.summary': '复制摘要',
+        'config.generic': '常规设置',
+        'config.compactSuffix': '分叉后的会话标题加「（n）」',
+        'config.compactSuffixHint': '关闭时沿用宿主默认的「标题 (n)」（半角括号、空格在前）；打开时把括号放到标题前，写成「（n）标题」。',
+        'config.applyExisting': '立即整理现有会话标题',
+        'config.summary.on': '标题：编号在前',
+        'config.summary.off': '标题：沿用宿主默认',
       },
       en: {
         'action.fork': 'Fork from this message',
@@ -117,6 +123,12 @@ export default (require) => {
         'clock.md': '{m}/{d}',
         'clock.ymd': '{y}-{m}-{d}',
         'number.groupSeparator': ',',
+        'config.generic': 'General',
+        'config.compactSuffix': 'Put the fork number in front of the title',
+        'config.compactSuffixHint': 'Off keeps the shipped "Title (n)" form (ASCII parentheses, space before). On rewrites it as "（n）Title".',
+        'config.applyExisting': 'Apply to existing sessions now',
+        'config.summary.on': 'Title: number first',
+        'config.summary.off': 'Title: shipped default',
       },
     }
 
@@ -164,6 +176,15 @@ export default (require) => {
       '[data-dsfa-stale="1"]{display:none!important}',
       '[data-dsfa-empty-turn="1"]{display:none!important}',
       '.dsfa-dirty-row{display:flex;align-items:center;padding:2px 0 4px 34px}',
+      '.dsfa-config{display:flex;flex-direction:column;gap:6px}',
+      '.dsfa-config-toggle{display:inline-flex;align-items:center;gap:8px;padding:0;border:none;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}',
+      '.dsfa-config-switch{position:relative;flex:0 0 auto;width:28px;height:16px;border-radius:8px;background:var(--dsw-alias-bg-tertiary,rgba(127,127,127,.35));transition:background-color .15s}',
+      '.dsfa-config-switch::after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:var(--dsw-alias-bg-elevated,#fff);transition:transform .15s}',
+      '.dsfa-config-toggle-on .dsfa-config-switch{background:var(--dsw-alias-brand-primary,#4d6bfe)}',
+      '.dsfa-config-toggle-on .dsfa-config-switch::after{transform:translateX(12px)}',
+      '.dsfa-config-hint{margin:0;color:var(--dsw-alias-label-tertiary,#81858c);font-size:12px;line-height:18px}',
+      '.dsfa-config-action{align-self:flex-start;padding:4px 10px;border:1px solid var(--dsw-alias-border-primary,rgba(127,127,127,.35));border-radius:6px;background:transparent;color:inherit;font:inherit;font-size:12px;cursor:pointer}',
+      '.dsfa-config-action:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(127,127,127,.12))}',
       '[data-dsfa-hide-shipped="1"]{display:none!important}',
       '[data-dsfa-fork-tail="1"]{display:none!important}',
       '.dsfa-crow--node{gap:4px;height:calc(28px + var(--dsh-content-font-delta,0px))}',
@@ -244,6 +265,19 @@ export default (require) => {
           current = {}
         }
         store.setItem(STATUS_KEY, JSON.stringify({ ...current, ...patch, version: PLUGIN_VERSION, at: Date.now() }))
+        // 独立日志键：渲染会重写 STATUS_KEY，改名与扫描的痕迹需要一个不被覆盖的地方。
+        const logKey = 'dsh-fork-anywhere/log'
+        let log = []
+        try {
+          const rawLog = store.getItem(logKey)
+          if (typeof rawLog === 'string' && rawLog !== '') log = JSON.parse(rawLog) || []
+        } catch {
+          log = []
+        }
+        if (Array.isArray(log) && typeof patch.renameStep === 'string' && patch.renameStep !== '') {
+          log.push({ at: Date.now(), version: PLUGIN_VERSION, step: patch.renameStep, detail: patch.renameDetail === undefined ? null : String(patch.renameDetail), child: patch.renameChild === undefined ? null : patch.renameChild })
+          store.setItem(logKey, JSON.stringify(log.slice(-80)))
+        }
       } catch {
         /* storage is a diagnostic, never a dependency */
       }
@@ -1435,6 +1469,9 @@ function removeHost(row) {
           report(new Error('fork returned no session id'))
           return
         }
+        // 标题编号位置：宿主已经把标题写成「标题 (n)」，这里按偏好改成前缀形式。
+        publishStatus({ renameAt: Date.now(), renameStep: 'invoked', renameChild: childId })
+        applyNumberFirstTitle(sessions, childId, sessionId)
         // No success notice: the child session opens on its own, and a toast under
         // the transcript only covers the row the fork came from. Failures still
         // report, because a silent failure is worse than none.
@@ -1442,32 +1479,446 @@ function removeHost(row) {
       }, report)
     }
 
-    // --- toast ----------------------------------------------------------------
-
-    let toastTimer = null
+    /** apply 时记下的 sessions 服务，供设置卡的一次性整理使用。 */
+    let activeSessions = null
 
     /**
-     * One-line transient notice in this plugin's own namespace; the host has no
-     * public toast service, and a silent failure here would look like a dead button.
-     * @param message - already-localized text.
-     * @param isError - error styling.
+     * 用已稳定的三条路径之一改一条会话标题（同步返回是否成功）。
+     *
+     * 设置卡里的批量整理只需要「尽力而为」，所以这里不重试、不等待。
      */
-    function toast(message, isError) {
-      if (typeof document === 'undefined' || document.body === null) return
-      let node = document.getElementById(TOAST_ID)
-      if (node === null) {
-        node = document.createElement('div')
-        node.id = TOAST_ID
+    function renameSessionTo(sessions, id, title) {
+      const manager = sessions === null || sessions === undefined ? undefined : sessions.manager
+      if (manager !== undefined && manager !== null && typeof manager.rename === 'function') {
+        try {
+          manager.rename(id, title)
+          return true
+        } catch {
+          /* fall through */
+        }
       }
-      node.className = 'dsfa-toast' + (isError === true ? ' dsfa-toast-error' : '')
-      node.textContent = String(message)
-      node.style.display = 'block'
-      document.body.appendChild(node)
-      if (toastTimer !== null) clearTimeout(toastTimer)
-      toastTimer = setTimeout(() => {
-        toastTimer = null
-        node.style.display = 'none'
-      }, 2800)
+      if (typeof sessions.using === 'function') {
+        try {
+          sessions.using(id, { source: 'dsh-fork-anywhere' }, (reference) => {
+            const session = reference === null || reference === undefined || reference.binding === undefined ? undefined : reference.binding.session
+            if (session !== undefined && session !== null && typeof session.rename === 'function') return session.rename(title)
+            return { ok: false }
+          })
+          return true
+        } catch {
+          return false
+        }
+      }
+      return false
+    }
+
+    /**
+     * 一次性把现有会话里的「标题 (n)」改成「（n）标题」。
+     *
+     * 设置卡上的按钮调用它；不依赖 fork、不依赖监视器，直接把列表里所有带编号
+     * 的标题改写一遍。返回一行结果文本（改了几条 / 失败几条）。
+     * @returns 结果摘要。
+     */
+    function applyToExistingSessions() {
+      const sessions = activeSessions
+      if (sessions === null || sessions === undefined) return 'sessions 服务不可用'
+      const snapshot = typeof sessions.list !== 'undefined' && sessions.list !== null && typeof sessions.list.getSnapshot === 'function' ? sessions.list.getSnapshot() : undefined
+      const byId = snapshot === undefined || snapshot === null ? undefined : snapshot.byId
+      if (byId === undefined || byId === null) return '读不到会话列表'
+      let changed = 0
+      let failed = 0
+      for (const id of Object.keys(byId)) {
+        const entry = byId[id]
+        const title = entry === null || entry === undefined ? undefined : entry.title
+        if (typeof title !== 'string') continue
+        if (/ ?\(\d+\)\s*$/u.test(title) === false && /\uFF08\d+\uFF09\s*$/u.test(title) === false) continue
+        const target = numberFirstTitle(title)
+        if (target === null) continue
+        try {
+          const outcome = renameSessionTo(sessions, id, target)
+          if (outcome !== false) changed += 1
+          else failed += 1
+        } catch {
+          failed += 1
+        }
+      }
+      publishStatus({ renameAt: Date.now(), renameStep: 'bulk', renameDetail: 'changed=' + changed + ' failed=' + failed })
+      return '已改名 ' + changed + ' 条' + (failed > 0 ? '，失败 ' + failed + ' 条' : '')
+    }
+
+    /**
+     * 插件设置卡（`plugins.bundle.config` 插槽，键 = 包名）。
+     *
+     * 两种视图与 dsh-delete-turn 一致：`view === 'summary'` 时返回单行摘要，
+     * 否则返回页面上的卡片本体。
+     */
+    function ConfigCard({ view, t }) {
+      const tr = typeof t === 'function' ? t : (key) => key
+      const [on, setOn] = react.useState(getPrefs().numberFirst)
+      react.useEffect(() => subscribePrefs(() => setOn(getPrefs().numberFirst)), [])
+      if (view === 'summary') return tr(on ? 'config.summary.on' : 'config.summary.off')
+      const children = []
+      children.push(
+        react.createElement(
+          'button',
+          {
+            key: 'toggle',
+            type: 'button',
+            className: 'dsfa-config-toggle' + (on ? ' dsfa-config-toggle-on' : ''),
+            'aria-pressed': on ? 'true' : 'false',
+            onClick: () => setNumberFirst(!on),
+          },
+          react.createElement('span', { className: 'dsfa-config-switch', 'aria-hidden': 'true' }),
+          react.createElement('span', null, tr('config.compactSuffix')),
+        ),
+      )
+      children.push(react.createElement('p', { key: 'hint', className: 'dsfa-config-hint' }, tr('config.compactSuffixHint')))
+      children.push(
+        react.createElement(
+          'button',
+          {
+            key: 'apply-now',
+            type: 'button',
+            className: 'dsfa-config-action',
+            onClick: () => {
+              const result = applyToExistingSessions()
+              setOn(getPrefs().numberFirst)
+              if (typeof result === 'string') children.push(react.createElement('p', { key: 'result', className: 'dsfa-config-hint' }, result))
+            },
+          },
+          tr('config.applyExisting'),
+        ),
+      )
+      return react.createElement('div', { className: 'dsfa-config' }, ...children)
+    }
+
+    // --- 偏好：分叉标题的编号位置 --------------------------------------------
+    //
+    // 宿主 `sessions.fork({ increaseTitle: true })` 已经会把子会话标题改成
+    // 「标题 (n)」（`incrementedTitle`：匹配半角 `(n)` 或全角 `（n）` 时递增，
+    // 否则追加 ` (1)`）。前缀形式只能由插件在 fork 之后补一次 `rename`：
+    // 客户端服务 `sessions.rename(sessionId, title)` 直通
+    // `remote.session.rename`，宿主侧写 `session/title` 事件。
+    //
+    // 存放位置与 dsh-delete-turn 一致：localStorage，键 `<plugin>:prefs`。
+
+    const PREFS_KEY = 'dsh-fork-anywhere:prefs'
+    const DEFAULT_NUMBER_FIRST = true
+
+    function readStoredNumberFirst() {
+      try {
+        if (typeof window === 'undefined' || !window.localStorage) return DEFAULT_NUMBER_FIRST
+        const raw = window.localStorage.getItem(PREFS_KEY)
+        if (raw === null) return DEFAULT_NUMBER_FIRST
+        const parsed = JSON.parse(raw)
+        return parsed !== null && typeof parsed === 'object' && typeof parsed.numberFirst === 'boolean' ? parsed.numberFirst : DEFAULT_NUMBER_FIRST
+      } catch {
+        return DEFAULT_NUMBER_FIRST
+      }
+    }
+
+    let numberFirst = readStoredNumberFirst()
+    const prefListeners = new Set()
+
+    /** 当前偏好（设置卡与分叉路径读同一份）。 */
+    function getPrefs() {
+      return { numberFirst }
+    }
+
+    /**
+     * 改写偏好并通知订阅者。
+     *
+     * 写入失败（隐私模式）不影响内存里的值，只是下次加载回到默认。
+     */
+    function setNumberFirst(value) {
+      const next = value === true
+      if (numberFirst === next) return
+      numberFirst = next
+      try {
+        if (typeof window !== 'undefined' && window.localStorage) window.localStorage.setItem(PREFS_KEY, JSON.stringify({ numberFirst: next }))
+      } catch {
+        /* 存储拒绝写入时只丢持久化，不丢当前行为 */
+      }
+      for (const listener of prefListeners) {
+        try {
+          listener()
+        } catch (error) {
+          console.error('[dsh-fork-anywhere] 偏好订阅者抛出：', error)
+        }
+      }
+    }
+
+    function subscribePrefs(listener) {
+      prefListeners.add(listener)
+      return () => {
+        prefListeners.delete(listener)
+      }
+    }
+
+    /**
+     * 把宿主追加的编号挪到标题最前面。
+     *
+     * 只处理宿主自己的两种产物，别的形状一律原样返回：
+     *   `标题 (3)`      → `（3）标题`
+     *   `标题（3）`     → `（3）标题`
+     * 匹配不到编号时返回 null，调用方据此放弃改名。
+     * @returns 改写后的标题，或 null。
+     */
+    /** 拆出已有的前缀编号：`（n）标题` → `{ num, base }`，否则 null。 */
+    function splitPrefix(title) {
+      if (typeof title !== 'string' || title === '') return null
+      const m = /^\uFF08(\d+)\uFF09(.*)$/u.exec(title)
+      if (m === null || m[1] === undefined || m[2] === undefined) return null
+      const base = m[2].trim()
+      if (base === '') return null
+      return { num: m[1], base }
+    }
+
+    function numberFirstTitle(title) {
+      if (typeof title !== 'string' || title === '') return null
+      // 前缀已经就位的形态：只有末尾还有编号时才重排，别把前缀重复一次。
+      const prefixed = splitPrefix(title)
+      if (prefixed !== null) {
+        // 混合形态「（n）base (m)」：从已前缀的源标题分叉时，宿主会在末尾再补一个
+        // 「 (m)」。此时本次分叉的编号是 m，旧前缀 n 应当剥掉 →「（m）base」。
+        const tail = /^(.*?) ?\((\d+)\)\s*$/u.exec(prefixed.base)
+        if (tail !== null && tail[1] !== undefined && tail[2] !== undefined) {
+          const base = tail[1].trim()
+          if (base !== '') return '（' + tail[2] + '）' + base
+        }
+        // 纯「（n）base」形态：已就位，原样返回
+        return title
+      }
+      const ascii = /^(.*?) ?\((\d+)\)\s*$/u.exec(title)
+      if (ascii !== null && ascii[1] !== undefined && ascii[2] !== undefined) {
+        const base = ascii[1].trim()
+        if (base === '') return null
+        return '（' + ascii[2] + '）' + base
+      }
+      const fullWidth = /^(.*?)\uFF08(\d+)\uFF09\s*$/u.exec(title)
+      if (fullWidth !== null && fullWidth[1] !== undefined && fullWidth[2] !== undefined) {
+        const base = fullWidth[1].trim()
+        if (base === '') return null
+        return '（' + fullWidth[2] + '）' + base
+      }
+      return null
+    }
+
+    /**
+     * 分叉后按偏好修正子会话标题。
+     *
+     * 失败只是标题保持宿主默认形态，不影响已经建好的会话，所以不弹提示、
+     * 只写一条 console.warn。
+     */
+    /**
+     * 按宿主的规则推导子会话标题。
+     *
+     * 宿主 `incrementedTitle`：标题形如 `X (n)` / `X（n）` 时递增，否则追加 ` (1)`；
+     * `increasedForkTitle` 再用「已占用的标题」去重，直到不冲突。
+     * 直接复刻这套规则，比等快照里出现子会话更可靠 —— fork 刚返回时列表可能
+     * 还没投影到子会话，读不到标题，改名就永远不会发生。
+     * @returns 推导出的标题，或 null（源标题未知）。
+     */
+    function derivedForkTitle(sourceTitle, taken) {
+      if (typeof sourceTitle !== 'string' || sourceTitle.trim() === '') return null
+      const step = (title) => {
+        const ascii = /^(.*?)( ?)\((\d+)\)$/u.exec(title)
+        if (ascii !== null && ascii[1] !== undefined && ascii[3] !== undefined) {
+          return ascii[1] + (ascii[2] === '' ? '' : ' ') + '(' + (BigInt(ascii[3]) + 1n).toString() + ')'
+        }
+        const full = /^(.*?)（(\d+)）$/u.exec(title)
+        if (full !== null && full[1] !== undefined && full[2] !== undefined) {
+          return full[1] + '（' + (BigInt(full[2]) + 1n).toString() + '）'
+        }
+        return title + ' (1)'
+      }
+      // 源标题已经带了前缀编号：宿主再分叉会追加一个末尾编号，那样会变成
+      // 「（1）窗口 (1)」。正确形态是「（2）窗口」——直接在前缀上 +1。
+      const prefixed = splitPrefix(sourceTitle)
+      if (prefixed !== null) {
+        // 先剥掉 base 里可能残留的末尾编号，再在前缀上 +1
+        const tail = /(.*?) ?\((\d+)\)\s*$/u.exec(prefixed.base)
+        const base = tail !== null && tail[1] !== undefined ? tail[1].trim() : prefixed.base
+        let num = BigInt(prefixed.num) + 1n
+        let candidate = '\uFF08' + num.toString() + '\uFF09' + base
+        let guardPrefix = 0
+        while (taken !== null && taken.has(candidate) === true && guardPrefix < 100) {
+          num += 1n
+          candidate = '\uFF08' + num.toString() + '\uFF09' + base
+          guardPrefix += 1
+        }
+        return candidate
+      }
+      let next = step(sourceTitle)
+      let guard = 0
+      while (taken !== null && taken.has(next) === true && guard < 100) {
+        next = step(next)
+        guard += 1
+      }
+      return next
+    }
+
+    /** 快照里所有会话标题的集合，用于复刻宿主的去重。 */
+    function takenTitles(sessions) {
+      try {
+        const snapshot = typeof sessions.list !== 'undefined' && sessions.list !== null && typeof sessions.list.getSnapshot === 'function' ? sessions.list.getSnapshot() : undefined
+        const byId = snapshot === undefined || snapshot === null ? undefined : snapshot.byId
+        if (byId === undefined || byId === null) return null
+        const taken = new Set()
+        for (const id of Object.keys(byId)) {
+          const title = byId[id] === undefined || byId[id] === null ? undefined : byId[id].title
+          if (typeof title === 'string' && title !== '') taken.add(title)
+        }
+        return taken
+      } catch {
+        return null
+      }
+    }
+
+    /**
+     * 分叉后按偏好修正子会话标题。
+     *
+     * 标题由源会话标题按宿主规则推导（而不是等子会话投影出现），所以只要父会话
+     * 在列表里就能改名。失败只保留宿主默认形态，不影响已建好的会话。
+     */
+    const renameLog = []
+    function getRenameLog() {
+      return renameLog.slice()
+    }
+
+    function applyNumberFirstTitle(sessions, childId, sourceId, knownTitle) {
+      // 每一步留痕：写进 localStorage，重启后能从磁盘读到卡在哪。
+      const trace = (step, detail) => {
+        renameLog.push(step)
+        publishStatus({
+          renameAt: Date.now(),
+          renameStep: step,
+          renameDetail: detail === undefined ? null : String(detail),
+          renameChild: typeof childId === 'string' ? childId : null,
+          renameLog: (getRenameLog().concat([step]).slice(-24)),
+        })
+        console.warn('[dsh-fork-anywhere] 改名 [' + step + ']', detail === undefined ? '' : detail)
+      }
+      if (numberFirst !== true) {
+        trace('off', '偏好关闭')
+        return
+      }
+      if (sessions === null || sessions === undefined || typeof sessions.using !== 'function') {
+        // using 不可用时，若传入的是带 binding 的会话对象，直接改名
+        const direct = typeof sessions === 'object' && sessions !== null && sessions.binding !== undefined ? sessions.binding : undefined
+        const session = direct === null || direct === undefined ? undefined : direct.session
+        if (session !== undefined && session !== null && typeof session.rename === 'function') {
+          trace('direct', 'using 不可用，走 binding.session')
+          const title0 = readTitle(sourceId)
+          const d0 = derivedForkTitle(title0, null)
+          const t0 = d0 === null ? null : numberFirstTitle(d0)
+          if (t0 !== null) Promise.resolve(session.rename(t0)).catch((error) => trace('failed', error && error.message))
+          return
+        }
+        trace('no-sessions', typeof sessions)
+        return
+      }
+
+      const readTitle = (id) => {
+        try {
+          const snapshot = typeof sessions.list !== 'undefined' && sessions.list !== null && typeof sessions.list.getSnapshot === 'function' ? sessions.list.getSnapshot() : undefined
+          const byId = snapshot === undefined || snapshot === null ? undefined : snapshot.byId
+          const entry = byId === undefined || byId === null ? undefined : byId[id]
+          return entry === undefined || entry === null ? undefined : entry.title
+        } catch (error) {
+          trace('read-threw', error && error.message)
+          return undefined
+        }
+      }
+
+      const sourceTitle = typeof knownTitle === 'string' && knownTitle !== '' ? knownTitle : readTitle(sourceId)
+      trace('source', JSON.stringify(sourceTitle))
+      if (sourceTitle !== undefined && sourceTitle !== null && sourceTitle.charAt(0) === '\uFF08') {
+        trace('already-prefixed', sourceTitle)
+        return
+      }
+      // 标题来自列表里已经存在的那一条（watcher 路径）：它就是子会话的真实标题，
+      // 绝对不能再按 fork 规则递增一次，否则 (1) 会被改成 (2)。
+      const fromList = typeof knownTitle === 'string' && knownTitle !== ''
+      let renamed
+      if (fromList) {
+        renamed = numberFirstTitle(sourceTitle)
+        trace('derived', 'list:' + JSON.stringify(sourceTitle))
+      } else {
+        const derived = derivedForkTitle(sourceTitle, takenTitles(sessions))
+        trace('derived', JSON.stringify(derived))
+        if (derived === null) return
+        renamed = numberFirstTitle(derived)
+      }
+      trace('target', JSON.stringify(renamed))
+      if (renamed === null) return
+
+      // 不预判“子会话是否已登记”：`sessions.using` 自己会 materialize 作用域，
+      // 只有 manager 里完全没有这个会话时才抛 `unknown session`。把这种抛错当作
+      // “还没到”，退避重试；其它错误直接留痕放弃。预判反而容易判错。
+      // manager 是 ClientSessions 的内部字段，`manager.rename(id, title)` 直通
+      // `remote.session.rename`，不经过 using/scope 的登记检查。有三个候选路径，
+      // 依次尝试，哪条能用就用哪条。
+      const tryRename = (attemptIndex) => {
+        const viaManager = () => {
+          const manager = sessions === null || sessions === undefined ? undefined : sessions.manager
+          if (manager === undefined || manager === null || typeof manager.rename !== 'function') return undefined
+          trace('calling-manager', renamed + ' child=' + String(childId).slice(0, 12))
+          // sweep 的 16/16 成功已经证明这条路径可用；这里把返回值也写进日志，
+          // 便于区分「调用成功但列表慢一拍」与「宿主拒绝」。
+          return Promise.resolve(manager.rename(childId, renamed)).then((outcome) => {
+            trace('manager-result', JSON.stringify(outcome === null || outcome === undefined ? null : (outcome.ok === undefined ? outcome : { ok: outcome.ok, error: outcome.error })))
+            return outcome
+          }, (error) => {
+            trace('manager-threw', String(error && error.message))
+            throw error
+          })
+        }
+        const viaBinding = () => {
+          const binding = typeof sessions.binding === 'function' ? sessions.binding(childId) : undefined
+          const session = binding === null || binding === undefined ? undefined : binding.session
+          if (session === undefined || session === null || typeof session.rename !== 'function') return undefined
+          trace('calling-binding', renamed)
+          return session.rename(renamed)
+        }
+        const viaUsing = () => {
+          if (typeof sessions.using !== 'function') return undefined
+          trace('calling-using', renamed)
+          return sessions.using(childId, { source: 'dsh-fork-anywhere' }, (reference) => {
+            const session = reference === null || reference === undefined || reference.binding === undefined ? undefined : reference.binding.session
+            if (session === undefined || session === null || typeof session.rename !== 'function') return { ok: false }
+            return session.rename(renamed)
+          })
+        }
+        const order = [viaManager, viaBinding, viaUsing]
+        for (let index = attemptIndex; index < order.length; index += 1) {
+          let result
+          try {
+            result = order[index]()
+          } catch (error) {
+            trace('path-threw', '#' + index + ' ' + String(error && error.message))
+            continue
+          }
+          if (result === undefined) continue
+          Promise.resolve(result).then((outcome) => {
+            const ok = outcome === null || outcome === undefined ? undefined : outcome.ok
+            const status = outcome === null || outcome === undefined ? undefined : outcome.status
+            if (ok === false || (typeof status === 'string' && status !== 'ok' && status !== 'success')) {
+              trace('path-rejected', '#' + index + ' ' + JSON.stringify(outcome && outcome.error))
+              tryRename(index + 1)
+              return
+            }
+            trace('settled', '#' + index + ' ok=' + String(ok))
+          }, (error) => {
+            trace('path-failed', '#' + index + ' ' + String(error && error.message))
+            tryRename(index + 1)
+          })
+          return
+        }
+        trace('no-path', '三条路径都不可用')
+      }
+
+      tryRename(0)
     }
 
     // --- locale ---------------------------------------------------------------
@@ -1984,12 +2435,246 @@ function removeHost(row) {
       } catch {
         /* a diagnostics aid must never be the reason apply fails */
       }
+      activeSessions = typeof ctx.get === 'function' ? ctx.get('sessions') : undefined
       const locale = typeof ctx.get === 'function' ? ctx.get('locale') : undefined
       const slots = typeof ctx.get === 'function' ? ctx.get('slots') : undefined
       const t = translator(locale)
+      // 平台自己的分支按钮（turn tail 的 onBranch → chat 的 forkAt）直接调用
+      // `ctx.sessions.fork(...).then(childId => uiWorkspace.openSession(childId))`，
+      // 不经过本插件。要覆盖标题，只能包住这个服务本身：fork 成功返回后，对
+      // 新建的会话做一次改名。包装只加一个 then，不改原行为、不改错误路径。
+      const wrapStatus = {}
+      try {
+        const liveSessions = typeof ctx.get === 'function' ? ctx.get('sessions') : undefined
+        wrapStatus.sessionsType = typeof liveSessions
+        wrapStatus.forkType = typeof (liveSessions === null || liveSessions === undefined ? undefined : liveSessions.fork)
+        wrapStatus.writable = liveSessions === null || liveSessions === undefined ? null : (() => {
+            try { const d = Object.getOwnPropertyDescriptor(liveSessions, 'fork'); return d === undefined ? 'proto-only' : ('writable=' + String(d.writable)) } catch { return 'desc-threw' }
+          })()
+        if (liveSessions !== null && liveSessions !== undefined && typeof liveSessions.fork === 'function' && liveSessions.__dsfaWrapped !== true) {
+          const originalFork = liveSessions.fork.bind(liveSessions)
+          liveSessions.fork = (options) => {
+            const pending = originalFork(options)
+            return Promise.resolve(pending).then((childId) => {
+              publishStatus({ renameAt: Date.now(), renameStep: 'invoked', renameChild: childId })
+              if (typeof childId === 'string' && childId !== '') applyNumberFirstTitle(liveSessions, childId, options === null || options === undefined ? undefined : options.sessionId)
+              return childId
+            })
+          }
+          try {
+            Object.defineProperty(liveSessions, '__dsfaWrapped', { value: true, enumerable: false })
+          } catch {
+            /* 冻结对象时至少包装仍然生效 */
+          }
+        }
+        wrapStatus.wrapped = liveSessions !== null && liveSessions !== undefined && liveSessions.__dsfaWrapped === true
+      } catch (error) {
+        wrapStatus.error = error === null || error === undefined ? 'throw' : String(error.message === undefined ? error : error.message)
+        console.warn('[dsh-fork-anywhere] 未能包住 sessions.fork：', error)
+      }
+      publishStatus({ forkWrap: wrapStatus })
+
       const fork = (sessionId, atSeq, context) => forkSessionAt(ctx, t, sessionId, atSeq, context)
 
       const disposers = []
+      // 分叉的另一条覆盖路径：不管分叉是谁发起的（本插件、平台按钮、别的插件），
+      // 子会话都会出现在会话列表里。盯住列表差分，发现「新出现的、带 (n) 编号的
+      // 标题」就按偏好改成前缀形态。只依赖 sessions.list 与 binding.session.rename，
+      // 与 fork 的包装无关，因此不会被后来加载的插件覆盖掉。
+      try {
+        const watchSessions = typeof ctx.get === 'function' ? ctx.get('sessions') : undefined
+        if (watchSessions !== null && watchSessions !== undefined && typeof watchSessions.list !== 'undefined' && watchSessions.list !== null && typeof watchSessions.list.subscribe === 'function') {
+          const seen = new Set()
+          const first = watchSessions.list.getSnapshot()
+          for (const id of Array.isArray(first.ids) ? first.ids : []) seen.add(id)
+          let lastSubBeat = 0
+          const stop = watchSessions.list.subscribe(() => {
+            try {
+              const nowTs = Date.now()
+              if (nowTs - lastSubBeat > 30000) {
+                lastSubBeat = nowTs
+                publishStatus({ renameAt: nowTs, renameStep: 'sub-fired', renameDetail: 'subscribe 回调已触发' })
+              }
+              poll()
+            } catch (error) {
+              publishStatus({ renameAt: Date.now(), renameStep: 'watcher-error', renameDetail: String(error && error.message) })
+            }
+          })
+          disposers.push(() => {
+            try {
+              stop()
+            } catch {
+              /* already stopped */
+            }
+          })
+          const scan = () => {
+            try {
+              const snapshot = watchSessions.list.getSnapshot()
+              const ids = Array.isArray(snapshot.ids) ? snapshot.ids : []
+              let numbered = 0
+              const samples = []
+              const previews = []
+              const previewResult = {}
+              for (const id of ids) {
+                const entry = snapshot.byId === null || snapshot.byId === undefined ? undefined : snapshot.byId[id]
+                const title = entry === null || entry === undefined ? undefined : entry.title
+                if (typeof title !== 'string') continue
+                if (/ ?\(\d+\)\s*$/u.test(title) === false && /\uFF08\d+\uFF09\s*$/u.test(title) === false) continue
+                numbered += 1
+                if (samples.length < 8) samples.push(id.slice(0, 14) + '=' + title)
+                if (previews.length < 8) {
+                  const target = numberFirstTitle(title)
+                  if (target !== null) previews.push(title + ' → ' + target)
+                }
+              }
+              publishStatus({
+                renameStep: 'scan',
+                renameDetail: 'ids=' + ids.length + ' numbered=' + numbered + ' ' + samples.join(' | '),
+                scanList: samples.slice(0, 8),
+              })
+              // 预览单独写一条：status 每次渲染都被覆盖，log 键是只追加的。
+              publishStatus({ renameStep: 'preview', renameDetail: 'n=' + previews.length + ' ' + previews.join(' | ') })
+            } catch (error) {
+              publishStatus({ renameStep: 'scan-error', renameDetail: String(error && error.message) })
+            }
+          }
+          // 一次性自动整理：侧边栏里现存的「标题 (n)」是历史会话，分叉钩子只影响
+          // 新分叉，所以用户在列表里永远看到旧形态。加载后自动整理一遍，并把
+          // 做过的版本记进 localStorage —— 已前缀化的标题会被 numberFirstTitle
+          // 原样返回 null，因此重复执行是幂等的。
+          const sweepKey = 'dsh-fork-anywhere/swept'
+          const sweep = () => {
+            try {
+              const snapshot = watchSessions.list.getSnapshot()
+              const byId = snapshot.byId === null || snapshot.byId === undefined ? {} : snapshot.byId
+              let changed = 0
+              let failed = 0
+              let firstError = null
+              for (const id of Object.keys(byId)) {
+                const entry = byId[id]
+                const title = entry === null || entry === undefined ? undefined : entry.title
+                if (typeof title !== 'string') continue
+                if (/ ?\(\d+\)\s*$/u.test(title) === false && /\uFF08\d+\uFF09\s*$/u.test(title) === false) continue
+                const target = numberFirstTitle(title)
+                if (target === null || target === title) continue
+                try {
+                  const outcome = renameSessionTo(watchSessions, id, target)
+                  if (outcome === false) failed += 1
+                  else changed += 1
+                } catch (error) {
+                  failed += 1
+                  if (firstError === null) firstError = String(error && error.message)
+                }
+              }
+              try {
+                if (typeof localStorage !== 'undefined' && localStorage !== null) localStorage.setItem(sweepKey, PLUGIN_VERSION)
+              } catch {
+                /* 记录失败不影响已完成的整理 */
+              }
+              publishStatus({ renameAt: Date.now(), renameStep: 'sweep', renameDetail: 'changed=' + changed + ' failed=' + failed + ' firstError=' + String(firstError) + ' version=' + PLUGIN_VERSION })
+            } catch (error) {
+              publishStatus({ renameAt: Date.now(), renameStep: 'sweep-error', renameDetail: String(error && error.message) })
+            }
+          }
+          let swept = null
+          try {
+            swept = typeof localStorage !== 'undefined' && localStorage !== null ? localStorage.getItem(sweepKey) : null
+          } catch {
+            swept = null
+          }
+          if (swept !== PLUGIN_VERSION && numberFirst) {
+            // 首次拖动列表可能还没就绪，延迟一拍再整理
+            const sweepTimer = setTimeout(sweep, 400)
+            if (sweepTimer !== null && typeof sweepTimer.unref === 'function') sweepTimer.unref()
+            disposers.push(() => clearTimeout(sweepTimer))
+          } else {
+            publishStatus({ renameAt: Date.now(), renameStep: 'sweep-skip', renameDetail: 'swept=' + String(swept) })
+          }
+
+          scan()
+          // 只读探测：三条改名路径在本环境里到底哪条存在。不调用任何改名，
+          // 只记录类型，用来判断 applyNumberFirstTitle 是否有可能成功。
+          try {
+            const probeSessions = watchSessions
+            const probe = {
+              manager: probeSessions === null || probeSessions === undefined ? '-' : typeof probeSessions.manager,
+              managerRename: probeSessions === null || probeSessions === undefined || probeSessions.manager === null || probeSessions.manager === undefined ? '-' : typeof probeSessions.manager.rename,
+              binding: typeof probeSessions.binding,
+              using: typeof probeSessions.using,
+              rename: typeof probeSessions.rename,
+              listSubscribe: typeof watchSessions.list.subscribe,
+            }
+            publishStatus({ renameProbe: probe, renameStep: 'probe', renameDetail: JSON.stringify(probe) })
+          } catch (error) {
+            publishStatus({ renameStep: 'probe-error', renameDetail: String(error && error.message) })
+          }
+          publishStatus({ watcher: 'on' })
+          // subscribe 不一定在列表变化时回调（接口语义未核实），所以再加一个低频
+          // 轮询：每 1.5 秒 diff 一次「新出现的带编号标题」。成本是每秒读一次快照，
+          // 不碰 DOM、不触发渲染。
+          let pollSeq = 0
+          function poll() {
+            try {
+              pollSeq += 1
+              const snapshot = watchSessions.list.getSnapshot()
+              const ids = Array.isArray(snapshot.ids) ? snapshot.ids : []
+              const fresh = ids.filter((id) => seen.has(id) !== true)
+              if (fresh.length > 0) {
+                publishStatus({ renameAt: Date.now(), renameStep: 'poll-diff', renameDetail: 'n=' + pollSeq + ' new=' + fresh.length + ' ' + fresh.slice(0, 3).join(','), renameChild: fresh[0] })
+              }
+              for (const id of ids) {
+                if (seen.has(id)) continue
+                seen.add(id)
+                const entry = snapshot.byId === null || snapshot.byId === undefined ? undefined : snapshot.byId[id]
+                const title = entry === null || entry === undefined ? undefined : entry.title
+                if (typeof title !== 'string') continue
+                if (/ ?\(\d+\)\s*$/u.test(title) === false && /\uFF08\d+\uFF09\s*$/u.test(title) === false) continue
+                publishStatus({ renameAt: Date.now(), renameStep: 'poll', renameDetail: String(title), renameChild: id })
+                applyNumberFirstTitle(watchSessions, id, null, title)
+              }
+            } catch (error) {
+              publishStatus({ renameAt: Date.now(), renameStep: 'poll-error', renameDetail: String(error && error.message) })
+            }
+          }
+          let lastBeat = 0
+          const beat = () => {
+            const now = Date.now()
+            if (now - lastBeat < 30000) return
+            lastBeat = now
+            try {
+              const snapshot = watchSessions.list.getSnapshot()
+              const ids = Array.isArray(snapshot.ids) ? snapshot.ids : []
+              const tail = snapshot.byId === null || snapshot.byId === undefined ? undefined : snapshot.byId[ids[0]]
+              let numbered = 0
+              for (const id of ids) {
+                const entry = snapshot.byId === null || snapshot.byId === undefined ? undefined : snapshot.byId[id]
+                const title = entry === null || entry === undefined ? undefined : entry.title
+                if (typeof title === 'string' && (/ ?\(\d+\)\s*$/u.test(title) || /\uFF08\d+\uFF09\s*$/u.test(title))) numbered += 1
+              }
+              const recent = ids.slice(-3).map((id) => {
+                const entry = snapshot.byId === null || snapshot.byId === undefined ? undefined : snapshot.byId[id]
+                const title = entry === null || entry === undefined ? '?' : String(entry.title || entry.displayTitle || '')
+                return id.slice(0, 8) + '=' + title.slice(0, 24)
+              }).join(' | ')
+              publishStatus({ renameAt: now, renameStep: 'poll-alive', renameDetail: 'ids=' + ids.length + ' seen=' + seen.size + ' numbered=' + numbered + ' tail:' + recent })
+            } catch (error) {
+              publishStatus({ renameAt: now, renameStep: 'poll-alive-error', renameDetail: String(error && error.message) })
+            }
+          }
+          beat()
+          const timer = setInterval(() => {
+            beat()
+            poll()
+          }, 1500)
+          if (timer !== null && typeof timer.unref === 'function') timer.unref()
+          disposers.push(() => clearInterval(timer))
+        } else {
+          publishStatus({ watcher: 'no-list' })
+        }
+      } catch (error) {
+        publishStatus({ watcher: 'threw', watchError: String(error && error.message) })
+      }
+
       if (locale !== null && locale !== undefined && typeof locale.register === 'function') {
         try {
           disposers.push(locale.register(NS, dictionaries))
@@ -2089,6 +2774,18 @@ function removeHost(row) {
         } catch (error) {
           console.warn('[dsh-fork-anywhere] slot registration failed:', error)
         }
+        try {
+          disposers.push(
+            slots.inject('plugins.bundle.config', () =>
+              slots.register(
+                { name: 'plugins.bundle.config', key: 'dsh-fork-anywhere', locale: NS },
+                ConfigCard,
+              ),
+            ),
+          )
+        } catch (error) {
+          console.warn('[dsh-fork-anywhere] 设置卡注册失败：', error)
+        }
       } else {
         console.warn('[dsh-fork-anywhere] slots service unavailable: the prompt fork action stays off')
       }
@@ -2139,6 +2836,22 @@ function removeHost(row) {
         hideEmptyForkedTurns,
         hasShippedActions,
         disabledBranchButton,
+        numberFirstTitle,
+        getPrefs,
+        setNumberFirst,
+        subscribePrefs,
+        applyNumberFirstTitle,
+        derivedForkTitle,
+        takenTitles,
+        splitPrefix,
+        ConfigCard,
+        applyToExistingSessions,
+        __setActiveSessions: (value) => {
+          const previous = activeSessions
+          activeSessions = value
+          return previous
+        },
+        numberFirstTitle,
         dirtyTurnEnds,
         decorateDirtyTurns,
         usageLabel,

@@ -1,6 +1,6 @@
 // dsh-edit-turn browser half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-edit-turn/lib/client.js  (v0.6.1, sha256 ecd47e04452f462c)
+// Source: ../dsh-edit-turn/lib/client.js  (v0.6.3, sha256 ae624d3c133fb024)
 // Regenerate with `npm run vendor`; test/vendor-sync.test.js fails when this is stale.
 //
 // The component registers its factory with the host module loader; inside this
@@ -3083,7 +3083,13 @@ export default (require) => {
       const chipBottom0 = chipStrip0 === null || chipStrip0 === undefined || typeof chipStrip0.getBoundingClientRect !== 'function'
         ? 0
         : Math.max(0, chipStrip0.getBoundingClientRect().bottom - boxRect0.top + 8)
-      const headerOffset = Math.max(38, chipBottom0, bubble.rect.top - base.top)
+      // 带附件的提示词：附件在本框里重画成了 chips，正文就紧贴在 chips 下方。
+      // `bubble.rect.top - base.top` 记的是「正文在原气泡里的位置」——图片在文字
+      // 上方时那是个几百像素的偏移，照搬会把正文推到框底，看起来像被拆成了两段
+      // （issue #3：正文与添加文件的按钮一起「飞上去」）。
+      const headerOffset = chipsInBox !== null && chipsInBox !== undefined
+        ? Math.max(38, chipBottom0)
+        : Math.max(38, chipBottom0, bubble.rect.top - base.top)
       let contentHeight = Math.round(base.height)
       if (area !== null && area !== undefined && (allBox === null || allBox === undefined)) {
         try {

@@ -1,6 +1,6 @@
 // dsh-log-trim host half (dsh-log-trim.flatten.js), VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-log-trim/lib/flatten.js  (v0.8.0, sha256 51d812cef44f7623)
+// Source: ../dsh-log-trim/lib/flatten.js  (v0.8.3, sha256 620848e3d4de9b83)
 // Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.
 //
 // src/shell.js imports the copy named after the component, which is why the
@@ -167,6 +167,10 @@ export function flattenHistory(events) {
     if (event.type !== 'session/title') return [event]
     const seqs = Array.isArray(event.data?.messageSeqs) ? event.data.messageSeqs : null
     if (seqs === null) return [event]
+    // 用户自己设的标题（`source.kind === 'user'`）必须不带 messageSeqs：宿主的
+    // 校验原文是「messageSeqs must be empty exactly for a user title」。给它补一个
+    // 「更早的消息」会让整份日志被拒收。
+    if (String(event.data?.source?.kind ?? '') === 'user') return [event]
     const kept = seqs.filter((seq) => typeof seq === 'number' && seq < event.seq &&
       renumbered.some((other) => other.seq === seq && (other.type === 'user/message' || other.type === 'assistant/message')))
     if (kept.length > 0 && kept.length === seqs.length) return [event]

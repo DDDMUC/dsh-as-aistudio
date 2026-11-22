@@ -1,6 +1,6 @@
 // dsh-log-trim host half (dsh-log-trim.archive.js), VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-log-trim/lib/archive.js  (v0.8.0, sha256 36448b5b6cc2a6c3)
+// Source: ../dsh-log-trim/lib/archive.js  (v0.8.3, sha256 36448b5b6cc2a6c3)
 // Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.
 //
 // src/shell.js imports the copy named after the component, which is why the

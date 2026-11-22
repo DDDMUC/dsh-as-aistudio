@@ -1,6 +1,6 @@
 // dsh-log-trim host half (dsh-log-trim.js), VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-log-trim/lib/index.js  (v0.8.0, sha256 81007098fc97d584)
+// Source: ../dsh-log-trim/lib/index.js  (v0.8.3, sha256 090cdd5670b7b974)
 // Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.
 //
 // src/shell.js imports the copy named after the component, which is why the
@@ -45,7 +45,7 @@ import { readLedger, recordFor } from './dsh-log-trim.ledger.js'
 
 export const name = 'dsh-log-trim'
 export const PLUGIN_ID = name
-export const PLUGIN_VERSION = '0.8.0'
+export const PLUGIN_VERSION = '0.8.2'
 export const ROUTE_PREFIX = '/api/dsh-log-trim'
 
 /**
@@ -360,6 +360,8 @@ function fixTitleRefs(events) {
     const data = event.data ?? {}
     const seqs = Array.isArray(data.messageSeqs) ? data.messageSeqs : null
     if (seqs === null) return [event]
+    // 用户设的标题必须保持 messageSeqs 为空（宿主校验：exactly for a user title）。
+    if (String(data.source?.kind ?? '') === 'user') return [event]
     const earlier = (seq) => Number.isSafeInteger(seq) && seq < event.seq &&
       events.some((other) => other.seq === seq && (other.type === 'user/message' || other.type === 'assistant/message'))
     const kept = seqs.filter(earlier)
@@ -995,7 +997,13 @@ export async function estimate(logFile, keepWindows) {
     title: titleOf(log.events),
     events: log.events.length,
     bytes: log.compressedBytes,
-    windows: trimmed.windows,
+    // **真实可裁窗口数**：只数带 checkpoint 的窗口。第 1 窗是"会话开头到第一个
+    // checkpoint 前"的设置窗（系统提示词、权限、预设），它不含对话内容、也永远
+    // 没得裁。原来的 `trimmed.windows` 是总窗数，跟 `keepLastWindows` 内部判断用的
+    // 不是同一个数，于是 planTrim 判「4 窗 > 2，该裁、能丢 55.9%」，执行时
+    // keepLastWindows 却按真实窗数（3 ≤ … 之外）返回 cutSeq:null，被记成 skipped。
+    // 界面和日志都说该裁，实际一条不动 —— 就是这个口径差造成的。
+    windows: trimmed.realWindows ?? trimmed.windows,
     cutSeq: trimmed.cutSeq,
     droppable: trimmed.dropped + shadowed.dropped,
     modelBefore: before,

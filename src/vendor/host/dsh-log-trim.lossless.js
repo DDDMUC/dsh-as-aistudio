@@ -1,6 +1,6 @@
 // dsh-log-trim host half (dsh-log-trim.lossless.js), VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-log-trim/lib/lossless.js  (v0.8.0, sha256 c75f2441458c9da7)
+// Source: ../dsh-log-trim/lib/lossless.js  (v0.8.3, sha256 fddb9674badc6568)
 // Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.
 //
 // src/shell.js imports the copy named after the component, which is why the
@@ -481,7 +481,24 @@ function mergeStateEvents(out, marks, preserved) {
  * @returns {object[]} the rebuilt events, seqs assigned from 0.
  */
 export function rebuildSurface(events) {
-  const visible = foldSurface(events).visible ?? []
+  const folded = foldSurface(events)
+  // goal 的轮次消息（`source.kind === 'goal'`）不在可见表面上，但 `/goal` 是从
+  // 整份日志折叠出来的：少一条就永久报 `goal replay failed`。重建只走可见表面，
+  // 于是它们会被顺手丢掉——把没被 replace 覆盖的那些并进表面，让重建把当普通
+  // 用户消息写回去（顺序按 seq，goal 快照仍然排在它承认的轮次前面）。
+  // 只有「被插件替换覆盖」的 goal 轮次才算用户删掉的；被 compaction 摘要遮蔽的
+  // 不算——那些消息仍在日志里，goal 投影照样要读。
+  const pluginReplaced = (seq) =>
+    events.some((event) => {
+      const op = event.surfaceOp
+      if (op === null || typeof op !== 'object' || op.op !== 'replace') return false
+      if (!String(event.data?.source?.kind ?? '').startsWith('plugin:')) return false
+      return Number.isSafeInteger(op.startSeq) && Number.isSafeInteger(op.endSeq) && seq >= op.startSeq && seq <= op.endSeq
+    })
+  const goalRounds = events
+    .filter((event) => event.type === 'user/message' && event.data?.source?.kind === 'goal' && !pluginReplaced(event.seq))
+    .map((event) => event.seq)
+  const visible = [...new Set([...(folded.visible ?? []), ...goalRounds])].sort((left, right) => left - right)
   const bySeq = new Map(events.map((event) => [event.seq, event]))
   const preserved = events.filter((event) => PRESERVED_STATE_TYPES.has(String(event.type ?? '')))
   // Output index at which each visible source event starts; state events are
