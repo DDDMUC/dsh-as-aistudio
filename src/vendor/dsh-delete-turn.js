@@ -1,6 +1,6 @@
 // dsh-delete-turn browser half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-delete-turn/src/client.js  (v0.2.8, sha256 17ca274a4b6cfde9)
+// Source: ../dsh-delete-turn/src/client.js  (v0.2.9, sha256 f53be0db8c6ec3b7)
 // Regenerate with `npm run vendor`; test/vendor-sync.test.js fails when this is stale.
 //
 // The component registers its factory with the host module loader; inside this
@@ -19,7 +19,10 @@ export default (require) => {
     const NS = 'dsh-delete-turn'
     const ROUTE_PREFIX = '/dsh-delete-turn'
     // Minimum gap between automatic snapshot refreshes while a transcript grows.
+    // The floor is 3 s; the actual gap backs off to 4x the last measured round
+    // trip, so a host that is struggling is not polled harder the worse it gets.
     const REFRESH_INTERVAL_MS = 3000
+    const REFRESH_BACKOFF_FACTOR = 4
 
     // --- preferences ----------------------------------------------------------
     //
@@ -402,9 +405,14 @@ export default (require) => {
       // last read. Throttled: a streaming turn produces many new seqs, and one
       // read per interval is enough for the ledger and the gates.
       requestRefresh() {
+        // A hidden tab draws no rows and no delete buttons, so the snapshot it
+        // would refresh is invisible. Skipping the poll is the single cheapest
+        // win: a backgrounded window used to keep decoding a 20 MB log forever.
+        if (typeof document !== 'undefined' && document.hidden === true) return
         if (this.inflight !== null) return
+        const gap = Math.max(REFRESH_INTERVAL_MS, (this.lastCost || 0) * REFRESH_BACKOFF_FACTOR)
         const since = typeof this.refreshedAt === 'number' ? Date.now() - this.refreshedAt : Infinity
-        if (since < REFRESH_INTERVAL_MS) return
+        if (since < gap) return
         this.load(true)
       }
 
@@ -412,6 +420,7 @@ export default (require) => {
         if (this.inflight !== null) return this.inflight
         if (this.view.loaded && force !== true) return Promise.resolve()
         this.refreshedAt = Date.now()
+        const startedAt = Date.now()
         const url = `${ROUTE_PREFIX}/state?sessionId=${encodeURIComponent(this.sessionId)}`
         const pending = fetch(url, { headers: { accept: 'application/json' } })
           .then(async (res) => {
@@ -451,6 +460,10 @@ export default (require) => {
             this.publish({ loadError: true })
           })
           .finally(() => {
+            // Remember what this round trip cost: `requestRefresh` waits
+            // max(3 s, 4x this) before asking again, so a host that is already
+            // slow is not polled harder the slower it gets.
+            this.lastCost = Date.now() - startedAt
             this.inflight = null
           })
         this.inflight = pending

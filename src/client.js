@@ -813,6 +813,8 @@ window.__ModuleLoader__.load({
         // save just published.
         if (this.inflight !== null) return this.inflight.then(() => this.load(force))
         if (this.view.loaded && force !== true) return Promise.resolve()
+        this.lastLoadAt = Date.now()
+        const startedAt = Date.now()
         const url = `${ROUTE_PREFIX}/state?sessionId=${encodeURIComponent(this.sessionId)}`
         const pending = fetch(url, { headers: { accept: 'application/json' } })
           .then(async (res) => {
@@ -893,6 +895,9 @@ window.__ModuleLoader__.load({
             this.publish({ loadError: true })
           })
           .finally(() => {
+            // 记下这次往返耗时：`syncEditableSet` 据此把间隔退避到 4 倍，
+            // 宿主越慢就问得越少（下限 3 秒）。
+            this.lastCost = Date.now() - startedAt
             this.inflight = null
             // While the session is replying, the editor stays open but cannot
             // save; re-check so the banner clears itself when the turn ends.
@@ -4059,6 +4064,16 @@ window.__ModuleLoader__.load({
     function syncEditableSet(controller, rowCount) {
       if (rowCount === controller.rowCount) return
       controller.rowCount = rowCount
+      // A hidden tab draws no rows, and there is nothing to refresh for a reader
+      // who is not looking. Without this guard a backgrounded window kept asking
+      // the host to re-read and re-fold a 20 MB log - the 2026-11-23 host outage
+      // (234 connections, 2.4 G RSS) was made of exactly these polls.
+      if (typeof document !== 'undefined' && document.hidden === true) return
+      // No backoff here on purpose: a row appearing is a discrete event (a reply
+      // landed, a re-run appended a prompt), not a poll. Streaming tokens add no
+      // rows, so this stays rare, and a re-run must show its new editable prompt
+      // at once rather than three seconds later. The backoff belongs to the
+      // seq-driven poll in dsh-delete-turn, which is the one that can repeat.
       controller.load(true)
     }
 
@@ -6175,6 +6190,10 @@ window.__ModuleLoader__.load({
       ensurePolling() {
         if (this.pollTimer !== null) return
         this.pollTimer = window.setInterval(() => {
+          // A hidden tab has nothing to redraw: skip the poll entirely. A
+          // backgrounded window used to keep asking the host to re-read a
+          // 20 MB log, which is what filled the host on 2026-11-23.
+          if (typeof document !== 'undefined' && document.hidden === true) return
           if (this.view.rerunning || this.view.pending) {
             this.load(true)
             return
@@ -7218,7 +7237,10 @@ window.__ModuleLoader__.load({
     const NS = 'dsh-delete-turn'
     const ROUTE_PREFIX = '/dsh-delete-turn'
     // Minimum gap between automatic snapshot refreshes while a transcript grows.
+    // The floor is 3 s; the actual gap backs off to 4x the last measured round
+    // trip, so a host that is struggling is not polled harder the worse it gets.
     const REFRESH_INTERVAL_MS = 3000
+    const REFRESH_BACKOFF_FACTOR = 4
 
     // --- preferences ----------------------------------------------------------
     //
@@ -7601,9 +7623,14 @@ window.__ModuleLoader__.load({
       // last read. Throttled: a streaming turn produces many new seqs, and one
       // read per interval is enough for the ledger and the gates.
       requestRefresh() {
+        // A hidden tab draws no rows and no delete buttons, so the snapshot it
+        // would refresh is invisible. Skipping the poll is the single cheapest
+        // win: a backgrounded window used to keep decoding a 20 MB log forever.
+        if (typeof document !== 'undefined' && document.hidden === true) return
         if (this.inflight !== null) return
+        const gap = Math.max(REFRESH_INTERVAL_MS, (this.lastCost || 0) * REFRESH_BACKOFF_FACTOR)
         const since = typeof this.refreshedAt === 'number' ? Date.now() - this.refreshedAt : Infinity
-        if (since < REFRESH_INTERVAL_MS) return
+        if (since < gap) return
         this.load(true)
       }
 
@@ -7611,6 +7638,7 @@ window.__ModuleLoader__.load({
         if (this.inflight !== null) return this.inflight
         if (this.view.loaded && force !== true) return Promise.resolve()
         this.refreshedAt = Date.now()
+        const startedAt = Date.now()
         const url = `${ROUTE_PREFIX}/state?sessionId=${encodeURIComponent(this.sessionId)}`
         const pending = fetch(url, { headers: { accept: 'application/json' } })
           .then(async (res) => {
@@ -7650,6 +7678,10 @@ window.__ModuleLoader__.load({
             this.publish({ loadError: true })
           })
           .finally(() => {
+            // Remember what this round trip cost: `requestRefresh` waits
+            // max(3 s, 4x this) before asking again, so a host that is already
+            // slow is not polled harder the slower it gets.
+            this.lastCost = Date.now() - startedAt
             this.inflight = null
           })
         this.inflight = pending
@@ -13552,7 +13584,7 @@ function removeHost(row) {
     const NS = 'dsh-as-aistudio'
 
     /** Keep in sync with package.json and src/components.js. */
-    const PLUGIN_VERSION = '0.6.2'
+    const PLUGIN_VERSION = '0.6.3'
 
     /** Presence marker the live verifier reads. */
     const DEBUG_KEY = '__DSH_AS_AISTUDIO__'

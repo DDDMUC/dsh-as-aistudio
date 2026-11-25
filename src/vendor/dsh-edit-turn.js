@@ -1,6 +1,6 @@
 // dsh-edit-turn browser half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-edit-turn/lib/client.js  (v0.6.3, sha256 ae624d3c133fb024)
+// Source: ../dsh-edit-turn/lib/client.js  (v0.6.4, sha256 4701e9ec5f008087)
 // Regenerate with `npm run vendor`; test/vendor-sync.test.js fails when this is stale.
 //
 // The component registers its factory with the host module loader; inside this
@@ -805,6 +805,8 @@ export default (require) => {
         // save just published.
         if (this.inflight !== null) return this.inflight.then(() => this.load(force))
         if (this.view.loaded && force !== true) return Promise.resolve()
+        this.lastLoadAt = Date.now()
+        const startedAt = Date.now()
         const url = `${ROUTE_PREFIX}/state?sessionId=${encodeURIComponent(this.sessionId)}`
         const pending = fetch(url, { headers: { accept: 'application/json' } })
           .then(async (res) => {
@@ -885,6 +887,9 @@ export default (require) => {
             this.publish({ loadError: true })
           })
           .finally(() => {
+            // 记下这次往返耗时：`syncEditableSet` 据此把间隔退避到 4 倍，
+            // 宿主越慢就问得越少（下限 3 秒）。
+            this.lastCost = Date.now() - startedAt
             this.inflight = null
             // While the session is replying, the editor stays open but cannot
             // save; re-check so the banner clears itself when the turn ends.
@@ -4051,6 +4056,16 @@ export default (require) => {
     function syncEditableSet(controller, rowCount) {
       if (rowCount === controller.rowCount) return
       controller.rowCount = rowCount
+      // A hidden tab draws no rows, and there is nothing to refresh for a reader
+      // who is not looking. Without this guard a backgrounded window kept asking
+      // the host to re-read and re-fold a 20 MB log - the 2026-11-23 host outage
+      // (234 connections, 2.4 G RSS) was made of exactly these polls.
+      if (typeof document !== 'undefined' && document.hidden === true) return
+      // No backoff here on purpose: a row appearing is a discrete event (a reply
+      // landed, a re-run appended a prompt), not a poll. Streaming tokens add no
+      // rows, so this stays rare, and a re-run must show its new editable prompt
+      // at once rather than three seconds later. The backoff belongs to the
+      // seq-driven poll in dsh-delete-turn, which is the one that can repeat.
       controller.load(true)
     }
 

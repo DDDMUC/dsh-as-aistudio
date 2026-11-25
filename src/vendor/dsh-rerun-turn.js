@@ -1,6 +1,6 @@
 // dsh-rerun-turn browser half, VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-rerun-turn/lib/client.js  (v0.3.0, sha256 dfd58ca65903a793)
+// Source: ../dsh-rerun-turn/lib/client.js  (v0.3.1, sha256 a06069136a991663)
 // Regenerate with `npm run vendor`; test/vendor-sync.test.js fails when this is stale.
 //
 // The component registers its factory with the host module loader; inside this
@@ -573,6 +573,10 @@ export default (require) => {
       ensurePolling() {
         if (this.pollTimer !== null) return
         this.pollTimer = window.setInterval(() => {
+          // A hidden tab has nothing to redraw: skip the poll entirely. A
+          // backgrounded window used to keep asking the host to re-read a
+          // 20 MB log, which is what filled the host on 2026-11-23.
+          if (typeof document !== 'undefined' && document.hidden === true) return
           if (this.view.rerunning || this.view.pending) {
             this.load(true)
             return
