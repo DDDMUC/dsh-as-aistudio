@@ -1,6 +1,6 @@
 // dsh-delete-turn host half (dsh-delete-turn.js), VENDORED by tools/vendor.mjs - DO NOT EDIT.
 //
-// Source: ../dsh-delete-turn/src/index.js  (v0.2.9, sha256 ef8fb7b9cfc93353)
+// Source: ../dsh-delete-turn/src/index.js  (v0.3.0, sha256 ef8fb7b9cfc93353)
 // Regenerate with `npm run vendor`; test/sync.test.js fails when this is stale.
 //
 // src/shell.js imports the copy named after the component, which is why the

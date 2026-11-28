@@ -4,6 +4,13 @@
 
 ## 中文
 
+**0.6.4** —— 组件跟进：`dsh-delete-turn` 0.3.0。
+
+- `dsh-delete-turn` 0.2.9 → **0.3.0**：会话空闲时观察者不再把自己写的变更当成新消息。
+  `applyDom` 往它自己监听的 `document.body` 子树里写注入宿主，重新插入宿主本身就是
+  一个 childList 变更，于是每次 pass 都把下一次 pass 排上队，循环自持；实测单核 100%
+  连续 20 秒、帧率 62 → 11。现在只提到本插件自注入节点的批次不再排下一次 pass。
+
 **0.6.1** —— 组件跟进。
 
 - `dsh-log-trim` 0.8.0：完美备份（可选）+ 折叠补全补丁/轮次/扫描回退。
@@ -203,6 +210,15 @@
 **0.2.14** —— 浏览器半侧与宿主半侧全部内置：本包没有任何运行时依赖，装它不会再装别的包；宿主半侧改为从运行中的 harness 解析平台包（`_platform.js`），并把组件导入的兄弟模块一起抄进来。
 
 ## English
+
+**0.6.4** —— component bump: `dsh-delete-turn` 0.3.0.
+
+- `dsh-delete-turn` 0.2.9 -> **0.3.0**: the observer no longer treats its own writes as news
+  while the session is idle. `applyDom` writes injected hosts into the same `document.body`
+  subtree it observes, and re-inserting a host is itself a childList change, so every pass
+  queued the next one and the loop never settled -- one core at 100% for 20 s straight,
+  frame rate 62 -> 11. A MutationRecord batch naming only nodes this plugin injected no
+  longer schedules a pass.
 
 **0.6.0** — against v0.5.23: five components become seven, four of them upgraded.
 
